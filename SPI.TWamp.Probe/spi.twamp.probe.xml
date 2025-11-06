@@ -4,24 +4,440 @@
         <name>SPI.TWamp.Probe</name>
     </assembly>
     <members>
-        <member name="T:spi.twamp.probe.Environment.DateConversion">
+        <member name="T:SPI.Twamp.Probe.Contracts.ActionData">
             <summary>
             
             </summary>
         </member>
-        <member name="M:spi.twamp.probe.Environment.DateConversion.ToDateOnly(System.Nullable{System.DateTime})">
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.TaskId">
+            <summary>
+            Gets or sets the identifier.
+            </summary>
+            <value>
+            The identifier.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.EndNode">
+            <summary>
+            Gets or sets the end node.
+            </summary>
+            <value>
+            The end node.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.IPAddress">
+            <summary>
+            Gets or sets the ip address.
+            </summary>
+            <value>
+            The ip address.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.RequestInfo">
+            <summary>
+            Gets or sets the console.
+            </summary>
+            <value>
+            The console.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Console">
+            <summary>
+            Gets or sets the console.
+            </summary>
+            <value>
+            The console.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.ErrorConsole">
+            <summary>
+            Gets or sets the error console.
+            </summary>
+            <value>
+            The error console.
+            </value>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Contracts.Identify">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.IPAddress">
+            <summary>
+            Gets or sets the ip address.
+            </summary>
+            <value>
+            The ip address.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.HostName">
+            <summary>
+            Gets or sets the name of the host.
+            </summary>
+            <value>
+            The name of the host.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.MacAddress">
+            <summary>
+            Gets or sets the mac address.
+            </summary>
+            <value>
+            The mac address.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.Title">
+            <summary>
+            Gets or sets the title.
+            </summary>
+            <value>
+            The title.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.Description">
+            <summary>
+            Gets or sets the description.
+            </summary>
+            <value>
+            The description.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.RequestInfo">
+            <summary>
+            Gets or sets the request information.
+            </summary>
+            <value>
+            The request information.
+            </value>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Contracts.TaskInfo">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.IpAddress">
+            <summary>
+            Gets or sets the ip address.
+            </summary>
+            <value>
+            The ip address.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Id">
+            <summary>
+            Gets or sets the identifier.
+            </summary>
+            <value>
+            The identifier.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Title">
+            <summary>
+            Gets or sets the title.
+            </summary>
+            <value>
+            The title.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Type">
+            <summary>
+            Gets or sets the type.
+            </summary>
+            <value>
+            The type.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Mode">
+            <summary>
+            Gets or sets the mode.
+            </summary>
+            <value>
+            The mode.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.CronExpression">
+            <summary>
+            Gets or sets the cron expression.
+            </summary>
+            <value>
+            The cron expression.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.CronWithSeconds">
+            <summary>
+            Gets or sets a value indicating whether [cron with seconds].
+            </summary>
+            <value>
+              <c>true</c> if [cron with seconds]; otherwise, <c>false</c>.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.ContinueIfError">
+            <summary>
+            Gets or sets a value indicating whether [continue if error].
+            </summary>
+            <value>
+              <c>true</c> if [continue if error]; otherwise, <c>false</c>.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Repeats">
+            <summary>
+            Gets or sets the repeats.
+            </summary>
+            <value>
+            The repeats.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Circles">
+            <summary>
+            Gets or sets the circles.
+            </summary>
+            <value>
+            The circles.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.PauseSec">
+            <summary>
+            Gets or sets the pause sec.
+            </summary>
+            <value>
+            The pause sec.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Start">
+            <summary>
+            Gets or sets the start.
+            </summary>
+            <value>
+            The start.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.End">
+            <summary>
+            Gets or sets the end.
+            </summary>
+            <value>
+            The end.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Create">
+            <summary>
+            Gets or sets the create.
+            </summary>
+            <value>
+            The create.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Delete">
+            <summary>
+            Gets or sets a value indicating whether this <see cref="T:SPI.Twamp.Probe.Contracts.TaskInfo"/> is delete.
+            </summary>
+            <value>
+              <c>true</c> if delete; otherwise, <c>false</c>.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.EndNode">
+            <summary>
+            Gets or sets the end node.
+            </summary>
+            <value>
+            The end node.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Parameters">
+            <summary>
+            Gets or sets the parameters.
+            </summary>
+            <value>
+            The parameters.
+            </value>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.RequestInfo">
+            <summary>
+            Gets or sets the request information.
+            </summary>
+            <value>
+            The request information.
+            </value>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Contracts.TaskMode">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.WinPing">
+            <summary>
+            The windows ping
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.TWamp">
+            <summary>
+            The twamp
+            </summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Contracts.TaskType">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Contracts.TaskType.Repeater">
+            <summary>
+            The repeater
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Contracts.TaskType.Scheduler">
+            <summary>
+            The scheduler
+            </summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Controllers.ProbeInterface">
+            <summary>
+            
+            </summary>
+            <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker)">
+            <summary>
+            
+            </summary>
+            <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckIn(System.String)">
+            <summary>
+            Sets the information client.
+            </summary>
+            <param name="requestInfo">The request information.</param>
+            <returns></returns>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.SetJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
+            <summary>
+            Sets the information client.
+            </summary>
+            <param name="jobs">The jobs.</param>
+            <param name="cancellationToken">The cancellation token.</param>
+            <returns></returns>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
+            <summary>
+            Checks the data.
+            </summary>
+            <returns></returns>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Environment.HostFunctions">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.GetFirstIPAddress">
+            <summary>
+            Gets the first ip address.
+            </summary>
+            <returns></returns>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.DoWork(SPI.Twamp.Probe.Contracts.TaskInfo,Microsoft.Extensions.Configuration.IConfiguration,NLog.Logger,System.Action,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Threading.CancellationToken)">
+            <summary>
+            Does the work.
+            </summary>
+            <param name="task">The task.</param>
+            <param name="configuration">The configuration.</param>
+            <param name="logger">The logger.</param>
+            <param name="endJob">The end job.</param>
+            <param name="bag">The bag.</param>
+            <param name="stoppingToken">The stopping token.</param>
+            <returns></returns>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Runners.CronExecuter">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,Microsoft.Extensions.Configuration.IConfiguration,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Action)">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetNextExecute(System.Threading.CancellationToken)">
+            <summary>
+            Sets the next execute.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.Dispose">
+            <summary>
+            Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetCronData(SPI.Twamp.Probe.Contracts.TaskInfo,System.Threading.CancellationToken)">
+            <summary>
+            Sets the cron data.
+            </summary>
+            <param name="item">The item.</param>
+            <param name="stoppingToken">The stopping token.</param>
+            <returns></returns>
+            <exception cref="T:System.NotImplementedException"></exception>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Runners.RepeatExecuter">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.RepeatExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,Microsoft.Extensions.Configuration.IConfiguration,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Action)">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Server.Worker">
+            <summary>
+            Initializes a new instance of the <see cref="T:SPI.Twamp.Probe.Server.Worker"/> class.
+            </summary>
+            <param name="logger">The logger.</param>
+            <param name="configuration"></param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration)">
+            <summary>
+            Initializes a new instance of the <see cref="T:SPI.Twamp.Probe.Server.Worker"/> class.
+            </summary>
+            <param name="logger">The logger.</param>
+            <param name="configuration"></param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.PushData(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Pushes the data.
+            </summary>
+            <param name="data">The data.</param>
+            <param name="stoppingToken">The stopping token.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.StartAsync(System.Threading.CancellationToken)">
+            <summary>
+            Triggered when the application host is ready to start the service.
+            </summary>
+            <param name="cancellationToken">Indicates that the start process has been aborted.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.StopAsync(System.Threading.CancellationToken)">
+            <summary>
+            Triggered when the application host is performing a graceful shutdown.
+            </summary>
+            <param name="cancellationToken">Indicates that the shutdown process should no longer be graceful.</param>
+            <returns>
+            A <see cref="T:System.Threading.Tasks.Task" /> that represents the asynchronous Stop operation.
+            </returns>
+        </member>
+        <member name="T:spi.twamp.Probe.Environment.DateConversion">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="M:spi.twamp.Probe.Environment.DateConversion.ToDateOnly(System.Nullable{System.DateTime})">
             <summary>
             Converts to date only.
             </summary>
             <param name="input">The input.</param>
             <returns></returns>
         </member>
-        <member name="T:spi.twamp.probe.Environment.StringConversion">
+        <member name="T:spi.twamp.Probe.Environment.StringConversion">
             <summary>
             
             </summary>
         </member>
-        <member name="M:spi.twamp.probe.Environment.StringConversion.ConvertTo``1(System.String,``0)">
+        <member name="M:spi.twamp.Probe.Environment.StringConversion.ConvertTo``1(System.String,``0)">
             <summary>
             
             </summary>

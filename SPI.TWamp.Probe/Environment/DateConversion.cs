@@ -1,6 +1,6 @@
 // Ignore Spelling: emr spi twamp
 
-namespace spi.twamp.probe.Environment
+namespace spi.twamp.Probe.Environment
 {
     /// <summary>
     /// 

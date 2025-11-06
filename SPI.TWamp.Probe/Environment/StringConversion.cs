@@ -2,7 +2,7 @@
 
 using System.ComponentModel;
 
-namespace spi.twamp.probe.Environment
+namespace spi.twamp.Probe.Environment
 {
     /// <summary>
     /// 

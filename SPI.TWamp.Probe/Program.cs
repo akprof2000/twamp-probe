@@ -9,7 +9,8 @@ using Newtonsoft.Json.Serialization;
 using NLog;
 using NLog.Extensions.Logging;
 using NLog.Web;
-using spi.twamp.probe.Environment;
+using spi.twamp.Probe.Environment;
+using SPI.Twamp.Probe.Server;
 using System.Reflection;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -75,6 +76,8 @@ try
                                 .AllowAnyHeader());
     });
     _ = builder.Services.AddSingleton(logger);
+    _ = builder.Services.AddSingleton<Worker>();
+    _ = builder.Services.AddHostedService(provider => provider.GetServices<Worker>().First());
 
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     _ = builder.Services.AddEndpointsApiExplorer();
