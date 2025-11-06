@@ -14,7 +14,7 @@ namespace SPI.Twamp.Probe.Server
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="configuration"></param>
-    public class Worker(Logger logger, IConfiguration configuration) : IHostedService
+    public class Worker(Logger logger, IConfiguration configuration) : IHostedService, IDisposable
     {
         private readonly Logger logger = logger;
         private readonly List<TaskInfo> _tasks = [];
@@ -26,7 +26,7 @@ namespace SPI.Twamp.Probe.Server
         private readonly ConcurrentDictionary<Guid, RepeatExecuter> _repeat = [];
 
         private ConcurrentBag<ActionData>? actions;
-
+        private bool disposedValue;
         private readonly AutoResetEvent _autoEvent = new(false);
 
 
@@ -63,6 +63,7 @@ namespace SPI.Twamp.Probe.Server
         private void EndJobCicle()
         {
             _jobFinish = true;
+            _autoEvent.Set();
         }
 
         private async Task CheckTasksInfo(TaskInfo[]? list, CancellationToken stoppingToken)
@@ -95,7 +96,7 @@ namespace SPI.Twamp.Probe.Server
                     {
 
                         _repeat[item.Id] = new RepeatExecuter(logger, item, _configuration, actions!, EndJobCicle);
-                        _repeat[item.Id].SomeMethodRunsAt(stoppingToken);
+                        _ = _repeat[item.Id].SomeMethodRunsAt(stoppingToken);
                         item.Delete = true;
                         saved = true;
 
@@ -190,13 +191,14 @@ namespace SPI.Twamp.Probe.Server
         {
             return await Task.Factory.StartNew(() =>
             {
-                ;
-                int signaled = WaitHandle.WaitAny([_autoEvent, cancellationToken.WaitHandle], 30000);
-                if (signaled > 0)
+                if (actions!.IsEmpty)
                 {
-                    return [];
+                    int signaled = WaitHandle.WaitAny([_autoEvent, cancellationToken.WaitHandle], 30000);
+                    if (signaled > 0)
+                    {
+                        return [];
+                    }
                 }
-
                 ActionData[] lst = [.. actions!];
                 actions.Clear();
                 if (File.Exists("JobResult.json"))
@@ -208,6 +210,36 @@ namespace SPI.Twamp.Probe.Server
             }, cancellationToken);
 
 
+        }
+
+        /// <summary>
+        /// Releases unmanaged and - optionally - managed resources.
+        /// </summary>
+        /// <param name="disposing"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    _autoEvent.Dispose();
+                    timer?.Dispose();
+                }
+
+     
+                disposedValue = true;
+            }
+        }
+
+
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// </summary>
+        public void Dispose()
+        {
+            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
         }
     }
 }

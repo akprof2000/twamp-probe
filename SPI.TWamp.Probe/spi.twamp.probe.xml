@@ -420,6 +420,17 @@
             A <see cref="T:System.Threading.Tasks.Task" /> that represents the asynchronous Stop operation.
             </returns>
         </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.Dispose(System.Boolean)">
+            <summary>
+            Releases unmanaged and - optionally - managed resources.
+            </summary>
+            <param name="disposing"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.Dispose">
+            <summary>
+            Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+            </summary>
+        </member>
         <member name="T:spi.twamp.Probe.Environment.DateConversion">
             <summary>
             
