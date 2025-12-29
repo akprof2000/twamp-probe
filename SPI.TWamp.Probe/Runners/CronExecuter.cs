@@ -5,8 +5,6 @@ using NLog;
 using SPI.Twamp.Probe.Contracts;
 using SPI.Twamp.Probe.Environment;
 using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Text;
 
 namespace SPI.Twamp.Probe.Runners
 {
@@ -20,10 +18,11 @@ namespace SPI.Twamp.Probe.Runners
         private readonly Logger logger = logger;
         private Timer? timer = null;
         private bool disposedValue;
+        private readonly CancellationTokenSource _source = new();
         private readonly ConcurrentBag<ActionData> _answers = bag;
         private readonly Action _endJob = endJob;
 
-        private void SetUpTimer(DateTime alertTime, CancellationToken stoppingToken)
+        private void SetUpTimer(DateTime alertTime)
         {
             DateTime current = DateTime.Now;
             TimeSpan timeToGo = alertTime - current;
@@ -33,11 +32,11 @@ namespace SPI.Twamp.Probe.Runners
             }
             timer = new Timer(async x =>
             {
-                await SomeMethodRunsAt(stoppingToken);
+                await SomeMethodRunsAt(_source.Token);
             }, null, timeToGo, Timeout.InfiniteTimeSpan);
         }
 
-        
+
         private async Task SomeMethodRunsAt(CancellationToken stoppingToken)
         {
             if (timer != null)
@@ -55,7 +54,7 @@ namespace SPI.Twamp.Probe.Runners
                 List<Task> tasks = [];
                 foreach (string item in arr)
                 {
-                    tasks.Add(Task.Run(() => HostFunctions.DoWork(_task,_configuration, logger, _endJob, _answers, stoppingToken), stoppingToken));
+                    tasks.Add(Task.Run(() => HostFunctions.DoWork(_task, item, _configuration, logger, _endJob, _answers, stoppingToken), stoppingToken));
                 }
 
                 if (tasks != null)
@@ -67,13 +66,13 @@ namespace SPI.Twamp.Probe.Runners
             {
                 logger.Error(ex);
             }
-            await SetNextExecute(stoppingToken);
+            await SetNextExecute();
         }
 
         /// <summary>
         /// Sets the next execute.
         /// </summary>
-        internal async Task SetNextExecute(CancellationToken stoppingToken)
+        internal async Task SetNextExecute()
         {
             if (timer != null)
             {
@@ -96,7 +95,7 @@ namespace SPI.Twamp.Probe.Runners
                 logger.Info("Task is ended by date {Date} id {Guid}", _task.End, _task.Id);
                 return;
             }
-            SetUpTimer(next, stoppingToken);
+            SetUpTimer(next);
         }
 
         protected virtual void Dispose(bool disposing)
@@ -106,6 +105,7 @@ namespace SPI.Twamp.Probe.Runners
                 if (disposing)
                 {
                     timer?.Dispose();
+                    _source.Dispose();
                 }
 
                 disposedValue = true;
@@ -126,13 +126,11 @@ namespace SPI.Twamp.Probe.Runners
         /// Sets the cron data.
         /// </summary>
         /// <param name="item">The item.</param>
-        /// <param name="stoppingToken">The stopping token.</param>
-        /// <returns></returns>
         /// <exception cref="System.NotImplementedException"></exception>
-        internal async Task SetCronData(TaskInfo item, CancellationToken stoppingToken)
+        internal async Task SetCronData(TaskInfo item)
         {
             _task = item;
-            await SetNextExecute(stoppingToken);
+            await SetNextExecute();
         }
     }
 }

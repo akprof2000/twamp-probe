@@ -333,11 +333,12 @@
             </summary>
             <returns></returns>
         </member>
-        <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.DoWork(SPI.Twamp.Probe.Contracts.TaskInfo,Microsoft.Extensions.Configuration.IConfiguration,NLog.Logger,System.Action,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.DoWork(SPI.Twamp.Probe.Contracts.TaskInfo,System.String,Microsoft.Extensions.Configuration.IConfiguration,NLog.Logger,System.Action,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Threading.CancellationToken)">
             <summary>
             Does the work.
             </summary>
             <param name="task">The task.</param>
+            <param name="node">The node.</param>
             <param name="configuration">The configuration.</param>
             <param name="logger">The logger.</param>
             <param name="endJob">The end job.</param>
@@ -355,7 +356,7 @@
             
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetNextExecute(System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetNextExecute">
             <summary>
             Sets the next execute.
             </summary>
@@ -365,13 +366,11 @@
             Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetCronData(SPI.Twamp.Probe.Contracts.TaskInfo,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetCronData(SPI.Twamp.Probe.Contracts.TaskInfo)">
             <summary>
             Sets the cron data.
             </summary>
             <param name="item">The item.</param>
-            <param name="stoppingToken">The stopping token.</param>
-            <returns></returns>
             <exception cref="T:System.NotImplementedException"></exception>
         </member>
         <member name="T:SPI.Twamp.Probe.Runners.RepeatExecuter">
@@ -456,6 +455,11 @@
             <param name="value"></param>
             <param name="def"></param>
             <returns></returns>
+        </member>
+        <member name="T:Program">
+            <summary>
+            Auto-generated public partial Program class for top-level statement apps.
+            </summary>
         </member>
     </members>
 </doc>

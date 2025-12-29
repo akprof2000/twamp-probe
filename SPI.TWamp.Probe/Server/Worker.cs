@@ -80,7 +80,7 @@ namespace SPI.Twamp.Probe.Server
                 {
                     if (item.Type == TaskType.Scheduler && _cron.TryGetValue(item.Id, out CronExecuter? cron))
                     {
-                        await cron.SetCronData(item, stoppingToken);
+                        await cron.SetCronData(item);
                     }
                 }
                 else
@@ -90,7 +90,7 @@ namespace SPI.Twamp.Probe.Server
                     if (item.Type == TaskType.Scheduler)
                     {
                         _cron[item.Id] = new CronExecuter(logger, item, _configuration, actions!, EndJobCicle);
-                        await _cron[item.Id].SetNextExecute(stoppingToken);
+                        await _cron[item.Id].SetNextExecute();
                     }
                     else if (item.Type == TaskType.Repeater)
                     {

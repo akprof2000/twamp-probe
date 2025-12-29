@@ -54,21 +54,23 @@ namespace SPI.Twamp.Probe.Environment
         /// Does the work.
         /// </summary>
         /// <param name="task">The task.</param>
+        /// <param name="node">The node.</param>
         /// <param name="configuration">The configuration.</param>
         /// <param name="logger">The logger.</param>
         /// <param name="endJob">The end job.</param>
         /// <param name="bag">The bag.</param>
         /// <param name="stoppingToken">The stopping token.</param>
         /// <returns></returns>
-        public static void DoWork(TaskInfo task, IConfiguration configuration, Logger logger, Action endJob, ConcurrentBag<ActionData> bag, CancellationToken stoppingToken)
+        public static void DoWork(TaskInfo task, string node, IConfiguration configuration, Logger logger, Action endJob, ConcurrentBag<ActionData> bag, CancellationToken stoppingToken)
         {
+            logger.Info("Start task by parameters {@TaskInfo}", task);
             string? execute = "";
             StringBuilder arg = new();
             switch (task.Mode)
             {
                 case TaskMode.WinPing:
                     execute = configuration["ping:name"];
-                    _ = arg.Append(task.EndNode);
+                    _ = arg.Append(node);
                     if (task.Parameters.Any())
                     {
                         foreach (string item in task.Parameters.Values)
@@ -85,7 +87,6 @@ namespace SPI.Twamp.Probe.Environment
                     break;
                 case TaskMode.TWamp:
                     execute = configuration["twamp:name"];
-                    _ = arg.Append(task.EndNode);
                     if (task.Parameters.Any())
                     {
                         foreach (string item in task.Parameters.Values)
@@ -99,6 +100,7 @@ namespace SPI.Twamp.Probe.Environment
                         _ = arg.Append(' ');
                         _ = arg.Append(configuration["twamp:default"]);
                     }
+                    _ = arg.Append(node);
                     break;
                 default:
                     break;
@@ -132,7 +134,7 @@ namespace SPI.Twamp.Probe.Environment
                         {
                             logger.Info("Console read {Console}", err);
                         }
-                        bag.Add(new ActionData { Console = con, ErrorConsole = err, EndNode = task.EndNode, IPAddress = task.IpAddress, TaskId = task.Id, RequestInfo = task.RequestInfo });
+                        bag.Add(new ActionData { Console = con, ErrorConsole = err, EndNode = node, IPAddress = task.IpAddress, TaskId = task.Id, RequestInfo = task.RequestInfo });
                         endJob();
 
                     }

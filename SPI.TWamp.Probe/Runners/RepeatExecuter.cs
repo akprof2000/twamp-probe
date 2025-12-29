@@ -39,7 +39,7 @@ namespace SPI.Twamp.Probe.Runners
                 List<Task> tasks = [];
                 foreach (string item in arr)
                 {
-                    tasks.Add(Task.Run(() => HostFunctions.DoWork(_task, _configuration, logger, _endJob, _answers, stoppingToken), stoppingToken));
+                    tasks.Add(Task.Run(() => HostFunctions.DoWork(_task, item, _configuration, logger, _endJob, _answers, stoppingToken), stoppingToken));
                 }
 
                 if (tasks != null)
