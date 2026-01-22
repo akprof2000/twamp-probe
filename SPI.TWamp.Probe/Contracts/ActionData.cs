@@ -8,6 +8,13 @@ namespace SPI.Twamp.Probe.Contracts
     public class ActionData
     {
         /// <summary>
+        /// Gets or sets the creation.
+        /// </summary>
+        /// <value>
+        /// The creation.
+        /// </value>
+        public DateTime Creation { get; set; } = DateTime.Now;
+        /// <summary>
         /// Gets or sets the identifier.
         /// </summary>
         /// <value>

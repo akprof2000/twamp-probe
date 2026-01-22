@@ -9,6 +9,14 @@
             
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Creation">
+            <summary>
+            Gets or sets the creation.
+            </summary>
+            <value>
+            The creation.
+            </value>
+        </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.TaskId">
             <summary>
             Gets or sets the identifier.
