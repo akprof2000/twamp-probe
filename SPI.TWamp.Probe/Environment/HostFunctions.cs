@@ -100,11 +100,14 @@ namespace SPI.Twamp.Probe.Environment
                         _ = arg.Append(' ');
                         _ = arg.Append(configuration["twamp:default"]);
                     }
+                    _ = arg.Append(' ');
                     _ = arg.Append(node);
                     break;
                 default:
                     break;
             }
+
+            logger.Info("Try execute {execute}, args {args}", execute, arg);
 
             for (int j = 0; j < task.Circles; j++)
             {
