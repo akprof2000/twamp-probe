@@ -100,6 +100,14 @@
             <param name="probeUrl">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Запрашивает у пробы идентификаторы задач по расписанию, которые она знает.
+            Нужно для сверки и досылки недостающих задач (в т. ч. на чистую пробу).
+            </summary>
+            <param name="probeUrl">Базовый адрес пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbePoller">
             <summary>
             Управление фоновым опросом проб. Позволяет запустить опрос вновь
@@ -164,8 +172,8 @@
         <member name="T:SPI.Twamp.Server.Abstractions.ITaskService">
             <summary>
             Прикладной сервис управления задачами: связывает хранилище задач с их
-            доставкой на пробу. После любого изменения актуальный список задач пробы
-            отправляется ей повторно.
+            доставкой на пробу. Изменения передаются пробе инкрементально (только
+            изменившиеся задачи), а фоновая сверка досылает недостающее.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.GetAllAsync">
@@ -182,6 +190,16 @@
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.DeleteByRequestInfoAsync(System.String,System.Threading.CancellationToken)">
             <summary>Помечает удалёнными все задачи пробы и отправляет ей обновлённый список.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Сверяет состояние пробы с хранилищем и приводит его в соответствие:
+            досылает недостающие активные задачи (в т. ч. на чистую перезалитую пробу),
+            удаляет с пробы устаревшие и помеченные на удаление. Устаревшие задачи
+            (с истёкшей датой окончания) исключаются из передачи и помечаются удалёнными.
+            </summary>
+            <param name="requestInfo">Адрес пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="T:SPI.Twamp.Server.Application.ClientService">
             <summary>
@@ -243,14 +261,14 @@
         </member>
         <member name="T:SPI.Twamp.Server.Application.TaskService">
             <summary>
-            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITaskService"/>: изменение задач в хранилище с последующей
-            синхронизацией полного списка задач пробы на саму пробу.
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITaskService"/>: изменения задач в хранилище с инкрементальной
+            доставкой пробе и фоновой сверкой состояния.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskRepository,SPI.Twamp.Server.Abstractions.IProbeClient)">
             <summary>
-            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITaskService"/>: изменение задач в хранилище с последующей
-            синхронизацией полного списка задач пробы на саму пробу.
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITaskService"/>: изменения задач в хранилище с инкрементальной
+            доставкой пробе и фоновой сверкой состояния.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.GetAllAsync">
@@ -268,42 +286,52 @@
         <member name="M:SPI.Twamp.Server.Application.TaskService.DeleteByRequestInfoAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.TaskService.SyncProbeAsync(System.String,System.Threading.CancellationToken)">
-            <summary>Отправляет пробе её актуальный список задач.</summary>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.TryPushAsync(System.String,System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
+            <summary>Пытается передать пробе изменения; при недоступности пробы только логирует.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.BackgroundServices.ProbePollingService">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
-            отдельный цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД.
+            цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД, а также
+            периодически сверяет и синхронизирует набор задач пробы.
             <para>
-            Пришёл на смену прежнему подходу с <c>Task.Factory.StartNew(async …)</c>: теперь
-            циклы корректно отменяются при остановке сервиса, не дублируются для одной пробы
-            и используют экспоненциальную задержку при ошибках связи.
+            Пришёл на смену прежнему подходу с <c>Task.Factory.StartNew(async …)</c>: циклы
+            корректно отменяются при остановке, не дублируются и используют экспоненциальную
+            задержку при ошибках связи. Периодическая сверка (<see cref="M:SPI.Twamp.Server.Abstractions.ITaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)"/>)
+            досылает недостающие задачи — в т. ч. автоматически конфигурирует чистую перезалитую пробу.
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository)">
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.ITaskService)">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
-            отдельный цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД.
+            цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД, а также
+            периодически сверяет и синхронизирует набор задач пробы.
             <para>
-            Пришёл на смену прежнему подходу с <c>Task.Factory.StartNew(async …)</c>: теперь
-            циклы корректно отменяются при остановке сервиса, не дублируются для одной пробы
-            и используют экспоненциальную задержку при ошибках связи.
+            Пришёл на смену прежнему подходу с <c>Task.Factory.StartNew(async …)</c>: циклы
+            корректно отменяются при остановке, не дублируются и используют экспоненциальную
+            задержку при ошибках связи. Периодическая сверка (<see cref="M:SPI.Twamp.Server.Abstractions.ITaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)"/>)
+            досылает недостающие задачи — в т. ч. автоматически конфигурирует чистую перезалитую пробу.
             </para>
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService.MaxBackoffSeconds">
             <summary>Максимальная задержка между попытками при ошибках связи, секунд.</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._reconcileIntervalSeconds">
+            <summary>Интервал фоновой сверки задач с пробами, секунд.</summary>
+        </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._pollers">
             <summary>Запущенные циклы опроса по адресу пробы — защита от повторного запуска.</summary>
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._cts">
-            <summary>Токен жизненного цикла всех циклов опроса.</summary>
+            <summary>Токен жизненного цикла всех фоновых циклов.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartAsync(System.Threading.CancellationToken)">
-            <summary>Старт сервиса: подготовка индексов и запуск опроса всех известных проб.</summary>
+            <summary>Старт сервиса: индексы, опрос известных проб и цикл сверки задач.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartPolling(SPI.Twamp.Server.Contracts.Client)">
             <inheritdoc/>
@@ -313,6 +341,15 @@
             Бесконечный цикл опроса одной пробы: запрашивает результаты и сохраняет их.
             При ошибках связи ждёт с нарастающей задержкой (backoff), при успехе — сбрасывает её.
             </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ReconcileLoopAsync(System.Threading.CancellationToken)">
+            <summary>
+            Фоновый цикл сверки: периодически приводит набор задач каждой пробы
+            в соответствие с хранилищем (досылает недостающее, убирает устаревшее).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ReconcileSafeAsync(System.String,System.Threading.CancellationToken)">
+            <summary>Выполняет сверку одной пробы, не прерываясь на ошибках связи с ней.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StopAsync(System.Threading.CancellationToken)">
             <summary>Остановка сервиса: отмена всех циклов опроса и ожидание их завершения.</summary>
@@ -787,6 +824,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetResultsAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.TaskRepository">

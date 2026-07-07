@@ -25,5 +25,13 @@ namespace SPI.Twamp.Server.Abstractions
         /// <param name="probeUrl">Базовый адрес пробы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         Task<ActionData[]> GetResultsAsync(string probeUrl, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Запрашивает у пробы идентификаторы задач по расписанию, которые она знает.
+        /// Нужно для сверки и досылки недостающих задач (в т. ч. на чистую пробу).
+        /// </summary>
+        /// <param name="probeUrl">Базовый адрес пробы.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task<Guid[]> GetTaskIdsAsync(string probeUrl, CancellationToken cancellationToken);
     }
 }

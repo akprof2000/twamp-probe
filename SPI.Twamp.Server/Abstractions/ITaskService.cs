@@ -6,8 +6,8 @@ namespace SPI.Twamp.Server.Abstractions
 {
     /// <summary>
     /// Прикладной сервис управления задачами: связывает хранилище задач с их
-    /// доставкой на пробу. После любого изменения актуальный список задач пробы
-    /// отправляется ей повторно.
+    /// доставкой на пробу. Изменения передаются пробе инкрементально (только
+    /// изменившиеся задачи), а фоновая сверка досылает недостающее.
     /// </summary>
     public interface ITaskService
     {
@@ -25,5 +25,15 @@ namespace SPI.Twamp.Server.Abstractions
 
         /// <summary>Помечает удалёнными все задачи пробы и отправляет ей обновлённый список.</summary>
         Task DeleteByRequestInfoAsync(string requestInfo, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Сверяет состояние пробы с хранилищем и приводит его в соответствие:
+        /// досылает недостающие активные задачи (в т. ч. на чистую перезалитую пробу),
+        /// удаляет с пробы устаревшие и помеченные на удаление. Устаревшие задачи
+        /// (с истёкшей датой окончания) исключаются из передачи и помечаются удалёнными.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task ReconcileAsync(string requestInfo, CancellationToken cancellationToken);
     }
 }

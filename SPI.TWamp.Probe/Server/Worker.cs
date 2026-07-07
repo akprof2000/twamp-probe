@@ -10,42 +10,43 @@ using System.Collections.Concurrent;
 namespace SPI.Twamp.Probe.Server
 {
     /// <summary>
-    /// Фоновый сервис-оркестратор. Хранит реестр задач, регистрирует под них
-    /// исполнителей по расписанию и обеспечивает сохранение/загрузку состояния.
+    /// Фоновый сервис-оркестратор. Хранит реестр задач по расписанию, регистрирует под
+    /// них исполнителей и применяет инкрементальные изменения, приходящие от сервера.
     /// <para>
-    /// Сам сервис не выполняет зонды и не выдаёт результаты: выполнение делегируется
-    /// <see cref="IProbeDispatcher"/>, а выдача результатов — <see cref="IResultStore"/>.
+    /// Обмен с сервером инкрементальный: <see cref="MergeJobs"/> получает только
+    /// изменившиеся задачи и сливает их в реестр (добавляет, обновляет, удаляет), а не
+    /// перезаписывает весь список. Сервер сверяет состояние через <see cref="GetKnownTaskIds"/>
+    /// и досылает недостающее — так чистая (перезалитая) проба сама получает все свои задачи.
+    /// </para>
+    /// <para>
+    /// Разовые задачи (Repeater) выполняются один раз и в реестре не хранятся.
+    /// Выполнение зондов делегируется <see cref="IProbeDispatcher"/>, выдача результатов —
+    /// <see cref="IResultStore"/>.
     /// </para>
     /// </summary>
     public sealed class Worker(Logger logger, IProbeDispatcher dispatcher, IResultStore resultStore) : IHostedService, IDisposable
     {
-        /// <summary>Файл с текущим списком зарегистрированных задач.</summary>
+        /// <summary>Файл с сохранённым реестром задач по расписанию.</summary>
         private const string TasksFileName = "TaskInfo.json";
 
         private readonly Logger _logger = logger;
         private readonly IProbeDispatcher _dispatcher = dispatcher;
         private readonly IResultStore _resultStore = resultStore;
 
-        /// <summary>Уже известные задачи (реестр).</summary>
+        /// <summary>Реестр задач по расписанию (единственный вид задач, хранимый между запусками).</summary>
         private readonly List<TaskInfo> _tasks = [];
 
-        /// <summary>Идентификаторы известных задач для быстрой проверки «новая ли задача» (O(1) вместо O(n)).</summary>
-        private readonly HashSet<Guid> _knownTaskIds = [];
-
-        /// <summary>Активные исполнители задач по расписанию.</summary>
+        /// <summary>Активные исполнители задач по расписанию (ключ — идентификатор задачи).</summary>
         private readonly ConcurrentDictionary<Guid, CronExecuter> _cron = [];
 
-        /// <summary>Сериализует регистрацию задач при одновременных запросах.</summary>
+        /// <summary>Сериализует применение изменений при одновременных запросах.</summary>
         private readonly SemaphoreSlim _registrationLock = new(1, 1);
 
         /// <summary>Источник токена, живущий всё время работы сервиса; отменяется при остановке.</summary>
         private readonly CancellationTokenSource _shutdown = new();
-
-        /// <summary>Хэш последнего полученного списка задач — чтобы не переобрабатывать одно и то же.</summary>
-        private int _hashCode;
         private bool _disposed;
 
-        /// <summary>Запуск сервиса: загрузка сохранённых результатов и ранее известных задач.</summary>
+        /// <summary>Запуск сервиса: загрузка сохранённых результатов и реестра задач.</summary>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             await _resultStore.LoadAsync(cancellationToken);
@@ -53,91 +54,31 @@ namespace SPI.Twamp.Probe.Server
             if (File.Exists(TasksFileName))
             {
                 string text = await File.ReadAllTextAsync(TasksFileName, cancellationToken);
-                _hashCode = text.GetHashCode();
-                TaskInfo[]? list = JsonConvert.DeserializeObject<TaskInfo[]>(text);
-                await RegisterTasksAsync(list, cancellationToken);
+                TaskInfo[]? saved = JsonConvert.DeserializeObject<TaskInfo[]>(text);
+                await MergeJobs(saved ?? [], cancellationToken);
             }
         }
 
         /// <summary>
-        /// Принимает новый список задач от веб-интерфейса, сохраняет его и регистрирует
-        /// изменения. Повторные одинаковые списки игнорируются по хэшу.
+        /// Применяет инкрементальные изменения задач: добавляет новые, обновляет существующие
+        /// и удаляет помеченные на удаление. Метод безопасен при параллельных вызовах.
         /// </summary>
-        /// <param name="data">JSON-представление массива задач.</param>
-        /// <param name="cancellationToken">Токен отмены запроса.</param>
-        public async Task PushData(string data, CancellationToken cancellationToken)
+        /// <param name="jobs">Изменившиеся задачи (не обязательно полный список).</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        public async Task MergeJobs(TaskInfo[] jobs, CancellationToken cancellationToken)
         {
-            int hash = data.GetHashCode();
-            if (hash == _hashCode)
-            {
-                return; // список не изменился — обрабатывать нечего
-            }
-
-            await File.WriteAllTextAsync(TasksFileName, data, cancellationToken);
-            _hashCode = hash;
-
-            TaskInfo[]? list = JsonConvert.DeserializeObject<TaskInfo[]>(data);
-            _logger.Debug("Получен обновлённый список задач {@Tasks}", list);
-
-            await RegisterTasksAsync(list, cancellationToken);
-        }
-
-        /// <summary>
-        /// Регистрирует новые задачи и обновляет существующие. Доступ сериализован,
-        /// поэтому метод безопасен при параллельных вызовах из нескольких запросов.
-        /// </summary>
-        private async Task RegisterTasksAsync(TaskInfo[]? list, CancellationToken cancellationToken)
-        {
-            if (list is null)
-            {
-                return;
-            }
-
             await _registrationLock.WaitAsync(cancellationToken);
             try
             {
-                bool tasksChanged = false;
-
-                foreach (TaskInfo item in list)
+                bool changed = false;
+                foreach (TaskInfo item in jobs)
                 {
-                    if (_knownTaskIds.Contains(item.Id))
-                    {
-                        // Известную задачу-планировщик обновляем «на лету».
-                        if (item.Type == TaskType.Scheduler && _cron.TryGetValue(item.Id, out CronExecuter? cron))
-                        {
-                            await cron.SetCronData(item);
-                        }
-                        continue;
-                    }
-
-                    // На горячем пути (тысячи задач за один запрос) не сериализуем весь объект —
-                    // это слишком дорого и переполняет очередь логов. Пишем компактно и на уровне Debug.
-                    _logger.Debug("Обнаружена новая задача {Id} {Title} {Mode}", item.Id, item.Title, item.Mode);
-                    _tasks.Add(item);
-                    _ = _knownTaskIds.Add(item.Id);
-
-                    switch (item.Type)
-                    {
-                        case TaskType.Scheduler:
-                            await RegisterCronTask(item);
-                            break;
-
-                        case TaskType.Repeater:
-                            // Разовую задачу выполняем один раз. При перезагрузке из файла
-                            // она приходит уже помеченной Delete=true и повторно не запускается.
-                            if (!item.Delete)
-                            {
-                                _dispatcher.Enqueue(item);
-                                item.Delete = true;
-                                tasksChanged = true;
-                            }
-                            break;
-                    }
+                    changed |= await MergeOneAsync(item);
                 }
 
-                if (tasksChanged)
+                if (changed)
                 {
-                    await File.WriteAllTextAsync(TasksFileName, JsonConvert.SerializeObject(_tasks), cancellationToken);
+                    await PersistAsync(cancellationToken);
                 }
             }
             finally
@@ -146,13 +87,80 @@ namespace SPI.Twamp.Probe.Server
             }
         }
 
-        /// <summary>Создаёт исполнителя задачи по расписанию и планирует первый запуск.</summary>
-        private async Task RegisterCronTask(TaskInfo item)
+        /// <summary>Возвращает идентификаторы задач по расписанию, известных пробе сейчас.</summary>
+        public Guid[] GetKnownTaskIds() => [.. _cron.Keys];
+
+        /// <summary>
+        /// Применяет одну задачу к реестру. Возвращает <c>true</c>, если реестр изменился
+        /// (значит, его нужно сохранить на диск).
+        /// </summary>
+        private async Task<bool> MergeOneAsync(TaskInfo item)
         {
+            // Разовые задачи выполняем немедленно и в реестре не храним.
+            if (item.Type == TaskType.Repeater)
+            {
+                if (!item.Delete)
+                {
+                    _dispatcher.Enqueue(item);
+                    _logger.Debug("Разовая задача {Id} поставлена в очередь", item.Id);
+                }
+                return false;
+            }
+
+            // Задача по расписанию, помеченная на удаление.
+            if (item.Delete)
+            {
+                return RemoveScheduler(item.Id);
+            }
+
+            // Обновление существующей задачи по расписанию.
+            if (_cron.TryGetValue(item.Id, out CronExecuter? existing))
+            {
+                int index = _tasks.FindIndex(t => t.Id == item.Id);
+                if (index >= 0)
+                {
+                    _tasks[index] = item;
+                }
+                await existing.SetCronData(item); // перепланировать по новым параметрам
+                _logger.Debug("Задача {Id} обновлена", item.Id);
+                return true;
+            }
+
+            // Новая задача по расписанию.
+            _tasks.Add(item);
             CronExecuter executer = new(_logger, item, _dispatcher);
             _cron[item.Id] = executer;
             await executer.SetNextExecute();
+            _logger.Debug("Задача {Id} добавлена", item.Id);
+            return true;
         }
+
+        /// <summary>Останавливает и удаляет задачу по расписанию из реестра.</summary>
+        private bool RemoveScheduler(Guid id)
+        {
+            bool changed = false;
+
+            if (_cron.TryRemove(id, out CronExecuter? cron))
+            {
+                cron.Dispose();
+                changed = true;
+            }
+
+            if (_tasks.RemoveAll(t => t.Id == id) > 0)
+            {
+                changed = true;
+            }
+
+            if (changed)
+            {
+                _logger.Debug("Задача {Id} удалена", id);
+            }
+            return changed;
+        }
+
+        /// <summary>Сохраняет текущий реестр задач по расписанию на диск.</summary>
+        private async Task PersistAsync(CancellationToken cancellationToken) =>
+            await File.WriteAllTextAsync(TasksFileName, JsonConvert.SerializeObject(_tasks), cancellationToken);
 
         /// <summary>Остановка сервиса: отмена выполнения и освобождение исполнителей.</summary>
         public async Task StopAsync(CancellationToken cancellationToken)

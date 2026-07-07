@@ -1,7 +1,6 @@
 ﻿// Ignore Spelling: SPI Twamp
 
 using Microsoft.AspNetCore.Mvc;
-using Newtonsoft.Json;
 using NLog;
 using SPI.Twamp.Probe.Abstractions;
 using SPI.Twamp.Probe.Contracts;
@@ -52,17 +51,28 @@ namespace SPI.Twamp.Probe.Controllers
         }
 
         /// <summary>
-        /// Принимает от сервера список задач для выполнения пробой.
+        /// Принимает от сервера изменившиеся задачи и сливает их в реестр пробы
+        /// (инкрементально: добавление, обновление, удаление).
         /// </summary>
-        /// <param name="jobs">Массив задач.</param>
+        /// <param name="jobs">Изменившиеся задачи (не обязательно полный список).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         [HttpPost("[action]")]
         public async Task<ActionResult> SetJobs([FromBody][Required] TaskInfo[] jobs, CancellationToken cancellationToken)
         {
-            logger.Info("Получен список задач {@ArrayTaskInfo}", jobs);
-            await storage.PushData(JsonConvert.SerializeObject(jobs), cancellationToken);
+            logger.Info("Получено изменений задач: {Count}", jobs.Length);
+            await storage.MergeJobs(jobs, cancellationToken);
 
             return Ok();
+        }
+
+        /// <summary>
+        /// Возвращает идентификаторы задач по расписанию, известных пробе.
+        /// Используется сервером для сверки состояния и досылки недостающих задач.
+        /// </summary>
+        [HttpGet("[action]")]
+        public ActionResult<Guid[]> TaskIds()
+        {
+            return Ok(storage.GetKnownTaskIds());
         }
 
         /// <summary>

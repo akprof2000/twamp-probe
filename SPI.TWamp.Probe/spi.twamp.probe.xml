@@ -302,10 +302,17 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.SetJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
             <summary>
-            Принимает от сервера список задач для выполнения пробой.
+            Принимает от сервера изменившиеся задачи и сливает их в реестр пробы
+            (инкрементально: добавление, обновление, удаление).
             </summary>
-            <param name="jobs">Массив задач.</param>
+            <param name="jobs">Изменившиеся задачи (не обязательно полный список).</param>
             <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.TaskIds">
+            <summary>
+            Возвращает идентификаторы задач по расписанию, известных пробе.
+            Используется сервером для сверки состояния и досылки недостающих задач.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
             <summary>
@@ -526,64 +533,78 @@
         </member>
         <member name="T:SPI.Twamp.Probe.Server.Worker">
             <summary>
-            Фоновый сервис-оркестратор. Хранит реестр задач, регистрирует под них
-            исполнителей по расписанию и обеспечивает сохранение/загрузку состояния.
+            Фоновый сервис-оркестратор. Хранит реестр задач по расписанию, регистрирует под
+            них исполнителей и применяет инкрементальные изменения, приходящие от сервера.
             <para>
-            Сам сервис не выполняет зонды и не выдаёт результаты: выполнение делегируется
-            <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher"/>, а выдача результатов — <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
+            Обмен с сервером инкрементальный: <see cref="M:SPI.Twamp.Probe.Server.Worker.MergeJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)"/> получает только
+            изменившиеся задачи и сливает их в реестр (добавляет, обновляет, удаляет), а не
+            перезаписывает весь список. Сервер сверяет состояние через <see cref="M:SPI.Twamp.Probe.Server.Worker.GetKnownTaskIds"/>
+            и досылает недостающее — так чистая (перезалитая) проба сама получает все свои задачи.
+            </para>
+            <para>
+            Разовые задачи (Repeater) выполняются один раз и в реестре не хранятся.
+            Выполнение зондов делегируется <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher"/>, выдача результатов —
+            <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
             </para>
             </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.IResultStore)">
             <summary>
-            Фоновый сервис-оркестратор. Хранит реестр задач, регистрирует под них
-            исполнителей по расписанию и обеспечивает сохранение/загрузку состояния.
+            Фоновый сервис-оркестратор. Хранит реестр задач по расписанию, регистрирует под
+            них исполнителей и применяет инкрементальные изменения, приходящие от сервера.
             <para>
-            Сам сервис не выполняет зонды и не выдаёт результаты: выполнение делегируется
-            <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher"/>, а выдача результатов — <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
+            Обмен с сервером инкрементальный: <see cref="M:SPI.Twamp.Probe.Server.Worker.MergeJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)"/> получает только
+            изменившиеся задачи и сливает их в реестр (добавляет, обновляет, удаляет), а не
+            перезаписывает весь список. Сервер сверяет состояние через <see cref="M:SPI.Twamp.Probe.Server.Worker.GetKnownTaskIds"/>
+            и досылает недостающее — так чистая (перезалитая) проба сама получает все свои задачи.
+            </para>
+            <para>
+            Разовые задачи (Repeater) выполняются один раз и в реестре не хранятся.
+            Выполнение зондов делегируется <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher"/>, выдача результатов —
+            <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
             </para>
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.Worker.TasksFileName">
-            <summary>Файл с текущим списком зарегистрированных задач.</summary>
+            <summary>Файл с сохранённым реестром задач по расписанию.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.Worker._tasks">
-            <summary>Уже известные задачи (реестр).</summary>
-        </member>
-        <member name="F:SPI.Twamp.Probe.Server.Worker._knownTaskIds">
-            <summary>Идентификаторы известных задач для быстрой проверки «новая ли задача» (O(1) вместо O(n)).</summary>
+            <summary>Реестр задач по расписанию (единственный вид задач, хранимый между запусками).</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.Worker._cron">
-            <summary>Активные исполнители задач по расписанию.</summary>
+            <summary>Активные исполнители задач по расписанию (ключ — идентификатор задачи).</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.Worker._registrationLock">
-            <summary>Сериализует регистрацию задач при одновременных запросах.</summary>
+            <summary>Сериализует применение изменений при одновременных запросах.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.Worker._shutdown">
             <summary>Источник токена, живущий всё время работы сервиса; отменяется при остановке.</summary>
         </member>
-        <member name="F:SPI.Twamp.Probe.Server.Worker._hashCode">
-            <summary>Хэш последнего полученного списка задач — чтобы не переобрабатывать одно и то же.</summary>
-        </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.StartAsync(System.Threading.CancellationToken)">
-            <summary>Запуск сервиса: загрузка сохранённых результатов и ранее известных задач.</summary>
+            <summary>Запуск сервиса: загрузка сохранённых результатов и реестра задач.</summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.PushData(System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Server.Worker.MergeJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
             <summary>
-            Принимает новый список задач от веб-интерфейса, сохраняет его и регистрирует
-            изменения. Повторные одинаковые списки игнорируются по хэшу.
+            Применяет инкрементальные изменения задач: добавляет новые, обновляет существующие
+            и удаляет помеченные на удаление. Метод безопасен при параллельных вызовах.
             </summary>
-            <param name="data">JSON-представление массива задач.</param>
-            <param name="cancellationToken">Токен отмены запроса.</param>
+            <param name="jobs">Изменившиеся задачи (не обязательно полный список).</param>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.RegisterTasksAsync(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Server.Worker.GetKnownTaskIds">
+            <summary>Возвращает идентификаторы задач по расписанию, известных пробе сейчас.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.MergeOneAsync(SPI.Twamp.Probe.Contracts.TaskInfo)">
             <summary>
-            Регистрирует новые задачи и обновляет существующие. Доступ сериализован,
-            поэтому метод безопасен при параллельных вызовах из нескольких запросов.
+            Применяет одну задачу к реестру. Возвращает <c>true</c>, если реестр изменился
+            (значит, его нужно сохранить на диск).
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.RegisterCronTask(SPI.Twamp.Probe.Contracts.TaskInfo)">
-            <summary>Создаёт исполнителя задачи по расписанию и планирует первый запуск.</summary>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.RemoveScheduler(System.Guid)">
+            <summary>Останавливает и удаляет задачу по расписанию из реестра.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.PersistAsync(System.Threading.CancellationToken)">
+            <summary>Сохраняет текущий реестр задач по расписанию на диск.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.StopAsync(System.Threading.CancellationToken)">
             <summary>Остановка сервиса: отмена выполнения и освобождение исполнителей.</summary>

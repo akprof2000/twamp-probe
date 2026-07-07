@@ -48,5 +48,13 @@ namespace SPI.Twamp.Server.Infrastructure
                 .AllowAnyHttpStatus()
                 .GetAsync(cancellationToken: cancellationToken)
                 .ReceiveJson<ActionData[]>();
+
+        /// <inheritdoc/>
+        public Task<Guid[]> GetTaskIdsAsync(string probeUrl, CancellationToken cancellationToken) =>
+            probeUrl
+                .AppendPathSegment("api/ProbeInterface/TaskIds")
+                .WithTimeout(_timeoutSeconds)
+                .GetAsync(cancellationToken: cancellationToken)
+                .ReceiveJson<Guid[]>();
     }
 }
