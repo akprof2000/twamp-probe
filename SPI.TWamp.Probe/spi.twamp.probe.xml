@@ -4,6 +4,77 @@
         <name>SPI.TWamp.Probe</name>
     </assembly>
     <members>
+        <member name="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher">
+            <summary>
+            Диспетчер выполнения зондов: принимает задачи в очередь и раздаёт их
+            фиксированному пулу рабочих потоков.
+            <para>
+            Это ключ к устойчивой работе при ~10 000 задач: сколько бы задач ни
+            поступило, одновременно выполняется не больше числа воркеров, а очередь
+            не «заваливает» пул потоков и не тормозит завершение уже запущенных зондов.
+            </para>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IProbeDispatcher.Enqueue(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <summary>
+            Ставит задачу в очередь на выполнение. Метод неблокирующий:
+            возвращает управление сразу, реальное выполнение идёт в фоне.
+            </summary>
+            <param name="task">Задача для выполнения зонда.</param>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Abstractions.IProbeRunner">
+            <summary>
+            Исполнитель зонда: запускает внешнюю утилиту (системный ping или TWamp)
+            для узлов задачи и складывает результаты в <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
+            <para>
+            Вся работа с процессом асинхронная — поток пула не блокируется на время
+            ожидания завершения дочернего процесса или пауз между циклами.
+            </para>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IProbeRunner.RunForNodesAsync(SPI.Twamp.Probe.Contracts.TaskInfo,System.Threading.CancellationToken)">
+            <summary>
+            Асинхронно выполняет зонд для всех узлов задачи.
+            Список узлов берётся из <see cref="P:SPI.Twamp.Probe.Contracts.TaskInfo.EndNode"/> (разделители «;» и «,»)
+            и обрабатывается параллельно.
+            </summary>
+            <param name="task">Описание задачи с параметрами запуска.</param>
+            <param name="cancellationToken">Токен отмены выполнения.</param>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Abstractions.IResultStore">
+            <summary>
+            Потокобезопасное хранилище результатов зондирования.
+            <para>
+            Отвечает за накопление результатов от множества параллельных задач
+            и их асинхронную выдачу веб-интерфейсу через «длинный опрос» (long polling)
+            без блокировки потоков пула — это ключ к устойчивой работе при большом
+            числе одновременных задач.
+            </para>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)">
+            <summary>
+            Добавляет результат выполнения задачи в очередь на выдачу.
+            Метод неблокирующий и безопасен для вызова из множества потоков.
+            </summary>
+            <param name="result">Результат одного замера зонда.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <summary>
+            Асинхронно ожидает появления результатов и возвращает накопленную пачку.
+            Ожидание не удерживает поток пула и прекращается по таймауту или отмене.
+            </summary>
+            <param name="timeout">Максимальное время ожидания новых результатов.</param>
+            <param name="cancellationToken">Токен отмены (например, разрыв соединения клиентом).</param>
+            <returns>Массив накопленных результатов (возможно пустой при таймауте).</returns>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.LoadAsync(System.Threading.CancellationToken)">
+            <summary>
+            Загружает ранее сохранённые (не доставленные) результаты при старте приложения,
+            чтобы они пережили перезапуск.
+            </summary>
+            <param name="cancellationToken">Токен отмены операции запуска.</param>
+        </member>
         <member name="T:SPI.Twamp.Probe.Contracts.ActionData">
             <summary>
             
@@ -211,6 +282,16 @@
             The pause sec.
             </value>
         </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.TimeoutSec">
+            <summary>
+            Индивидуальный таймаут выполнения одного запуска зонда, в секундах.
+            Если процесс не завершится за это время — он принудительно завершается (Kill).
+            Значение 0 означает «без ограничения по времени».
+            </summary>
+            <value>
+            Таймаут выполнения в секундах (0 — без ограничения).
+            </value>
+        </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Start">
             <summary>
             Gets or sets the start.
@@ -299,13 +380,13 @@
         </member>
         <member name="T:SPI.Twamp.Probe.Controllers.ProbeInterface">
             <summary>
-            
+            Веб-интерфейс зонда: приём задач и выдача результатов их выполнения.
             </summary>
             <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker,SPI.Twamp.Probe.Abstractions.IResultStore)">
             <summary>
-            
+            Веб-интерфейс зонда: приём задач и выдача результатов их выполнения.
             </summary>
             <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
@@ -326,13 +407,16 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
             <summary>
-            Checks the data.
+            Возвращает накопленные результаты выполнения задач.
+            Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных,
+            не блокируя поток пула, и отдаёт их пачкой.
             </summary>
-            <returns></returns>
+            <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+            <returns>Массив результатов (возможно пустой при таймауте).</returns>
         </member>
         <member name="T:SPI.Twamp.Probe.Environment.HostFunctions">
             <summary>
-            
+            Вспомогательные функции уровня хоста (сведения о сетевых интерфейсах и т. п.).
             </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.GetFirstIPAddress">
@@ -341,102 +425,268 @@
             </summary>
             <returns></returns>
         </member>
-        <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.DoWork(SPI.Twamp.Probe.Contracts.TaskInfo,System.String,Microsoft.Extensions.Configuration.IConfiguration,NLog.Logger,System.Action,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Threading.CancellationToken)">
-            <summary>
-            Does the work.
-            </summary>
-            <param name="task">The task.</param>
-            <param name="node">The node.</param>
-            <param name="configuration">The configuration.</param>
-            <param name="logger">The logger.</param>
-            <param name="endJob">The end job.</param>
-            <param name="bag">The bag.</param>
-            <param name="stoppingToken">The stopping token.</param>
-            <returns></returns>
-        </member>
         <member name="T:SPI.Twamp.Probe.Runners.CronExecuter">
             <summary>
-            
+            Планировщик одной задачи по cron-расписанию.
+            Вычисляет момент следующего запуска и по срабатыванию ставит задачу в очередь
+            диспетчера, после чего сразу планирует следующее срабатывание.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,Microsoft.Extensions.Configuration.IConfiguration,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Action)">
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,SPI.Twamp.Probe.Abstractions.IProbeDispatcher)">
             <summary>
-            
+            Планировщик одной задачи по cron-расписанию.
+            Вычисляет момент следующего запуска и по срабатыванию ставит задачу в очередь
+            диспетчера, после чего сразу планирует следующее срабатывание.
             </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Runners.CronExecuter._cts">
+            <summary>Источник токена отмены — останавливает планирование при удалении задачи или остановке.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetNextExecute">
-            <summary>
-            Sets the next execute.
-            </summary>
-        </member>
-        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.Dispose">
-            <summary>
-            Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-            </summary>
+            <summary>Планирует следующий запуск задачи согласно cron-выражению.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.SetCronData(SPI.Twamp.Probe.Contracts.TaskInfo)">
-            <summary>
-            Sets the cron data.
-            </summary>
-            <param name="item">The item.</param>
-            <exception cref="T:System.NotImplementedException"></exception>
+            <summary>Обновляет параметры задачи и пересчитывает расписание.</summary>
         </member>
-        <member name="T:SPI.Twamp.Probe.Runners.RepeatExecuter">
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.ScheduleAt(System.DateTime)">
+            <summary>Ставит таймер на указанный момент срабатывания.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.ExecuteAsync">
+            <summary>Ставит задачу в очередь на выполнение и планирует следующий запуск.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.DisposeTimerAsync">
+            <summary>Останавливает и освобождает текущий таймер.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.Dispose">
+            <summary>Останавливает расписание и освобождает ресурсы.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Runners.ProbeRunner">
             <summary>
-            
+            Выполняет внешний зонд (системный ping или утилита TWamp) для узлов задачи.
+            <para>
+            Вся работа с процессом асинхронная: ожидание завершения и чтение вывода
+            не блокируют поток пула.
+            </para>
+            <para>
+            Предел одновременных запусков задаётся не здесь, а числом воркеров
+            <see cref="!:ProbeDispatcher"/> — исполнитель просто честно выполняет то,
+            что ему передал диспетчер.
+            </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.RepeatExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,Microsoft.Extensions.Configuration.IConfiguration,System.Collections.Concurrent.ConcurrentBag{SPI.Twamp.Probe.Contracts.ActionData},System.Action)">
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IResultStore)">
             <summary>
-            
+            Выполняет внешний зонд (системный ping или утилита TWamp) для узлов задачи.
+            <para>
+            Вся работа с процессом асинхронная: ожидание завершения и чтение вывода
+            не блокируют поток пула.
+            </para>
+            <para>
+            Предел одновременных запусков задаётся не здесь, а числом воркеров
+            <see cref="!:ProbeDispatcher"/> — исполнитель просто честно выполняет то,
+            что ему передал диспетчер.
+            </para>
             </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Runners.ProbeRunner.NodeSeparators">
+            <summary>Разделители списка узлов в поле <see cref="P:SPI.Twamp.Probe.Contracts.TaskInfo.EndNode"/>.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.RunForNodesAsync(SPI.Twamp.Probe.Contracts.TaskInfo,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.RunSingleNodeAsync(SPI.Twamp.Probe.Contracts.TaskInfo,System.String,System.Threading.CancellationToken)">
+            <summary>Выполняет все циклы и повторы зонда для одного узла.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.BuildCommand(SPI.Twamp.Probe.Contracts.TaskInfo,System.String)">
+            <summary>Формирует имя исполняемого файла и строку аргументов в зависимости от режима задачи.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.AppendParameters(System.Text.StringBuilder,SPI.Twamp.Probe.Contracts.TaskInfo,System.String)">
+            <summary>Добавляет параметры задачи либо значение по умолчанию из конфигурации.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.ExecuteOnceAsync(SPI.Twamp.Probe.Contracts.TaskInfo,System.String,System.String,System.String,System.Threading.CancellationToken)">
+            <summary>Запускает дочерний процесс один раз и возвращает собранный результат замера.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.GetTimeout(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <summary>Возвращает индивидуальный таймаут задачи или бесконечность, если он не задан.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.KillProcess(System.Diagnostics.Process,SPI.Twamp.Probe.Contracts.TaskInfo,System.String,System.TimeSpan)">
+            <summary>Принудительно завершает процесс зонда (вместе с дочерними) по таймауту.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Server.ProbeDispatcher">
+            <summary>
+            Реализация диспетчера зондов на основе очереди (<see cref="T:System.Threading.Channels.Channel`1"/>) и
+            фиксированного пула рабочих циклов.
+            <para>
+            При старте поднимается N воркеров (N = «Probe:MaxParallel»). Каждый воркер в
+            цикле берёт из очереди очередную задачу и выполняет её через <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeRunner"/>.
+            Благодаря этому одновременно работает ровно N задач — независимо от того,
+            поступило их 10 или 10 000, — а завершение запущенных зондов не конкурирует
+            с тысячами ожидающих элементов в очереди пула потоков.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher._queue">
+            <summary>Очередь задач на выполнение. Безлимитная: приём задач никогда не блокирует отправителя.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher._cts">
+            <summary>Токен жизненного цикла пула воркеров.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IProbeRunner)">
+            <summary>Создаёт диспетчер и вычисляет число воркеров (предел параллелизма) из конфигурации.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.Enqueue(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.StartAsync(System.Threading.CancellationToken)">
+            <summary>Поднимает пул рабочих циклов при старте приложения.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.WorkerLoopAsync(System.Threading.CancellationToken)">
+            <summary>Рабочий цикл: последовательно берёт задачи из очереди и выполняет их.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.StopAsync(System.Threading.CancellationToken)">
+            <summary>Останавливает приём задач и дожидается завершения воркеров.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Server.ResultStore">
+            <summary>
+            Реализация хранилища результатов на основе неблокирующей очереди и
+            «сигнального» канала.
+            <para>
+            Тысячи параллельных задач могут добавлять результаты через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)"/>,
+            а веб-интерфейс забирает их пачками через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)"/>.
+            Ожидание новых данных реализовано асинхронно, поэтому во время «длинного
+            опроса» не удерживается ни один поток пула — именно это устраняло зависание
+            ответа при запуске более 300 задач одновременно.
+            </para>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.#ctor(NLog.Logger)">
+            <summary>
+            Реализация хранилища результатов на основе неблокирующей очереди и
+            «сигнального» канала.
+            <para>
+            Тысячи параллельных задач могут добавлять результаты через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)"/>,
+            а веб-интерфейс забирает их пачками через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)"/>.
+            Ожидание новых данных реализовано асинхронно, поэтому во время «длинного
+            опроса» не удерживается ни один поток пула — именно это устраняло зависание
+            ответа при запуске более 300 задач одновременно.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore.PersistenceFileName">
+            <summary>Файл для сохранения ещё не доставленных результатов между перезапусками.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore.PersistInterval">
+            <summary>Интервал фонового сохранения снимка очереди на диск.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._pending">
+            <summary>Очередь накопленных результатов — единый источник истины для выдачи и сохранения.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._signal">
+            <summary>
+            Канал-сигнал ёмкостью 1 с режимом <see cref="F:System.Threading.Channels.BoundedChannelFullMode.DropWrite"/>.
+            Работает как асинхронный AutoResetEvent: множество добавлений «схлопываются»
+            в один сигнал, а ожидающий потребитель пробуждается без блокировки потока.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._fileLock">
+            <summary>Сериализует запись файла, чтобы избежать одновременных обращений к диску.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._persistTimer">
+            <summary>Таймер фонового сохранения снимка очереди на диск. Создаётся лениво в <see cref="M:SPI.Twamp.Probe.Server.ResultStore.EnsurePersistTimer"/>.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._dirty">
+            <summary>Признак наличия несохранённых изменений (снижает лишние записи на диск).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.LoadAsync(System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.DrainPending">
+            <summary>Извлекает все накопленные на текущий момент результаты из очереди.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.EnsurePersistTimer">
+            <summary>Запускает фоновый таймер сохранения при первом появлении данных.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.FlushToDiskAsync">
+            <summary>
+            Сохраняет текущий снимок очереди на диск (или удаляет файл, если очередь пуста).
+            Вызывается по таймеру и при выдаче пачки, чтобы результаты пережили перезапуск.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.Dispose">
+            <summary>Освобождает таймер и семафор.</summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Server.Worker">
             <summary>
-            Initializes a new instance of the <see cref="T:SPI.Twamp.Probe.Server.Worker"/> class.
+            Фоновый сервис-оркестратор. Хранит реестр задач, регистрирует под них
+            исполнителей по расписанию и обеспечивает сохранение/загрузку состояния.
+            <para>
+            Сам сервис не выполняет зонды и не выдаёт результаты: выполнение делегируется
+            <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher"/>, а выдача результатов — <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
+            </para>
             </summary>
-            <param name="logger">The logger.</param>
-            <param name="configuration"></param>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration)">
+        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.IResultStore)">
             <summary>
-            Initializes a new instance of the <see cref="T:SPI.Twamp.Probe.Server.Worker"/> class.
+            Фоновый сервис-оркестратор. Хранит реестр задач, регистрирует под них
+            исполнителей по расписанию и обеспечивает сохранение/загрузку состояния.
+            <para>
+            Сам сервис не выполняет зонды и не выдаёт результаты: выполнение делегируется
+            <see cref="T:SPI.Twamp.Probe.Abstractions.IProbeDispatcher"/>, а выдача результатов — <see cref="T:SPI.Twamp.Probe.Abstractions.IResultStore"/>.
+            </para>
             </summary>
-            <param name="logger">The logger.</param>
-            <param name="configuration"></param>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker.TasksFileName">
+            <summary>Файл с текущим списком зарегистрированных задач.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker._tasks">
+            <summary>Уже известные задачи (реестр).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker._knownTaskIds">
+            <summary>Идентификаторы известных задач для быстрой проверки «новая ли задача» (O(1) вместо O(n)).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker._cron">
+            <summary>Активные исполнители задач по расписанию.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker._registrationLock">
+            <summary>Сериализует регистрацию задач при одновременных запросах.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker._shutdown">
+            <summary>Источник токена, живущий всё время работы сервиса; отменяется при остановке.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.Worker._hashCode">
+            <summary>Хэш последнего полученного списка задач — чтобы не переобрабатывать одно и то же.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.StartAsync(System.Threading.CancellationToken)">
+            <summary>Запуск сервиса: загрузка сохранённых результатов и ранее известных задач.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.PushData(System.String,System.Threading.CancellationToken)">
             <summary>
-            Pushes the data.
+            Принимает новый список задач от веб-интерфейса, сохраняет его и регистрирует
+            изменения. Повторные одинаковые списки игнорируются по хэшу.
             </summary>
-            <param name="data">The data.</param>
-            <param name="stoppingToken">The stopping token.</param>
+            <param name="data">JSON-представление массива задач.</param>
+            <param name="cancellationToken">Токен отмены запроса.</param>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.StartAsync(System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Server.Worker.RegisterTasksAsync(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
             <summary>
-            Triggered when the application host is ready to start the service.
+            Регистрирует новые задачи и обновляет существующие. Доступ сериализован,
+            поэтому метод безопасен при параллельных вызовах из нескольких запросов.
             </summary>
-            <param name="cancellationToken">Indicates that the start process has been aborted.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.RegisterCronTask(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <summary>Создаёт исполнителя задачи по расписанию и планирует первый запуск.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.StopAsync(System.Threading.CancellationToken)">
-            <summary>
-            Triggered when the application host is performing a graceful shutdown.
-            </summary>
-            <param name="cancellationToken">Indicates that the shutdown process should no longer be graceful.</param>
-            <returns>
-            A <see cref="T:System.Threading.Tasks.Task" /> that represents the asynchronous Stop operation.
-            </returns>
-        </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.Dispose(System.Boolean)">
-            <summary>
-            Releases unmanaged and - optionally - managed resources.
-            </summary>
-            <param name="disposing"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
+            <summary>Остановка сервиса: отмена выполнения и освобождение исполнителей.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.Dispose">
-            <summary>
-            Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-            </summary>
+            <summary>Освобождает ресурсы сервиса.</summary>
         </member>
         <member name="T:spi.twamp.Probe.Environment.DateConversion">
             <summary>

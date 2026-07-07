@@ -1,136 +1,113 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 using NCrontab;
 using NLog;
+using SPI.Twamp.Probe.Abstractions;
 using SPI.Twamp.Probe.Contracts;
-using SPI.Twamp.Probe.Environment;
-using System.Collections.Concurrent;
 
 namespace SPI.Twamp.Probe.Runners
 {
     /// <summary>
-    /// 
+    /// Планировщик одной задачи по cron-расписанию.
+    /// Вычисляет момент следующего запуска и по срабатыванию ставит задачу в очередь
+    /// диспетчера, после чего сразу планирует следующее срабатывание.
     /// </summary>
-    internal class CronExecuter(Logger logger, TaskInfo task, IConfiguration configuration, ConcurrentBag<ActionData> bag, Action endJob) : IDisposable
+    internal sealed class CronExecuter(Logger logger, TaskInfo task, IProbeDispatcher dispatcher) : IDisposable
     {
-        private readonly IConfiguration _configuration = configuration;
+        private readonly Logger _logger = logger;
+        private readonly IProbeDispatcher _dispatcher = dispatcher;
+
+        /// <summary>Источник токена отмены — останавливает планирование при удалении задачи или остановке.</summary>
+        private readonly CancellationTokenSource _cts = new();
+
         private TaskInfo _task = task;
-        private readonly Logger logger = logger;
-        private Timer? timer = null;
-        private bool disposedValue;
-        private readonly CancellationTokenSource _source = new();
-        private readonly ConcurrentBag<ActionData> _answers = bag;
-        private readonly Action _endJob = endJob;
+        private Timer? _timer;
+        private bool _disposed;
 
-        private void SetUpTimer(DateTime alertTime)
-        {
-            DateTime current = DateTime.Now;
-            TimeSpan timeToGo = alertTime - current;
-            if (timeToGo < TimeSpan.Zero)
-            {
-                return;//time already passed
-            }
-            timer = new Timer(async x =>
-            {
-                await SomeMethodRunsAt(_source.Token);
-            }, null, timeToGo, Timeout.InfiniteTimeSpan);
-        }
-
-
-        private async Task SomeMethodRunsAt(CancellationToken stoppingToken)
-        {
-            if (timer != null)
-            {
-                await timer.DisposeAsync();
-            }
-
-            timer = null;
-            logger.Info("Run job {Guid} at {Time}", _task.Id, DateTime.Now);
-            try
-            {
-
-
-                string[] arr = _task.EndNode.Split([";", ","], StringSplitOptions.RemoveEmptyEntries);
-                List<Task> tasks = [];
-                foreach (string item in arr)
-                {
-                    tasks.Add(Task.Run(() => HostFunctions.DoWork(_task, item, _configuration, logger, _endJob, _answers, stoppingToken), stoppingToken));
-                }
-
-                if (tasks != null)
-                {
-                    await Task.WhenAll(tasks);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex);
-            }
-            await SetNextExecute();
-        }
-
-        /// <summary>
-        /// Sets the next execute.
-        /// </summary>
+        /// <summary>Планирует следующий запуск задачи согласно cron-выражению.</summary>
         internal async Task SetNextExecute()
         {
-            if (timer != null)
-            {
-                await timer.DisposeAsync();
-            }
+            await DisposeTimerAsync();
 
-            timer = null;
             if (_task.Delete)
             {
-                logger.Info("Task is delete id {Guid}", _task.Id);
+                _logger.Info("Задача {Guid} помечена на удаление — расписание остановлено", _task.Id);
                 return;
             }
 
-            CrontabSchedule s = CrontabSchedule.Parse(_task.CronExpression, new CrontabSchedule.ParseOptions { IncludingSeconds = _task.CronWithSeconds });
-            DateTime start = DateTime.Now;
-            DateTime end = _task.End;
-            DateTime next = s.GetNextOccurrence(start, end);
-            if (next >= end)
+            CrontabSchedule schedule = CrontabSchedule.Parse(
+                _task.CronExpression,
+                new CrontabSchedule.ParseOptions { IncludingSeconds = _task.CronWithSeconds });
+
+            DateTime next = schedule.GetNextOccurrence(DateTime.Now, _task.End);
+            if (next >= _task.End)
             {
-                logger.Info("Task is ended by date {Date} id {Guid}", _task.End, _task.Id);
+                _logger.Info("Задача {Guid} завершена по дате окончания {Date}", _task.Id, _task.End);
                 return;
             }
-            SetUpTimer(next);
+
+            ScheduleAt(next);
         }
 
-        protected virtual void Dispose(bool disposing)
+        /// <summary>Обновляет параметры задачи и пересчитывает расписание.</summary>
+        internal async Task SetCronData(TaskInfo task)
         {
-            if (!disposedValue)
-            {
-                if (disposing)
-                {
-                    timer?.Dispose();
-                    _source.Dispose();
-                }
+            _task = task;
+            await SetNextExecute();
+        }
 
-                disposedValue = true;
+        /// <summary>Ставит таймер на указанный момент срабатывания.</summary>
+        private void ScheduleAt(DateTime alertTime)
+        {
+            TimeSpan delay = alertTime - DateTime.Now;
+            if (delay < TimeSpan.Zero)
+            {
+                return; // момент уже прошёл
+            }
+
+            _timer = new Timer(async _ => await ExecuteAsync(), null, delay, Timeout.InfiniteTimeSpan);
+        }
+
+        /// <summary>Ставит задачу в очередь на выполнение и планирует следующий запуск.</summary>
+        private async Task ExecuteAsync()
+        {
+            await DisposeTimerAsync();
+
+            if (_cts.IsCancellationRequested)
+            {
+                return; // задача удалена или сервис останавливается
+            }
+
+            _logger.Debug("Постановка задачи {Guid} в очередь в {Time}", _task.Id, DateTime.Now);
+
+            // Только ставим в очередь — фактическое выполнение возьмёт на себя диспетчер.
+            // Следующее срабатывание планируем сразу, не дожидаясь завершения зонда.
+            _dispatcher.Enqueue(_task);
+            await SetNextExecute();
+        }
+
+        /// <summary>Останавливает и освобождает текущий таймер.</summary>
+        private async Task DisposeTimerAsync()
+        {
+            if (_timer != null)
+            {
+                await _timer.DisposeAsync();
+                _timer = null;
             }
         }
 
-        /// <summary>
-        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-        /// </summary>
+        /// <summary>Останавливает расписание и освобождает ресурсы.</summary>
         public void Dispose()
         {
-            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-            Dispose(disposing: true);
-            GC.SuppressFinalize(this);
-        }
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
 
-        /// <summary>
-        /// Sets the cron data.
-        /// </summary>
-        /// <param name="item">The item.</param>
-        /// <exception cref="System.NotImplementedException"></exception>
-        internal async Task SetCronData(TaskInfo item)
-        {
-            _task = item;
-            await SetNextExecute();
+            _cts.Cancel();
+            _timer?.Dispose();
+            _cts.Dispose();
         }
     }
 }

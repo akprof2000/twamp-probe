@@ -2,244 +2,185 @@
 
 using Newtonsoft.Json;
 using NLog;
+using SPI.Twamp.Probe.Abstractions;
 using SPI.Twamp.Probe.Contracts;
 using SPI.Twamp.Probe.Runners;
 using System.Collections.Concurrent;
 
-
 namespace SPI.Twamp.Probe.Server
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="Worker"/> class.
+    /// Фоновый сервис-оркестратор. Хранит реестр задач, регистрирует под них
+    /// исполнителей по расписанию и обеспечивает сохранение/загрузку состояния.
+    /// <para>
+    /// Сам сервис не выполняет зонды и не выдаёт результаты: выполнение делегируется
+    /// <see cref="IProbeDispatcher"/>, а выдача результатов — <see cref="IResultStore"/>.
+    /// </para>
     /// </summary>
-    /// <param name="logger">The logger.</param>
-    /// <param name="configuration"></param>
-    public class Worker(Logger logger, IConfiguration configuration) : IHostedService, IDisposable
+    public sealed class Worker(Logger logger, IProbeDispatcher dispatcher, IResultStore resultStore) : IHostedService, IDisposable
     {
-        private readonly Logger logger = logger;
+        /// <summary>Файл с текущим списком зарегистрированных задач.</summary>
+        private const string TasksFileName = "TaskInfo.json";
+
+        private readonly Logger _logger = logger;
+        private readonly IProbeDispatcher _dispatcher = dispatcher;
+        private readonly IResultStore _resultStore = resultStore;
+
+        /// <summary>Уже известные задачи (реестр).</summary>
         private readonly List<TaskInfo> _tasks = [];
-        private int _hashCode = 0;
-        private bool _jobFinish = false;
-        private Timer? timer = null;
-        private readonly IConfiguration _configuration = configuration;
+
+        /// <summary>Идентификаторы известных задач для быстрой проверки «новая ли задача» (O(1) вместо O(n)).</summary>
+        private readonly HashSet<Guid> _knownTaskIds = [];
+
+        /// <summary>Активные исполнители задач по расписанию.</summary>
         private readonly ConcurrentDictionary<Guid, CronExecuter> _cron = [];
-        private readonly ConcurrentDictionary<Guid, RepeatExecuter> _repeat = [];
 
-        private ConcurrentBag<ActionData>? actions;
-        private bool disposedValue;
-        private readonly AutoResetEvent _autoEvent = new(false);
+        /// <summary>Сериализует регистрацию задач при одновременных запросах.</summary>
+        private readonly SemaphoreSlim _registrationLock = new(1, 1);
 
+        /// <summary>Источник токена, живущий всё время работы сервиса; отменяется при остановке.</summary>
+        private readonly CancellationTokenSource _shutdown = new();
 
-        private void SetUpTimer(CancellationToken stoppingToken)
+        /// <summary>Хэш последнего полученного списка задач — чтобы не переобрабатывать одно и то же.</summary>
+        private int _hashCode;
+        private bool _disposed;
+
+        /// <summary>Запуск сервиса: загрузка сохранённых результатов и ранее известных задач.</summary>
+        public async Task StartAsync(CancellationToken cancellationToken)
         {
-            timer = new Timer(async x =>
+            await _resultStore.LoadAsync(cancellationToken);
+
+            if (File.Exists(TasksFileName))
             {
-                await SomeMethodRunsAt(stoppingToken);
-            }, null, 1000, 0);
+                string text = await File.ReadAllTextAsync(TasksFileName, cancellationToken);
+                _hashCode = text.GetHashCode();
+                TaskInfo[]? list = JsonConvert.DeserializeObject<TaskInfo[]>(text);
+                await RegisterTasksAsync(list, cancellationToken);
+            }
         }
 
-
-        private async Task SomeMethodRunsAt(CancellationToken stoppingToken)
+        /// <summary>
+        /// Принимает новый список задач от веб-интерфейса, сохраняет его и регистрирует
+        /// изменения. Повторные одинаковые списки игнорируются по хэшу.
+        /// </summary>
+        /// <param name="data">JSON-представление массива задач.</param>
+        /// <param name="cancellationToken">Токен отмены запроса.</param>
+        public async Task PushData(string data, CancellationToken cancellationToken)
         {
-            if (timer != null)
+            int hash = data.GetHashCode();
+            if (hash == _hashCode)
             {
-                await timer.DisposeAsync();
+                return; // список не изменился — обрабатывать нечего
             }
 
-            timer = null;
+            await File.WriteAllTextAsync(TasksFileName, data, cancellationToken);
+            _hashCode = hash;
 
-            if (_jobFinish)
-            {
-                ActionData[] lst = [.. actions!];
-                await File.WriteAllTextAsync("JobResult.json", JsonConvert.SerializeObject(lst), stoppingToken);
-                _jobFinish = false;
-            }
+            TaskInfo[]? list = JsonConvert.DeserializeObject<TaskInfo[]>(data);
+            _logger.Debug("Получен обновлённый список задач {@Tasks}", list);
 
-            SetUpTimer(stoppingToken);
-
-            await Task.CompletedTask;
+            await RegisterTasksAsync(list, cancellationToken);
         }
 
-        private void EndJobCicle()
+        /// <summary>
+        /// Регистрирует новые задачи и обновляет существующие. Доступ сериализован,
+        /// поэтому метод безопасен при параллельных вызовах из нескольких запросов.
+        /// </summary>
+        private async Task RegisterTasksAsync(TaskInfo[]? list, CancellationToken cancellationToken)
         {
-            _jobFinish = true;
-            _autoEvent.Set();
-        }
-
-        private async Task CheckTasksInfo(TaskInfo[]? list, CancellationToken stoppingToken)
-        {
-            if (list == null)
+            if (list is null)
             {
                 return;
             }
-            bool saved = false;
-            foreach (TaskInfo item in list)
+
+            await _registrationLock.WaitAsync(cancellationToken);
+            try
             {
-                TaskInfo? res = _tasks.Find(x => x.Id == item.Id);
-                if (res != null)
+                bool tasksChanged = false;
+
+                foreach (TaskInfo item in list)
                 {
-                    if (item.Type == TaskType.Scheduler && _cron.TryGetValue(item.Id, out CronExecuter? cron))
+                    if (_knownTaskIds.Contains(item.Id))
                     {
-                        await cron.SetCronData(item);
+                        // Известную задачу-планировщик обновляем «на лету».
+                        if (item.Type == TaskType.Scheduler && _cron.TryGetValue(item.Id, out CronExecuter? cron))
+                        {
+                            await cron.SetCronData(item);
+                        }
+                        continue;
                     }
-                }
-                else
-                {
-                    logger.Info("Found new task data {@Task}", item);
+
+                    // На горячем пути (тысячи задач за один запрос) не сериализуем весь объект —
+                    // это слишком дорого и переполняет очередь логов. Пишем компактно и на уровне Debug.
+                    _logger.Debug("Обнаружена новая задача {Id} {Title} {Mode}", item.Id, item.Title, item.Mode);
                     _tasks.Add(item);
-                    if (item.Type == TaskType.Scheduler)
+                    _ = _knownTaskIds.Add(item.Id);
+
+                    switch (item.Type)
                     {
-                        _cron[item.Id] = new CronExecuter(logger, item, _configuration, actions!, EndJobCicle);
-                        await _cron[item.Id].SetNextExecute();
+                        case TaskType.Scheduler:
+                            await RegisterCronTask(item);
+                            break;
+
+                        case TaskType.Repeater:
+                            // Разовую задачу выполняем один раз. При перезагрузке из файла
+                            // она приходит уже помеченной Delete=true и повторно не запускается.
+                            if (!item.Delete)
+                            {
+                                _dispatcher.Enqueue(item);
+                                item.Delete = true;
+                                tasksChanged = true;
+                            }
+                            break;
                     }
-                    else if (item.Type == TaskType.Repeater)
-                    {
+                }
 
-                        _repeat[item.Id] = new RepeatExecuter(logger, item, _configuration, actions!, EndJobCicle);
-                        _ = _repeat[item.Id].SomeMethodRunsAt(stoppingToken);
-                        item.Delete = true;
-                        saved = true;
-
-                    }
-
+                if (tasksChanged)
+                {
+                    await File.WriteAllTextAsync(TasksFileName, JsonConvert.SerializeObject(_tasks), cancellationToken);
                 }
             }
-
-            if (saved)
+            finally
             {
-                await File.WriteAllTextAsync("TaskInfo.json", JsonConvert.SerializeObject(_tasks), stoppingToken);
+                _ = _registrationLock.Release();
             }
         }
 
-        /// <summary>
-        /// Pushes the data.
-        /// </summary>
-        /// <param name="data">The data.</param>
-        /// <param name="stoppingToken">The stopping token.</param>
-        public async Task PushData(string data, CancellationToken stoppingToken)
+        /// <summary>Создаёт исполнителя задачи по расписанию и планирует первый запуск.</summary>
+        private async Task RegisterCronTask(TaskInfo item)
         {
-            int hash = data.GetHashCode();
-            logger.Debug("Answer is OK with tasks {Tasks}", data);
-
-            if (hash != _hashCode)
-            {
-                await File.WriteAllTextAsync("TaskInfo.json", data, stoppingToken);
-                _hashCode = hash;
-                TaskInfo[]? list = JsonConvert.DeserializeObject<TaskInfo[]>(data);
-                logger.Debug("Hash changed update info {@Tasks}", list);
-
-                await CheckTasksInfo(list, stoppingToken);
-            }
-
-
-            await Task.CompletedTask;
+            CronExecuter executer = new(_logger, item, _dispatcher);
+            _cron[item.Id] = executer;
+            await executer.SetNextExecute();
         }
 
-        /// <summary>
-        /// Triggered when the application host is ready to start the service.
-        /// </summary>
-        /// <param name="cancellationToken">Indicates that the start process has been aborted.</param>
-        public async Task StartAsync(CancellationToken cancellationToken)
-        {
-
-            if (File.Exists("JobResult.json"))
-            {
-                string text = await File.ReadAllTextAsync("JobResult.json", cancellationToken);
-                ActionData[] lst = JsonConvert.DeserializeObject<ActionData[]>(text)!;
-                actions = [.. lst];
-
-            }
-            else
-            {
-                actions = [];
-            }
-
-            if (File.Exists("TaskInfo.json"))
-            {
-                string text = await File.ReadAllTextAsync("TaskInfo.json", cancellationToken);
-                _hashCode = text.GetHashCode();
-                TaskInfo[]? list = JsonConvert.DeserializeObject<TaskInfo[]>(text);
-                await CheckTasksInfo(list, cancellationToken);
-            }
-
-            SetUpTimer(cancellationToken);
-
-            await Task.CompletedTask;
-
-
-        }
-
-        /// <summary>
-        /// Triggered when the application host is performing a graceful shutdown.
-        /// </summary>
-        /// <param name="cancellationToken">Indicates that the shutdown process should no longer be graceful.</param>
-        /// <returns>
-        /// A <see cref="T:System.Threading.Tasks.Task" /> that represents the asynchronous Stop operation.
-        /// </returns>
+        /// <summary>Остановка сервиса: отмена выполнения и освобождение исполнителей.</summary>
         public async Task StopAsync(CancellationToken cancellationToken)
         {
-            if (timer != null)
+            await _shutdown.CancelAsync();
+
+            foreach (CronExecuter cron in _cron.Values)
             {
-                await timer.DisposeAsync();
-            }
-
-           await Task.CompletedTask;
-
-        }
-
-        internal async Task<ActionData[]> GetActionsData(CancellationToken cancellationToken)
-        {
-            return await Task.Factory.StartNew(() =>
-            {
-                if (actions!.IsEmpty)
-                {
-                    int signaled = WaitHandle.WaitAny([_autoEvent, cancellationToken.WaitHandle], 30000);
-                    if (signaled > 0)
-                    {
-                        return [];
-                    }
-                }
-                ActionData[] lst = [.. actions!];
-                actions.Clear();
-                if (File.Exists("JobResult.json"))
-                {
-                    File.Delete("JobResult.json");
-                }
-
-                return lst;
-            }, cancellationToken);
-
-
-        }
-
-        /// <summary>
-        /// Releases unmanaged and - optionally - managed resources.
-        /// </summary>
-        /// <param name="disposing"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!disposedValue)
-            {
-                if (disposing)
-                {
-                    _autoEvent.Dispose();
-                    timer?.Dispose();
-                }
-
-     
-                disposedValue = true;
+                cron.Dispose();
             }
         }
 
-
-        /// <summary>
-        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-        /// </summary>
+        /// <summary>Освобождает ресурсы сервиса.</summary>
         public void Dispose()
         {
-            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-            Dispose(disposing: true);
-            GC.SuppressFinalize(this);
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+
+            foreach (CronExecuter cron in _cron.Values)
+            {
+                cron.Dispose();
+            }
+
+            _registrationLock.Dispose();
+            _shutdown.Dispose();
         }
     }
 }

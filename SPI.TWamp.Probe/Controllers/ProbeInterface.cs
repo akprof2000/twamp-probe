@@ -3,6 +3,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 using NLog;
+using SPI.Twamp.Probe.Abstractions;
 using SPI.Twamp.Probe.Contracts;
 using SPI.Twamp.Probe.Server;
 using SPI.Twamp.Probe.Environment;
@@ -14,15 +15,16 @@ using System.Net;
 namespace SPI.Twamp.Probe.Controllers
 {
     /// <summary>
-    /// 
+    /// Веб-интерфейс зонда: приём задач и выдача результатов их выполнения.
     /// </summary>
     /// <seealso cref="ControllerBase" />
     [Route("api/[controller]")]
     [ApiController]
-    public class ProbeInterface(Logger logger, Worker storage) : ControllerBase
+    public class ProbeInterface(Logger logger, Worker storage, IResultStore resultStore) : ControllerBase
     {
         private readonly Logger logger = logger;
         private readonly Worker storage = storage;
+        private readonly IResultStore resultStore = resultStore;
 
 
         /// <summary>
@@ -68,14 +70,18 @@ namespace SPI.Twamp.Probe.Controllers
         }
 
         /// <summary>
-        /// Checks the data.
+        /// Возвращает накопленные результаты выполнения задач.
+        /// Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных,
+        /// не блокируя поток пула, и отдаёт их пачкой.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        /// <returns>Массив результатов (возможно пустой при таймауте).</returns>
         [HttpGet("[action]")]
         public async Task<ActionResult<ActionData[]>> CheckData(CancellationToken cancellationToken)
         {
-            logger.Info("Check data execute");
-            return Ok(await storage.GetActionsData(cancellationToken));
+            logger.Info("Запрос результатов зондирования");
+            ActionData[] results = await resultStore.TakeBatchAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            return Ok(results);
         }
     }
 }

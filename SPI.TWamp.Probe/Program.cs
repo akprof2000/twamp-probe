@@ -10,6 +10,8 @@ using NLog;
 using NLog.Extensions.Logging;
 using NLog.Web;
 using spi.twamp.Probe.Environment;
+using SPI.Twamp.Probe.Abstractions;
+using SPI.Twamp.Probe.Runners;
 using SPI.Twamp.Probe.Server;
 using System.Reflection;
 
@@ -52,9 +54,12 @@ try
     logger.Info($"{OperSystem}");
 
 
-    int MaxThreadsCount = Environment.ProcessorCount * builder.Configuration["MaxThreadsCountPerProcessor"].ConvertTo(4);
-    _ = ThreadPool.SetMaxThreads(MaxThreadsCount, MaxThreadsCount);
-    _ = ThreadPool.SetMinThreads(2, 2);
+    // Выполнение зондов и выдача результатов теперь полностью асинхронны и не
+    // удерживают потоки пула, поэтому искусственный верхний лимит потоков убран —
+    // он лишь провоцировал голодание пула при большом числе задач.
+    // Немного поднимаем минимум потоков, чтобы сгладить пики нагрузки на старте.
+    int minThreads = Environment.ProcessorCount * builder.Configuration["MinThreadsCountPerProcessor"].ConvertTo(2);
+    _ = ThreadPool.SetMinThreads(minThreads, minThreads);
 
 
     _ = builder.Services.AddProblemDetails();
@@ -76,8 +81,18 @@ try
                                 .AllowAnyHeader());
     });
     _ = builder.Services.AddSingleton(logger);
+    // Хранилище результатов и исполнитель зондов — синглтоны, общие для всех запросов.
+    _ = builder.Services.AddSingleton<IResultStore, ResultStore>();
+    _ = builder.Services.AddSingleton<IProbeRunner, ProbeRunner>();
+
+    // Диспетчер зондов: пул воркеров ограниченного размера. Регистрируем его хостед-сервисом
+    // ДО Worker, чтобы воркеры уже работали к моменту постановки задач в очередь.
+    _ = builder.Services.AddSingleton<ProbeDispatcher>();
+    _ = builder.Services.AddSingleton<IProbeDispatcher>(provider => provider.GetRequiredService<ProbeDispatcher>());
+    _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<ProbeDispatcher>());
+
     _ = builder.Services.AddSingleton<Worker>();
-    _ = builder.Services.AddHostedService(provider => provider.GetServices<Worker>().First());
+    _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<Worker>());
 
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     _ = builder.Services.AddEndpointsApiExplorer();

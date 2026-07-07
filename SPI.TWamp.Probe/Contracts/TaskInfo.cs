@@ -85,6 +85,15 @@ namespace SPI.Twamp.Probe.Contracts
         /// </value>
         public ulong PauseSec { get; set; } = 1;
         /// <summary>
+        /// Индивидуальный таймаут выполнения одного запуска зонда, в секундах.
+        /// Если процесс не завершится за это время — он принудительно завершается (Kill).
+        /// Значение 0 означает «без ограничения по времени».
+        /// </summary>
+        /// <value>
+        /// Таймаут выполнения в секундах (0 — без ограничения).
+        /// </value>
+        public int TimeoutSec { get; set; } = 0;
+        /// <summary>
         /// Gets or sets the start.
         /// </summary>
         /// <value>
