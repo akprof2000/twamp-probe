@@ -17,7 +17,7 @@ namespace SPI.Twamp.Probe.Runners
     /// </para>
     /// <para>
     /// Предел одновременных запусков задаётся не здесь, а числом воркеров
-    /// <see cref="ProbeDispatcher"/> — исполнитель просто честно выполняет то,
+    /// <see cref="Server.ProbeDispatcher"/> — исполнитель просто честно выполняет то,
     /// что ему передал диспетчер.
     /// </para>
     /// </summary>

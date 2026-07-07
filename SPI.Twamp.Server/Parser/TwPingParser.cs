@@ -6,7 +6,8 @@ namespace SPI.Twamp.Server.Parser
 {
 
     /// <summary>
-    /// 
+    /// Разбор текстового вывода утилиты twping в структурированную статистику
+    /// и формирование CSV-отчёта.
     /// </summary>
     public static partial class TwPingParser
     {
@@ -17,12 +18,12 @@ namespace SPI.Twamp.Server.Parser
         }
 
         /// <summary>
-        /// Parses the specified text.
+        /// Разбирает один блок вывода twping в объект статистики.
         /// </summary>
-        /// <param name="text">The text.</param>
-        /// <param name="error">The error.</param>
-        /// <param name="id">The identifier.</param>
-        /// <returns></returns>
+        /// <param name="text">Текст вывода зонда.</param>
+        /// <param name="error">Текст ошибок зонда (при наличии).</param>
+        /// <param name="id">Идентификатор задачи.</param>
+        /// <returns>Заполненная статистика сеанса.</returns>
         public static TwPingStats Parse(string? text, string? error, Guid? id)
         {
 
@@ -31,7 +32,7 @@ namespace SPI.Twamp.Server.Parser
 
             if (!string.IsNullOrEmpty(text))
             {
-                // from/to
+                // источник/получатель
                 Match ft = RegExHeader().Match(text);
 
                 if (ft.Success)
@@ -51,10 +52,10 @@ namespace SPI.Twamp.Server.Parser
                     }
                 }
 
-                // SID
+                // идентификатор сеанса (SID)
                 stats.Sid = Extract(text, @"SID:\s*([a-fA-F0-9]+)");
 
-                // first / last
+                // время первого/последнего пакета
                 string? firstStr = Extract(text, @"first:\s*([0-9T:\.\-]+)");
                 if (DateTime.TryParse(firstStr, culture, DateTimeStyles.None, out DateTime first))
                 {
@@ -67,7 +68,7 @@ namespace SPI.Twamp.Server.Parser
                     stats.Last = last;
                 }
 
-                // sent / lost / loss%
+                // отправлено / потеряно / процент потерь
                 Match sentLost = RegExSendLoss().Match(text);
                 if (sentLost.Success)
                 {
@@ -87,7 +88,7 @@ namespace SPI.Twamp.Server.Parser
                     }
                 }
 
-                // RTT
+                // круговая задержка (RTT)
                 Match rtt = RegExRtt().Match(text);
                 if (rtt.Success)
                 {
@@ -107,7 +108,7 @@ namespace SPI.Twamp.Server.Parser
                     }
                 }
 
-                // send time
+                // задержка в прямом направлении
                 Match send = RegExSendTime().Match(text);
                 if (send.Success)
                 {
@@ -127,7 +128,7 @@ namespace SPI.Twamp.Server.Parser
                     }
                 }
 
-                // reflect time
+                // задержка в обратном направлении
                 Match reflect = RegExDateTime().Match(text);
                 if (reflect.Success)
                 {
@@ -147,7 +148,7 @@ namespace SPI.Twamp.Server.Parser
                     }
                 }
 
-                // reflector processing
+                // время обработки на отражателе
                 Match proc = RegExReflector().Match(text);
                 if (proc.Success)
                 {
@@ -162,7 +163,7 @@ namespace SPI.Twamp.Server.Parser
                     }
                 }
 
-                // jitter
+                // джиттер
                 string? twoWay = Extract(text, @"two-way jitter = ([\d\.]+)");
                 if (double.TryParse(twoWay, NumberStyles.Any, culture, out double jw))
                 {
@@ -181,7 +182,7 @@ namespace SPI.Twamp.Server.Parser
                     stats.ReflectJitter = jr;
                 }
 
-                // hops
+                // количество переходов (hops)
                 string? sendHops = Extract(text, @"send hops = (\d+)");
                 if (int.TryParse(sendHops, out int sh))
                 {
@@ -204,12 +205,12 @@ namespace SPI.Twamp.Server.Parser
 
 
         /// <summary>
-        /// Parses the many.
+        /// Разбирает вывод, содержащий несколько блоков статистики (по числу сеансов).
         /// </summary>
-        /// <param name="input">The input.</param>
-        /// <param name="error">The error.</param>
-        /// <param name="id">The identifier.</param>
-        /// <returns></returns>
+        /// <param name="input">Полный текст вывода зонда.</param>
+        /// <param name="error">Текст ошибок зонда (при наличии).</param>
+        /// <param name="id">Идентификатор задачи.</param>
+        /// <returns>Список статистик по каждому найденному блоку.</returns>
         public static List<TwPingStats> ParseMany(string? input, string? error, Guid? id)
         {
             List<TwPingStats> list = [];
@@ -233,10 +234,10 @@ namespace SPI.Twamp.Server.Parser
         }
 
         /// <summary>
-        /// CSVs the escape.
+        /// Экранирует значение для CSV (кавычки и разделители).
         /// </summary>
-        /// <param name="value">The value.</param>
-        /// <returns></returns>
+        /// <param name="value">Исходное значение.</param>
+        /// <returns>Значение, безопасное для вставки в CSV.</returns>
         public static string CsvEscape(string? value)
         {
             if (value == null)
@@ -258,11 +259,11 @@ namespace SPI.Twamp.Server.Parser
 
 
         /// <summary>
-        /// Formats the number.
+        /// Форматирует число с заданным десятичным разделителем.
         /// </summary>
-        /// <param name="value">The value.</param>
-        /// <param name="decimalSeparator">The decimal separator.</param>
-        /// <returns></returns>
+        /// <param name="value">Значение.</param>
+        /// <param name="decimalSeparator">Десятичный разделитель.</param>
+        /// <returns>Строковое представление числа (или пустая строка для null).</returns>
         public static string FormatNumber(double? value, char decimalSeparator)
         {
             if (value == null)
@@ -282,12 +283,12 @@ namespace SPI.Twamp.Server.Parser
 
 
         /// <summary>
-        /// Converts to csv.
+        /// Формирует CSV-таблицу из набора статистик (с заголовком).
         /// </summary>
-        /// <param name="stats">The stats.</param>
-        /// <param name="columnSeparator">The column separator.</param>
-        /// <param name="decimalSeparator">The decimal separator.</param>
-        /// <returns></returns>
+        /// <param name="stats">Набор статистик.</param>
+        /// <param name="columnSeparator">Разделитель колонок.</param>
+        /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
+        /// <returns>Готовое содержимое CSV.</returns>
         public static string ToCsv(IEnumerable<TwPingStats> stats, char columnSeparator, char decimalSeparator)
         {
             StringBuilder sb = new();

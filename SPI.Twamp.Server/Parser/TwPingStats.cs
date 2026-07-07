@@ -1,219 +1,132 @@
-﻿namespace SPI.Twamp.Server.Parser
+namespace SPI.Twamp.Server.Parser
 {
     /// <summary>
-    /// 
+    /// Разобранная статистика одного сеанса TWamp/ping.
     /// </summary>
     public class TwPingStats
     {
         /// <summary>
-        /// Gets or sets the identifier.
+        /// Идентификатор задачи, к которой относится статистика.
         /// </summary>
-        /// <value>
-        /// The identifier.
-        /// </value>
-        public Guid? Id{ get; set; }
+        public Guid? Id { get; set; }
         /// <summary>
-        /// Gets or sets the title.
+        /// Название задачи.
         /// </summary>
-        /// <value>
-        /// The title.
-        /// </value>
         public string? Title { get; set; }
         /// <summary>
-        /// Gets or sets from host.
+        /// Хост-источник.
         /// </summary>
-        /// <value>
-        /// From host.
-        /// </value>
         public string? FromHost { get; set; }
         /// <summary>
-        /// Gets or sets from port.
+        /// Порт источника.
         /// </summary>
-        /// <value>
-        /// From port.
-        /// </value>
         public int? FromPort { get; set; }
         /// <summary>
-        /// Converts to host.
+        /// Хост-получатель.
         /// </summary>
-        /// <value>
-        /// To host.
-        /// </value>
         public string? ToHost { get; set; }
         /// <summary>
-        /// Converts to port.
+        /// Порт получателя.
         /// </summary>
-        /// <value>
-        /// To port.
-        /// </value>
         public int? ToPort { get; set; }
 
         /// <summary>
-        /// Gets or sets the sid.
+        /// Идентификатор сеанса (SID).
         /// </summary>
-        /// <value>
-        /// The sid.
-        /// </value>
         public string? Sid { get; set; }
         /// <summary>
-        /// Gets or sets the first.
+        /// Время первого пакета.
         /// </summary>
-        /// <value>
-        /// The first.
-        /// </value>
         public DateTime? First { get; set; }
         /// <summary>
-        /// Gets or sets the last.
+        /// Время последнего пакета.
         /// </summary>
-        /// <value>
-        /// The last.
-        /// </value>
         public DateTime? Last { get; set; }
         /// <summary>
-        /// Gets or sets the sent.
+        /// Отправлено пакетов.
         /// </summary>
-        /// <value>
-        /// The sent.
-        /// </value>
         public int? Sent { get; set; }
         /// <summary>
-        /// Gets or sets the lost.
+        /// Потеряно пакетов.
         /// </summary>
-        /// <value>
-        /// The lost.
-        /// </value>
         public int? Lost { get; set; }
         /// <summary>
-        /// Gets or sets the loss percent.
+        /// Процент потерь.
         /// </summary>
-        /// <value>
-        /// The loss percent.
-        /// </value>
         public double? LossPercent { get; set; }
 
         /// <summary>
-        /// Gets or sets the RTT minimum.
+        /// Минимальный RTT (круговая задержка).
         /// </summary>
-        /// <value>
-        /// The RTT minimum.
-        /// </value>
         public double? RttMin { get; set; }
         /// <summary>
-        /// Gets or sets the RTT median.
+        /// Медианный RTT.
         /// </summary>
-        /// <value>
-        /// The RTT median.
-        /// </value>
         public double? RttMedian { get; set; }
         /// <summary>
-        /// Gets or sets the RTT maximum.
+        /// Максимальный RTT.
         /// </summary>
-        /// <value>
-        /// The RTT maximum.
-        /// </value>
         public double? RttMax { get; set; }
 
         /// <summary>
-        /// Gets or sets the send minimum.
+        /// Минимальная задержка в прямом направлении (отправка).
         /// </summary>
-        /// <value>
-        /// The send minimum.
-        /// </value>
         public double? SendMin { get; set; }
         /// <summary>
-        /// Gets or sets the send median.
+        /// Медианная задержка в прямом направлении.
         /// </summary>
-        /// <value>
-        /// The send median.
-        /// </value>
         public double? SendMedian { get; set; }
         /// <summary>
-        /// Gets or sets the send maximum.
+        /// Максимальная задержка в прямом направлении.
         /// </summary>
-        /// <value>
-        /// The send maximum.
-        /// </value>
         public double? SendMax { get; set; }
 
         /// <summary>
-        /// Gets or sets the reflect minimum.
+        /// Минимальная задержка в обратном направлении (отражение).
         /// </summary>
-        /// <value>
-        /// The reflect minimum.
-        /// </value>
         public double? ReflectMin { get; set; }
         /// <summary>
-        /// Gets or sets the reflect median.
+        /// Медианная задержка в обратном направлении.
         /// </summary>
-        /// <value>
-        /// The reflect median.
-        /// </value>
         public double? ReflectMedian { get; set; }
         /// <summary>
-        /// Gets or sets the reflect maximum.
+        /// Максимальная задержка в обратном направлении.
         /// </summary>
-        /// <value>
-        /// The reflect maximum.
-        /// </value>
         public double? ReflectMax { get; set; }
 
         /// <summary>
-        /// Gets or sets the reflect proc minimum.
+        /// Минимальное время обработки на отражателе.
         /// </summary>
-        /// <value>
-        /// The reflect proc minimum.
-        /// </value>
         public double? ReflectProcMin { get; set; }
         /// <summary>
-        /// Gets or sets the reflect proc maximum.
+        /// Максимальное время обработки на отражателе.
         /// </summary>
-        /// <value>
-        /// The reflect proc maximum.
-        /// </value>
         public double? ReflectProcMax { get; set; }
 
         /// <summary>
-        /// Gets or sets the two way jitter.
+        /// Двусторонний джиттер.
         /// </summary>
-        /// <value>
-        /// The two way jitter.
-        /// </value>
         public double? TwoWayJitter { get; set; }
         /// <summary>
-        /// Gets or sets the send jitter.
+        /// Джиттер в прямом направлении.
         /// </summary>
-        /// <value>
-        /// The send jitter.
-        /// </value>
         public double? SendJitter { get; set; }
         /// <summary>
-        /// Gets or sets the reflect jitter.
+        /// Джиттер в обратном направлении.
         /// </summary>
-        /// <value>
-        /// The reflect jitter.
-        /// </value>
         public double? ReflectJitter { get; set; }
 
         /// <summary>
-        /// Gets or sets the send hops.
+        /// Количество переходов (hops) в прямом направлении.
         /// </summary>
-        /// <value>
-        /// The send hops.
-        /// </value>
         public int? SendHops { get; set; }
         /// <summary>
-        /// Gets or sets the reflect hops.
+        /// Количество переходов (hops) в обратном направлении.
         /// </summary>
-        /// <value>
-        /// The reflect hops.
-        /// </value>
         public int? ReflectHops { get; set; }
         /// <summary>
-        /// Gets or sets the errors.
+        /// Текст ошибок, если разбор не удался.
         /// </summary>
-        /// <value>
-        /// The errors.
-        /// </value>
         public string? Errors { get; set; }
     }
 }

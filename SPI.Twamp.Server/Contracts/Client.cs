@@ -1,29 +1,25 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 using LiteDB;
 
 namespace SPI.Twamp.Server.Contracts
 {
     /// <summary>
-    /// 
+    /// Подтверждённая проба (клиент), которую сервер опрашивает.
+    /// Расширяет идентификационные данные пробы.
     /// </summary>
-    /// <seealso cref="SPI.Twamp.Server.Contracts.Identify" />
-    public class Client: Identify
+    /// <seealso cref="Identify" />
+    public class Client : Identify
     {
         /// <summary>
-        /// Gets or sets the identifier.
+        /// Идентификатор записи в БД.
         /// </summary>
-        /// <value>
-        /// The identifier.
-        /// </value>
         [BsonId]
         public ObjectId? Id { get; set; }
+
         /// <summary>
-        /// Gets or sets the name.
+        /// Отображаемое имя пробы.
         /// </summary>
-        /// <value>
-        /// The name.
-        /// </value>
         public string Name { get; set; } = "New One";
     }
 }

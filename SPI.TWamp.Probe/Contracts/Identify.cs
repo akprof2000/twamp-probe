@@ -1,54 +1,35 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 namespace SPI.Twamp.Probe.Contracts
 {
     /// <summary>
-    /// 
+    /// Идентификационные данные пробы (ответ на CheckIn).
     /// </summary>
     public class Identify
     {
         /// <summary>
-        /// Gets or sets the ip address.
+        /// IP-адрес пробы.
         /// </summary>
-        /// <value>
-        /// The ip address.
-        /// </value>
         public string IPAddress { get; set; } = "0.0.0.0";
         /// <summary>
-        /// Gets or sets the name of the host.
+        /// Имя хоста.
         /// </summary>
-        /// <value>
-        /// The name of the host.
-        /// </value>
         public string HostName { get; set; } = "local";
         /// <summary>
-        /// Gets or sets the mac address.
+        /// MAC-адрес.
         /// </summary>
-        /// <value>
-        /// The mac address.
-        /// </value>
         public string MacAddress { get; set; } = "00:00:00:00:00:00";
         /// <summary>
-        /// Gets or sets the title.
+        /// Название сетевого интерфейса.
         /// </summary>
-        /// <value>
-        /// The title.
-        /// </value>
         public string? Title { get; set; }
         /// <summary>
-        /// Gets or sets the description.
+        /// Описание сетевого интерфейса.
         /// </summary>
-        /// <value>
-        /// The description.
-        /// </value>
         public string? Description { get; set; }
         /// <summary>
-        /// Gets or sets the request information.
+        /// Идентификатор запроса (адрес, по которому обращались к пробе).
         /// </summary>
-        /// <value>
-        /// The request information.
-        /// </value>
         public string RequestInfo { get; set; } = "0.0.0.0";
-
     }
 }

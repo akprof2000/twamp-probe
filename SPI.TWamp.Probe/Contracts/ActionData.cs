@@ -1,60 +1,39 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 namespace SPI.Twamp.Probe.Contracts
 {
     /// <summary>
-    /// 
+    /// Результат одного замера зонда, передаваемый серверу.
     /// </summary>
     public class ActionData
     {
         /// <summary>
-        /// Gets or sets the creation.
+        /// Момент создания результата.
         /// </summary>
-        /// <value>
-        /// The creation.
-        /// </value>
         public DateTime Creation { get; set; } = DateTime.Now;
         /// <summary>
-        /// Gets or sets the identifier.
+        /// Идентификатор задачи, к которой относится результат.
         /// </summary>
-        /// <value>
-        /// The identifier.
-        /// </value>
         public Guid TaskId { get; set; }
         /// <summary>
-        /// Gets or sets the end node.
+        /// Конечный узел (адрес), для которого выполнялся зонд.
         /// </summary>
-        /// <value>
-        /// The end node.
-        /// </value>
         public string EndNode { get; set; } = "0.0.0.0.0";
         /// <summary>
-        /// Gets or sets the ip address.
+        /// IP-адрес, связанный с задачей.
         /// </summary>
-        /// <value>
-        /// The ip address.
-        /// </value>
         public string IPAddress { get; set; } = "0.0.0.0";
         /// <summary>
-        /// Gets or sets the console.
+        /// Идентификатор запроса (адрес сервера-источника задачи).
         /// </summary>
-        /// <value>
-        /// The console.
-        /// </value>
         public string RequestInfo { get; set; } = "0.0.0.0";
         /// <summary>
-        /// Gets or sets the console.
+        /// Стандартный вывод процесса зонда.
         /// </summary>
-        /// <value>
-        /// The console.
-        /// </value>
         public string Console { get; set; } = "";
         /// <summary>
-        /// Gets or sets the error console.
+        /// Вывод ошибок процесса зонда.
         /// </summary>
-        /// <value>
-        /// The error console.
-        /// </value>
         public string ErrorConsole { get; set; } = "";
     }
 }

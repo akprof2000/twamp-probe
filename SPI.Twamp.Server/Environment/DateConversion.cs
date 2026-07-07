@@ -3,15 +3,15 @@
 namespace spi.twamp.server.Environment
 {
     /// <summary>
-    /// 
+    /// Расширения для преобразования дат.
     /// </summary>
     public static class DateConversion
     {
         /// <summary>
-        /// Converts to date only.
+        /// Преобразует дату со временем в дату без времени.
         /// </summary>
-        /// <param name="input">The input.</param>
-        /// <returns></returns>
+        /// <param name="input">Исходная дата со временем.</param>
+        /// <returns>Дата без времени или <c>null</c>, если вход был <c>null</c>.</returns>
         public static DateOnly? ToDateOnly(this DateTime? input)
         {
             return input == null ? null : DateOnly.FromDateTime(input.Value);

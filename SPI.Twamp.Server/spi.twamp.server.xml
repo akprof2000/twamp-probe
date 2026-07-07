@@ -322,358 +322,236 @@
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.ActionData">
             <summary>
-            
+            Результат замера зонда, полученный от пробы и сохранённый в БД.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.Id">
             <summary>
-            Gets or sets the identifier.
+            Идентификатор записи в БД.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.Creation">
             <summary>
-            Gets or sets the creation.
+            Момент создания результата.
             </summary>
-            <value>
-            The creation.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.TaskId">
             <summary>
-            Gets or sets the identifier.
+            Идентификатор задачи, к которой относится результат.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.EndNode">
             <summary>
-            Gets or sets the end node.
+            Конечный узел (адрес), для которого выполнялся зонд.
             </summary>
-            <value>
-            The end node.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.RequestInfo">
             <summary>
-            Gets or sets the request information.
+            Идентификатор запроса (адрес пробы-источника).
             </summary>
-            <value>
-            The request information.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.Console">
             <summary>
-            Gets or sets the console.
+            Стандартный вывод процесса зонда.
             </summary>
-            <value>
-            The console.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.ErrorConsole">
             <summary>
-            Gets or sets the error console.
+            Вывод ошибок процесса зонда.
             </summary>
-            <value>
-            The error console.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.Client">
             <summary>
-            
+            Подтверждённая проба (клиент), которую сервер опрашивает.
+            Расширяет идентификационные данные пробы.
             </summary>
             <seealso cref="T:SPI.Twamp.Server.Contracts.Identify" />
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Client.Id">
             <summary>
-            Gets or sets the identifier.
+            Идентификатор записи в БД.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Client.Name">
             <summary>
-            Gets or sets the name.
+            Отображаемое имя пробы.
             </summary>
-            <value>
-            The name.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.Identify">
             <summary>
-            
+            Идентификационные данные пробы (ответ пробы на CheckIn).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Identify.IPAddress">
             <summary>
-            Gets or sets the ip address.
+            IP-адрес пробы.
             </summary>
-            <value>
-            The ip address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Identify.HostName">
             <summary>
-            Gets or sets the name of the host.
+            Имя хоста.
             </summary>
-            <value>
-            The name of the host.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Identify.MacAddress">
             <summary>
-            Gets or sets the mac address.
+            MAC-адрес.
             </summary>
-            <value>
-            The mac address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Identify.Title">
             <summary>
-            Gets or sets the title.
+            Название сетевого интерфейса.
             </summary>
-            <value>
-            The title.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Identify.Description">
             <summary>
-            Gets or sets the description.
+            Описание сетевого интерфейса.
             </summary>
-            <value>
-            The description.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.Identify.RequestInfo">
             <summary>
-            Gets or sets the request information.
+            Идентификатор запроса (адрес пробы).
             </summary>
-            <value>
-            The request information.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.CsvRow">
             <summary>
-            
+            Строка CSV-файла импорта задач. Соответствует одной задаче зондирования.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.NriId">
             <summary>
-            Gets or sets the nri identifier.
+            Внешний идентификатор (NRI) — не используется логикой, только для справки.
             </summary>
-            <value>
-            The nri identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Name">
             <summary>
-            Gets or sets the name.
+            Имя (метка) задачи из файла.
             </summary>
-            <value>
-            The name.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.HostName">
             <summary>
-            Gets or sets the name of the host.
+            Имя хоста конечного узла.
             </summary>
-            <value>
-            The name of the host.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Ip">
             <summary>
-            Gets or sets the ip.
+            Адрес конечного узла (куда направлен зонд).
             </summary>
-            <value>
-            The ip.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Probe">
             <summary>
-            Gets or sets the proba.
+            Адрес пробы, которая должна выполнять задачу.
             </summary>
-            <value>
-            The proba.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Type">
             <summary>
-            Gets or sets the type.
+            Тип задачи (разовая или по расписанию).
             </summary>
-            <value>
-            The type.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Repeats">
             <summary>
-            Gets or sets the repeat.
+            Количество повторов зонда внутри цикла.
             </summary>
-            <value>
-            The repeat.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Cron">
             <summary>
-            Gets or sets the cron.
+            Cron-выражение расписания.
             </summary>
-            <value>
-            The cron.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Circles">
             <summary>
-            Gets or sets the circles.
+            Количество циклов замера.
             </summary>
-            <value>
-            The circles.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Pause">
             <summary>
-            Gets or sets the pause sec.
+            Пауза между циклами, в секундах.
             </summary>
-            <value>
-            The pause sec.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Timeout">
             <summary>
             Индивидуальный таймаут выполнения зонда, в секундах (0 — без ограничения).
             Колонка необязательна: [Optional] позволяет загружать CSV без этого столбца.
             </summary>
-            <value>
-            Таймаут выполнения в секундах (0 — без ограничения).
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Start">
             <summary>
-            Gets or sets the start.
+            Дата начала действия задачи.
             </summary>
-            <value>
-            The start.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.End">
             <summary>
-            Gets or sets the end.
+            Дата окончания действия задачи.
             </summary>
-            <value>
-            The end.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Mode">
             <summary>
-            Gets or sets the mode.
+            Режим зондирования (ping или TWamp).
             </summary>
-            <value>
-            The mode.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Request">
             <summary>
-            Gets or sets the request.
+            Дополнительные аргументы командной строки зонда.
             </summary>
-            <value>
-            The request.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskInfo">
             <summary>
-            
+            Описание задачи зондирования, хранимое сервером и передаваемое пробе.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.RequestInfo">
             <summary>
-            Gets or sets the ip address.
+            Идентификатор запроса — адрес пробы, которой принадлежит задача.
             </summary>
-            <value>
-            The ip address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Id">
             <summary>
-            Gets or sets the identifier.
+            Уникальный идентификатор задачи.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Title">
             <summary>
-            Gets or sets the title.
+            Человекочитаемое название задачи.
             </summary>
-            <value>
-            The title.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Type">
             <summary>
-            Gets or sets the type.
+            Тип задачи (разовая или по расписанию).
             </summary>
-            <value>
-            The type.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Mode">
             <summary>
-            Gets or sets the mode.
+            Режим зондирования (ping или TWamp).
             </summary>
-            <value>
-            The mode.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.CronExpression">
             <summary>
-            Gets or sets the cron expression.
+            Cron-выражение расписания.
             </summary>
-            <value>
-            The cron expression.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.CronWithSeconds">
             <summary>
-            Gets or sets a value indicating whether [cron with seconds].
+            Учитывать ли секунды в cron-выражении.
             </summary>
-            <value>
-              <c>true</c> if [cron with seconds]; otherwise, <c>false</c>.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.ContinueIfError">
             <summary>
-            Gets or sets a value indicating whether [continue if error].
+            Продолжать ли выполнение при ошибке.
             </summary>
-            <value>
-              <c>true</c> if [continue if error]; otherwise, <c>false</c>.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Repeats">
             <summary>
-            Gets or sets the repeats.
+            Количество повторов зонда внутри одного цикла.
             </summary>
-            <value>
-            The repeats.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Circles">
             <summary>
-            Gets or sets the circles.
+            Количество циклов замера.
             </summary>
-            <value>
-            The circles.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.PauseSec">
             <summary>
-            Gets or sets the pause sec.
+            Пауза между циклами, в секундах.
             </summary>
-            <value>
-            The pause sec.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.TimeoutSec">
             <summary>
@@ -681,86 +559,65 @@
             Значение передаётся пробе: если процесс не завершится за это время,
             проба принудительно завершит его (Kill). Значение 0 — без ограничения.
             </summary>
-            <value>
-            Таймаут выполнения в секундах (0 — без ограничения).
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Start">
             <summary>
-            Gets or sets the start.
+            Дата начала действия задачи.
             </summary>
-            <value>
-            The start.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.End">
             <summary>
-            Gets or sets the end.
+            Дата окончания действия задачи.
             </summary>
-            <value>
-            The end.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Create">
             <summary>
-            Gets or sets the create.
+            Дата создания задачи.
             </summary>
-            <value>
-            The create.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Delete">
             <summary>
-            Gets or sets a value indicating whether this <see cref="T:SPI.Twamp.Server.Contracts.TaskInfo"/> is delete.
+            Признак того, что задача помечена на удаление.
             </summary>
-            <value>
-              <c>true</c> if delete; otherwise, <c>false</c>.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.EndNode">
             <summary>
-            Gets or sets the end node.
+            Список конечных узлов (адресов) через «;» или «,».
             </summary>
-            <value>
-            The end node.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.Parameters">
             <summary>
-            Gets or sets the parameters.
+            Дополнительные параметры командной строки зонда.
             </summary>
-            <value>
-            The parameters.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskMode">
             <summary>
-            
+            Режим зондирования: системный ping или утилита TWamp.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Contracts.TaskMode.WinPing">
             <summary>
-            The windows ping
+            Системный ping (Windows).
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Contracts.TaskMode.TWamp">
             <summary>
-            The twamp
+            Зонд TWamp.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskType">
             <summary>
-            
+            Тип задачи: разовая или по расписанию.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Contracts.TaskType.Repeater">
             <summary>
-            The repeater
+            Разовая задача (выполняется один раз).
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Contracts.TaskType.Scheduler">
             <summary>
-            The scheduler
+            Задача по расписанию (cron).
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Controllers.UserInterface">
@@ -959,50 +816,51 @@
         </member>
         <member name="T:SPI.Twamp.Server.Parser.TwPingParser">
             <summary>
-            
+            Разбор текстового вывода утилиты twping в структурированную статистику
+            и формирование CSV-отчёта.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.Parse(System.String,System.String,System.Nullable{System.Guid})">
             <summary>
-            Parses the specified text.
+            Разбирает один блок вывода twping в объект статистики.
             </summary>
-            <param name="text">The text.</param>
-            <param name="error">The error.</param>
-            <param name="id">The identifier.</param>
-            <returns></returns>
+            <param name="text">Текст вывода зонда.</param>
+            <param name="error">Текст ошибок зонда (при наличии).</param>
+            <param name="id">Идентификатор задачи.</param>
+            <returns>Заполненная статистика сеанса.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.ParseMany(System.String,System.String,System.Nullable{System.Guid})">
             <summary>
-            Parses the many.
+            Разбирает вывод, содержащий несколько блоков статистики (по числу сеансов).
             </summary>
-            <param name="input">The input.</param>
-            <param name="error">The error.</param>
-            <param name="id">The identifier.</param>
-            <returns></returns>
+            <param name="input">Полный текст вывода зонда.</param>
+            <param name="error">Текст ошибок зонда (при наличии).</param>
+            <param name="id">Идентификатор задачи.</param>
+            <returns>Список статистик по каждому найденному блоку.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.CsvEscape(System.String)">
             <summary>
-            CSVs the escape.
+            Экранирует значение для CSV (кавычки и разделители).
             </summary>
-            <param name="value">The value.</param>
-            <returns></returns>
+            <param name="value">Исходное значение.</param>
+            <returns>Значение, безопасное для вставки в CSV.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.FormatNumber(System.Nullable{System.Double},System.Char)">
             <summary>
-            Formats the number.
+            Форматирует число с заданным десятичным разделителем.
             </summary>
-            <param name="value">The value.</param>
-            <param name="decimalSeparator">The decimal separator.</param>
-            <returns></returns>
+            <param name="value">Значение.</param>
+            <param name="decimalSeparator">Десятичный разделитель.</param>
+            <returns>Строковое представление числа (или пустая строка для null).</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.ToCsv(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Parser.TwPingStats},System.Char,System.Char)">
             <summary>
-            Converts to csv.
+            Формирует CSV-таблицу из набора статистик (с заголовком).
             </summary>
-            <param name="stats">The stats.</param>
-            <param name="columnSeparator">The column separator.</param>
-            <param name="decimalSeparator">The decimal separator.</param>
-            <returns></returns>
+            <param name="stats">Набор статистик.</param>
+            <param name="columnSeparator">Разделитель колонок.</param>
+            <param name="decimalSeparator">Десятичный разделитель чисел.</param>
+            <returns>Готовое содержимое CSV.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExHeader">
             <remarks>
@@ -1135,266 +993,180 @@
         </member>
         <member name="T:SPI.Twamp.Server.Parser.TwPingStats">
             <summary>
-            
+            Разобранная статистика одного сеанса TWamp/ping.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Id">
             <summary>
-            Gets or sets the identifier.
+            Идентификатор задачи, к которой относится статистика.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Title">
             <summary>
-            Gets or sets the title.
+            Название задачи.
             </summary>
-            <value>
-            The title.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.FromHost">
             <summary>
-            Gets or sets from host.
+            Хост-источник.
             </summary>
-            <value>
-            From host.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.FromPort">
             <summary>
-            Gets or sets from port.
+            Порт источника.
             </summary>
-            <value>
-            From port.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ToHost">
             <summary>
-            Converts to host.
+            Хост-получатель.
             </summary>
-            <value>
-            To host.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ToPort">
             <summary>
-            Converts to port.
+            Порт получателя.
             </summary>
-            <value>
-            To port.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Sid">
             <summary>
-            Gets or sets the sid.
+            Идентификатор сеанса (SID).
             </summary>
-            <value>
-            The sid.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.First">
             <summary>
-            Gets or sets the first.
+            Время первого пакета.
             </summary>
-            <value>
-            The first.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Last">
             <summary>
-            Gets or sets the last.
+            Время последнего пакета.
             </summary>
-            <value>
-            The last.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Sent">
             <summary>
-            Gets or sets the sent.
+            Отправлено пакетов.
             </summary>
-            <value>
-            The sent.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Lost">
             <summary>
-            Gets or sets the lost.
+            Потеряно пакетов.
             </summary>
-            <value>
-            The lost.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.LossPercent">
             <summary>
-            Gets or sets the loss percent.
+            Процент потерь.
             </summary>
-            <value>
-            The loss percent.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.RttMin">
             <summary>
-            Gets or sets the RTT minimum.
+            Минимальный RTT (круговая задержка).
             </summary>
-            <value>
-            The RTT minimum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.RttMedian">
             <summary>
-            Gets or sets the RTT median.
+            Медианный RTT.
             </summary>
-            <value>
-            The RTT median.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.RttMax">
             <summary>
-            Gets or sets the RTT maximum.
+            Максимальный RTT.
             </summary>
-            <value>
-            The RTT maximum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.SendMin">
             <summary>
-            Gets or sets the send minimum.
+            Минимальная задержка в прямом направлении (отправка).
             </summary>
-            <value>
-            The send minimum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.SendMedian">
             <summary>
-            Gets or sets the send median.
+            Медианная задержка в прямом направлении.
             </summary>
-            <value>
-            The send median.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.SendMax">
             <summary>
-            Gets or sets the send maximum.
+            Максимальная задержка в прямом направлении.
             </summary>
-            <value>
-            The send maximum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectMin">
             <summary>
-            Gets or sets the reflect minimum.
+            Минимальная задержка в обратном направлении (отражение).
             </summary>
-            <value>
-            The reflect minimum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectMedian">
             <summary>
-            Gets or sets the reflect median.
+            Медианная задержка в обратном направлении.
             </summary>
-            <value>
-            The reflect median.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectMax">
             <summary>
-            Gets or sets the reflect maximum.
+            Максимальная задержка в обратном направлении.
             </summary>
-            <value>
-            The reflect maximum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectProcMin">
             <summary>
-            Gets or sets the reflect proc minimum.
+            Минимальное время обработки на отражателе.
             </summary>
-            <value>
-            The reflect proc minimum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectProcMax">
             <summary>
-            Gets or sets the reflect proc maximum.
+            Максимальное время обработки на отражателе.
             </summary>
-            <value>
-            The reflect proc maximum.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.TwoWayJitter">
             <summary>
-            Gets or sets the two way jitter.
+            Двусторонний джиттер.
             </summary>
-            <value>
-            The two way jitter.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.SendJitter">
             <summary>
-            Gets or sets the send jitter.
+            Джиттер в прямом направлении.
             </summary>
-            <value>
-            The send jitter.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectJitter">
             <summary>
-            Gets or sets the reflect jitter.
+            Джиттер в обратном направлении.
             </summary>
-            <value>
-            The reflect jitter.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.SendHops">
             <summary>
-            Gets or sets the send hops.
+            Количество переходов (hops) в прямом направлении.
             </summary>
-            <value>
-            The send hops.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.ReflectHops">
             <summary>
-            Gets or sets the reflect hops.
+            Количество переходов (hops) в обратном направлении.
             </summary>
-            <value>
-            The reflect hops.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Errors">
             <summary>
-            Gets or sets the errors.
+            Текст ошибок, если разбор не удался.
             </summary>
-            <value>
-            The errors.
-            </value>
         </member>
         <member name="T:spi.twamp.server.Environment.DateConversion">
             <summary>
-            
+            Расширения для преобразования дат.
             </summary>
         </member>
         <member name="M:spi.twamp.server.Environment.DateConversion.ToDateOnly(System.Nullable{System.DateTime})">
             <summary>
-            Converts to date only.
+            Преобразует дату со временем в дату без времени.
             </summary>
-            <param name="input">The input.</param>
-            <returns></returns>
+            <param name="input">Исходная дата со временем.</param>
+            <returns>Дата без времени или <c>null</c>, если вход был <c>null</c>.</returns>
         </member>
         <member name="T:spi.twamp.server.Environment.StringConversion">
             <summary>
-            
+            Расширения для безопасного преобразования строк (например, значений конфигурации).
             </summary>
         </member>
         <member name="M:spi.twamp.server.Environment.StringConversion.ConvertTo``1(System.String,``0)">
             <summary>
-            
+            Преобразует строку к типу <typeparamref name="T"/>; при ошибке или null
+            возвращает значение по умолчанию.
             </summary>
-            <typeparam name="T"></typeparam>
-            <param name="value"></param>
-            <param name="def"></param>
-            <returns></returns>
+            <typeparam name="T">Целевой тип.</typeparam>
+            <param name="value">Исходная строка.</param>
+            <param name="def">Значение по умолчанию.</param>
+            <returns>Преобразованное значение или <paramref name="def"/>.</returns>
         </member>
         <member name="T:Program">
             <summary>

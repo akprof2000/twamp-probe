@@ -77,210 +77,138 @@
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.ActionData">
             <summary>
-            
+            Результат одного замера зонда, передаваемый серверу.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Creation">
             <summary>
-            Gets or sets the creation.
+            Момент создания результата.
             </summary>
-            <value>
-            The creation.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.TaskId">
             <summary>
-            Gets or sets the identifier.
+            Идентификатор задачи, к которой относится результат.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.EndNode">
             <summary>
-            Gets or sets the end node.
+            Конечный узел (адрес), для которого выполнялся зонд.
             </summary>
-            <value>
-            The end node.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.IPAddress">
             <summary>
-            Gets or sets the ip address.
+            IP-адрес, связанный с задачей.
             </summary>
-            <value>
-            The ip address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.RequestInfo">
             <summary>
-            Gets or sets the console.
+            Идентификатор запроса (адрес сервера-источника задачи).
             </summary>
-            <value>
-            The console.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Console">
             <summary>
-            Gets or sets the console.
+            Стандартный вывод процесса зонда.
             </summary>
-            <value>
-            The console.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.ErrorConsole">
             <summary>
-            Gets or sets the error console.
+            Вывод ошибок процесса зонда.
             </summary>
-            <value>
-            The error console.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.Identify">
             <summary>
-            
+            Идентификационные данные пробы (ответ на CheckIn).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.IPAddress">
             <summary>
-            Gets or sets the ip address.
+            IP-адрес пробы.
             </summary>
-            <value>
-            The ip address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.HostName">
             <summary>
-            Gets or sets the name of the host.
+            Имя хоста.
             </summary>
-            <value>
-            The name of the host.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.MacAddress">
             <summary>
-            Gets or sets the mac address.
+            MAC-адрес.
             </summary>
-            <value>
-            The mac address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.Title">
             <summary>
-            Gets or sets the title.
+            Название сетевого интерфейса.
             </summary>
-            <value>
-            The title.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.Description">
             <summary>
-            Gets or sets the description.
+            Описание сетевого интерфейса.
             </summary>
-            <value>
-            The description.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.RequestInfo">
             <summary>
-            Gets or sets the request information.
+            Идентификатор запроса (адрес, по которому обращались к пробе).
             </summary>
-            <value>
-            The request information.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.TaskInfo">
             <summary>
-            
+            Описание задачи зондирования, получаемое пробой от сервера.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.IpAddress">
             <summary>
-            Gets or sets the ip address.
+            IP-адрес, связанный с задачей.
             </summary>
-            <value>
-            The ip address.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Id">
             <summary>
-            Gets or sets the identifier.
+            Уникальный идентификатор задачи.
             </summary>
-            <value>
-            The identifier.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Title">
             <summary>
-            Gets or sets the title.
+            Человекочитаемое название задачи.
             </summary>
-            <value>
-            The title.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Type">
             <summary>
-            Gets or sets the type.
+            Тип задачи (разовая или по расписанию).
             </summary>
-            <value>
-            The type.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Mode">
             <summary>
-            Gets or sets the mode.
+            Режим зондирования (ping или TWamp).
             </summary>
-            <value>
-            The mode.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.CronExpression">
             <summary>
-            Gets or sets the cron expression.
+            Cron-выражение расписания.
             </summary>
-            <value>
-            The cron expression.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.CronWithSeconds">
             <summary>
-            Gets or sets a value indicating whether [cron with seconds].
+            Учитывать ли секунды в cron-выражении.
             </summary>
-            <value>
-              <c>true</c> if [cron with seconds]; otherwise, <c>false</c>.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.ContinueIfError">
             <summary>
-            Gets or sets a value indicating whether [continue if error].
+            Продолжать ли выполнение при ошибке.
             </summary>
-            <value>
-              <c>true</c> if [continue if error]; otherwise, <c>false</c>.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Repeats">
             <summary>
-            Gets or sets the repeats.
+            Количество повторов зонда внутри одного цикла.
             </summary>
-            <value>
-            The repeats.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Circles">
             <summary>
-            Gets or sets the circles.
+            Количество циклов замера.
             </summary>
-            <value>
-            The circles.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.PauseSec">
             <summary>
-            Gets or sets the pause sec.
+            Пауза между циклами, в секундах.
             </summary>
-            <value>
-            The pause sec.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.TimeoutSec">
             <summary>
@@ -288,94 +216,70 @@
             Если процесс не завершится за это время — он принудительно завершается (Kill).
             Значение 0 означает «без ограничения по времени».
             </summary>
-            <value>
-            Таймаут выполнения в секундах (0 — без ограничения).
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Start">
             <summary>
-            Gets or sets the start.
+            Дата начала действия задачи.
             </summary>
-            <value>
-            The start.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.End">
             <summary>
-            Gets or sets the end.
+            Дата окончания действия задачи.
             </summary>
-            <value>
-            The end.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Create">
             <summary>
-            Gets or sets the create.
+            Дата создания задачи.
             </summary>
-            <value>
-            The create.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Delete">
             <summary>
-            Gets or sets a value indicating whether this <see cref="T:SPI.Twamp.Probe.Contracts.TaskInfo"/> is delete.
+            Признак того, что задача помечена на удаление.
             </summary>
-            <value>
-              <c>true</c> if delete; otherwise, <c>false</c>.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.EndNode">
             <summary>
-            Gets or sets the end node.
+            Список конечных узлов (адресов) через «;» или «,».
             </summary>
-            <value>
-            The end node.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.Parameters">
             <summary>
-            Gets or sets the parameters.
+            Дополнительные параметры командной строки зонда.
             </summary>
-            <value>
-            The parameters.
-            </value>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.TaskInfo.RequestInfo">
             <summary>
-            Gets or sets the request information.
+            Идентификатор запроса (адрес сервера-источника задачи).
             </summary>
-            <value>
-            The request information.
-            </value>
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.TaskMode">
             <summary>
-            
+            Режим зондирования: системный ping или утилита TWamp.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.WinPing">
             <summary>
-            The windows ping
+            Системный ping (Windows).
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.TWamp">
             <summary>
-            The twamp
+            Зонд TWamp.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.TaskType">
             <summary>
-            
+            Тип задачи: разовая или по расписанию.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Contracts.TaskType.Repeater">
             <summary>
-            The repeater
+            Разовая задача (выполняется один раз).
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Contracts.TaskType.Scheduler">
             <summary>
-            The scheduler
+            Задача по расписанию (cron).
             </summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Controllers.ProbeInterface">
@@ -392,18 +296,16 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckIn(System.String)">
             <summary>
-            Sets the information client.
+            Регистрирует пробу и возвращает её идентификационные данные.
             </summary>
-            <param name="requestInfo">The request information.</param>
-            <returns></returns>
+            <param name="requestInfo">Идентификатор запроса (адрес сервера).</param>
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.SetJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
             <summary>
-            Sets the information client.
+            Принимает от сервера список задач для выполнения пробой.
             </summary>
-            <param name="jobs">The jobs.</param>
-            <param name="cancellationToken">The cancellation token.</param>
-            <returns></returns>
+            <param name="jobs">Массив задач.</param>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
             <summary>
@@ -421,9 +323,10 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Environment.HostFunctions.GetFirstIPAddress">
             <summary>
-            Gets the first ip address.
+            Возвращает первый подходящий IPv4-адрес хоста вместе с именем интерфейса,
+            MAC-адресом и описанием.
             </summary>
-            <returns></returns>
+            <returns>Кортеж: адрес, имя интерфейса, MAC-адрес, описание.</returns>
         </member>
         <member name="T:SPI.Twamp.Probe.Runners.CronExecuter">
             <summary>
@@ -469,7 +372,7 @@
             </para>
             <para>
             Предел одновременных запусков задаётся не здесь, а числом воркеров
-            <see cref="!:ProbeDispatcher"/> — исполнитель просто честно выполняет то,
+            <see cref="T:SPI.Twamp.Probe.Server.ProbeDispatcher"/> — исполнитель просто честно выполняет то,
             что ему передал диспетчер.
             </para>
             </summary>
@@ -483,7 +386,7 @@
             </para>
             <para>
             Предел одновременных запусков задаётся не здесь, а числом воркеров
-            <see cref="!:ProbeDispatcher"/> — исполнитель просто честно выполняет то,
+            <see cref="T:SPI.Twamp.Probe.Server.ProbeDispatcher"/> — исполнитель просто честно выполняет то,
             что ему передал диспетчер.
             </para>
             </summary>
@@ -690,29 +593,30 @@
         </member>
         <member name="T:spi.twamp.Probe.Environment.DateConversion">
             <summary>
-            
+            Расширения для преобразования дат.
             </summary>
         </member>
         <member name="M:spi.twamp.Probe.Environment.DateConversion.ToDateOnly(System.Nullable{System.DateTime})">
             <summary>
-            Converts to date only.
+            Преобразует дату со временем в дату без времени.
             </summary>
-            <param name="input">The input.</param>
-            <returns></returns>
+            <param name="input">Исходная дата со временем.</param>
+            <returns>Дата без времени или <c>null</c>, если вход был <c>null</c>.</returns>
         </member>
         <member name="T:spi.twamp.Probe.Environment.StringConversion">
             <summary>
-            
+            Расширения для безопасного преобразования строк (например, значений конфигурации).
             </summary>
         </member>
         <member name="M:spi.twamp.Probe.Environment.StringConversion.ConvertTo``1(System.String,``0)">
             <summary>
-            
+            Преобразует строку к типу <typeparamref name="T"/>; при ошибке или null
+            возвращает значение по умолчанию.
             </summary>
-            <typeparam name="T"></typeparam>
-            <param name="value"></param>
-            <param name="def"></param>
-            <returns></returns>
+            <typeparam name="T">Целевой тип.</typeparam>
+            <param name="value">Исходная строка.</param>
+            <param name="def">Значение по умолчанию.</param>
+            <returns>Преобразованное значение или <paramref name="def"/>.</returns>
         </member>
         <member name="T:Program">
             <summary>

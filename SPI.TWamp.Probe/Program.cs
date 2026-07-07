@@ -94,11 +94,11 @@ try
     _ = builder.Services.AddSingleton<Worker>();
     _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<Worker>());
 
-    // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+    // Подробнее о настройке Swagger/OpenAPI: https://aka.ms/aspnetcore/swashbuckle
     _ = builder.Services.AddEndpointsApiExplorer();
     _ = builder.Services.AddSwaggerGen(c =>
     {
-        // Set the comments path for the Swagger JSON and UI.
+        // Путь к XML-комментариям для Swagger JSON и UI.
         string xmlFile = "spi.twamp.probe.xml";
         string xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
         c.IncludeXmlComments(xmlPath);

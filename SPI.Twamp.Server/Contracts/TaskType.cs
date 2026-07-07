@@ -1,21 +1,19 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 namespace SPI.Twamp.Server.Contracts
 {
     /// <summary>
-    /// 
+    /// Тип задачи: разовая или по расписанию.
     /// </summary>
     public enum TaskType
     {
         /// <summary>
-        /// The repeater
+        /// Разовая задача (выполняется один раз).
         /// </summary>
         Repeater,
         /// <summary>
-        /// The scheduler
+        /// Задача по расписанию (cron).
         /// </summary>
         Scheduler
     }
-
-
 }

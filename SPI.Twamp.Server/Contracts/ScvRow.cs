@@ -1,123 +1,75 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 using CsvHelper.Configuration.Attributes;
 
 namespace SPI.Twamp.Server.Contracts
 {
     /// <summary>
-    /// 
+    /// Строка CSV-файла импорта задач. Соответствует одной задаче зондирования.
     /// </summary>
     public class CsvRow
     {
         /// <summary>
-        /// Gets or sets the nri identifier.
+        /// Внешний идентификатор (NRI) — не используется логикой, только для справки.
         /// </summary>
-        /// <value>
-        /// The nri identifier.
-        /// </value>
         public ulong? NriId { get; set; }
         /// <summary>
-        /// Gets or sets the name.
+        /// Имя (метка) задачи из файла.
         /// </summary>
-        /// <value>
-        /// The name.
-        /// </value>
-        public string? Name{ get; set; }
+        public string? Name { get; set; }
         /// <summary>
-        /// Gets or sets the name of the host.
+        /// Имя хоста конечного узла.
         /// </summary>
-        /// <value>
-        /// The name of the host.
-        /// </value>
         public string? HostName { get; set; }
         /// <summary>
-        /// Gets or sets the ip.
+        /// Адрес конечного узла (куда направлен зонд).
         /// </summary>
-        /// <value>
-        /// The ip.
-        /// </value>
         public string Ip { get; set; } = "0.0.0.0";
         /// <summary>
-        /// Gets or sets the proba.
+        /// Адрес пробы, которая должна выполнять задачу.
         /// </summary>
-        /// <value>
-        /// The proba.
-        /// </value>
         public string Probe { get; set; } = "0.0.0.0";
         /// <summary>
-        /// Gets or sets the type.
+        /// Тип задачи (разовая или по расписанию).
         /// </summary>
-        /// <value>
-        /// The type.
-        /// </value>
         public TaskType Type { get; set; } = TaskType.Scheduler;
         /// <summary>
-        /// Gets or sets the repeat.
+        /// Количество повторов зонда внутри цикла.
         /// </summary>
-        /// <value>
-        /// The repeat.
-        /// </value>
         public uint Repeats { get; set; } = 1;
         /// <summary>
-        /// Gets or sets the cron.
+        /// Cron-выражение расписания.
         /// </summary>
-        /// <value>
-        /// The cron.
-        /// </value>
         public string Cron { get; set; } = "* * * * *";
         /// <summary>
-        /// Gets or sets the circles.
+        /// Количество циклов замера.
         /// </summary>
-        /// <value>
-        /// The circles.
-        /// </value>
         public uint Circles { get; set; } = 1;
         /// <summary>
-        /// Gets or sets the pause sec.
+        /// Пауза между циклами, в секундах.
         /// </summary>
-        /// <value>
-        /// The pause sec.
-        /// </value>
         public ulong Pause { get; set; } = 1;
         /// <summary>
         /// Индивидуальный таймаут выполнения зонда, в секундах (0 — без ограничения).
         /// Колонка необязательна: [Optional] позволяет загружать CSV без этого столбца.
         /// </summary>
-        /// <value>
-        /// Таймаут выполнения в секундах (0 — без ограничения).
-        /// </value>
         [Optional]
         public int Timeout { get; set; } = 0;
         /// <summary>
-        /// Gets or sets the start.
+        /// Дата начала действия задачи.
         /// </summary>
-        /// <value>
-        /// The start.
-        /// </value>
         public DateTime Start { get; set; }
         /// <summary>
-        /// Gets or sets the end.
+        /// Дата окончания действия задачи.
         /// </summary>
-        /// <value>
-        /// The end.
-        /// </value>
         public DateTime End { get; set; }
-
         /// <summary>
-        /// Gets or sets the mode.
+        /// Режим зондирования (ping или TWamp).
         /// </summary>
-        /// <value>
-        /// The mode.
-        /// </value>
         public TaskMode Mode { get; set; } = TaskMode.TWamp;
         /// <summary>
-        /// Gets or sets the request.
+        /// Дополнительные аргументы командной строки зонда.
         /// </summary>
-        /// <value>
-        /// The request.
-        /// </value>
         public string? Request { get; set; }
-
-
     }
 }

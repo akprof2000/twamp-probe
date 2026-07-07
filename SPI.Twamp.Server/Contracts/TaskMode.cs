@@ -1,18 +1,18 @@
-﻿// Ignore Spelling: SPI Twamp
+// Ignore Spelling: SPI Twamp
 
 namespace SPI.Twamp.Server.Contracts
 {
     /// <summary>
-    /// 
+    /// Режим зондирования: системный ping или утилита TWamp.
     /// </summary>
     public enum TaskMode
     {
         /// <summary>
-        /// The windows ping
+        /// Системный ping (Windows).
         /// </summary>
         WinPing,
         /// <summary>
-        /// The twamp
+        /// Зонд TWamp.
         /// </summary>
         TWamp
     }

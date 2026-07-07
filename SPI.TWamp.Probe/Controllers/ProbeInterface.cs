@@ -10,8 +10,6 @@ using SPI.Twamp.Probe.Environment;
 using System.ComponentModel.DataAnnotations;
 using System.Net;
 
-// For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
-
 namespace SPI.Twamp.Probe.Controllers
 {
     /// <summary>
@@ -28,15 +26,14 @@ namespace SPI.Twamp.Probe.Controllers
 
 
         /// <summary>
-        /// Sets the information client.
+        /// Регистрирует пробу и возвращает её идентификационные данные.
         /// </summary>
-        /// <param name="requestInfo">The request information.</param>
-        /// <returns></returns>
+        /// <param name="requestInfo">Идентификатор запроса (адрес сервера).</param>
         [HttpPost("[action]")]
         public ActionResult<Identify> CheckIn([FromQuery][Required] string requestInfo)
         {
             ArgumentException.ThrowIfNullOrEmpty(requestInfo);
-            logger.Info("Get check In", requestInfo);
+            logger.Info("Получен CheckIn {RequestInfo}", requestInfo);
 
             (string address, string name, string mac, string descr) = HostFunctions.GetFirstIPAddress();
 
@@ -49,21 +46,20 @@ namespace SPI.Twamp.Probe.Controllers
                 Title = name,
                 RequestInfo = requestInfo
             };
-            logger.Info("Check in answer is {@Identify}", res);
+            logger.Info("Ответ CheckIn {@Identify}", res);
 
             return Ok(res);
         }
 
         /// <summary>
-        /// Sets the information client.
+        /// Принимает от сервера список задач для выполнения пробой.
         /// </summary>
-        /// <param name="jobs">The jobs.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns></returns>
+        /// <param name="jobs">Массив задач.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
         [HttpPost("[action]")]
         public async Task<ActionResult> SetJobs([FromBody][Required] TaskInfo[] jobs, CancellationToken cancellationToken)
         {
-            logger.Info("Set jobs {@ArrayTaskInfo}", jobs);
+            logger.Info("Получен список задач {@ArrayTaskInfo}", jobs);
             await storage.PushData(JsonConvert.SerializeObject(jobs), cancellationToken);
 
             return Ok();
