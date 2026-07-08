@@ -240,10 +240,8 @@ namespace SPI.Twamp.Server.Controllers
             using Stream stream = file.OpenReadStream();
             ProvisioningResult result = await _provisioningService.GenerateAsync(stream, cancellationToken);
 
-            foreach (TaskInfo task in result.Tasks)
-            {
-                await _taskService.AddAsync(task, cancellationToken);
-            }
+            // Пакетная заливка: одна запись в БД и один SetJobs на пачку для каждой пробы.
+            await _taskService.AddRangeAsync(result.Tasks, cancellationToken);
 
             return Ok(new
             {

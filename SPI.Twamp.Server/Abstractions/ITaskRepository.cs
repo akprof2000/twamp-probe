@@ -13,6 +13,9 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>Добавляет новую задачу или обновляет существующую (по идентификатору).</summary>
         Task UpsertAsync(TaskInfo task);
 
+        /// <summary>Добавляет или обновляет пачку задач за одну операцию с БД.</summary>
+        Task UpsertRangeAsync(IEnumerable<TaskInfo> tasks);
+
         /// <summary>Возвращает задачу по идентификатору или <c>null</c>, если её нет.</summary>
         Task<TaskInfo?> GetByIdAsync(Guid id);
 

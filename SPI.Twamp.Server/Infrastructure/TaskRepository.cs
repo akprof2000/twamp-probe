@@ -17,6 +17,10 @@ namespace SPI.Twamp.Server.Infrastructure
         public async Task UpsertAsync(TaskInfo task) => _ = await _context.Tasks.UpsertAsync(task);
 
         /// <inheritdoc/>
+        public async Task UpsertRangeAsync(IEnumerable<TaskInfo> tasks) =>
+            _ = await _context.Tasks.UpsertAsync(tasks);
+
+        /// <inheritdoc/>
         public async Task<TaskInfo?> GetByIdAsync(Guid id) =>
             await _context.Tasks.FindOneAsync(x => x.Id == id);
 

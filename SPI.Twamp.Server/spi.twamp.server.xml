@@ -220,6 +220,9 @@
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.UpsertAsync(SPI.Twamp.Server.Contracts.TaskInfo)">
             <summary>Добавляет новую задачу или обновляет существующую (по идентификатору).</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.UpsertRangeAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.TaskInfo})">
+            <summary>Добавляет или обновляет пачку задач за одну операцию с БД.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.GetByIdAsync(System.Guid)">
             <summary>Возвращает задачу по идентификатору или <c>null</c>, если её нет.</summary>
         </member>
@@ -247,6 +250,15 @@
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.AddAsync(SPI.Twamp.Server.Contracts.TaskInfo,System.Threading.CancellationToken)">
             <summary>Сохраняет задачу и отправляет обновлённый список задач её пробе.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.AddRangeAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
+            <summary>
+            Массово сохраняет задачи и рассылает их пробам пакетами: задачи группируются
+            по адресу пробы, и каждой пробе уходит один SetJobs на пачку вместо
+            отдельного HTTP-запроса на каждую задачу.
+            </summary>
+            <param name="tasks">Задачи для сохранения и доставки.</param>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Помечает задачу удалённой и отправляет обновлённый список её пробе.</summary>
@@ -463,7 +475,13 @@
         <member name="M:SPI.Twamp.Server.Application.TaskService.GetByRequestInfoAsync(System.String)">
             <inheritdoc/>
         </member>
+        <member name="F:SPI.Twamp.Server.Application.TaskService.PushBatchSize">
+            <summary>Максимальный размер одной пачки задач, отправляемой пробе за раз.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.AddAsync(SPI.Twamp.Server.Contracts.TaskInfo,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.AddRangeAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
@@ -1150,6 +1168,9 @@
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.UpsertAsync(SPI.Twamp.Server.Contracts.TaskInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.UpsertRangeAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.TaskInfo})">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.GetByIdAsync(System.Guid)">

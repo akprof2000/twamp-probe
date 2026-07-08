@@ -23,6 +23,9 @@ namespace SPI.Twamp.Server.Application
         public Task<IReadOnlyList<TaskInfo>> GetByRequestInfoAsync(string requestInfo) =>
             _tasks.GetByRequestInfoAsync(requestInfo);
 
+        /// <summary>Максимальный размер одной пачки задач, отправляемой пробе за раз.</summary>
+        private const int PushBatchSize = 1000;
+
         /// <inheritdoc/>
         public async Task AddAsync(TaskInfo task, CancellationToken cancellationToken)
         {
@@ -31,6 +34,31 @@ namespace SPI.Twamp.Server.Application
             // Передаём пробе только изменившуюся задачу. Если проба недоступна —
             // ничего страшного: недостающее досошлёт фоновая сверка.
             await TryPushAsync(task.RequestInfo, [task], cancellationToken);
+        }
+
+        /// <inheritdoc/>
+        public async Task AddRangeAsync(IReadOnlyList<TaskInfo> tasks, CancellationToken cancellationToken)
+        {
+            if (tasks.Count == 0)
+            {
+                return;
+            }
+
+            _logger.Info("Массовое сохранение задач: {Count}", tasks.Count);
+            await _tasks.UpsertRangeAsync(tasks);
+
+            // Группируем по пробе и отправляем большими пачками: один HTTP-запрос
+            // на пачку вместо запроса на каждую задачу. Отправка best-effort —
+            // недоставленное досошлёт фоновая сверка.
+            foreach (IGrouping<string, TaskInfo> group in tasks.GroupBy(t => t.RequestInfo))
+            {
+                TaskInfo[] all = [.. group];
+                for (int offset = 0; offset < all.Length; offset += PushBatchSize)
+                {
+                    TaskInfo[] chunk = all[offset..Math.Min(offset + PushBatchSize, all.Length)];
+                    await TryPushAsync(group.Key, chunk, cancellationToken);
+                }
+            }
         }
 
         /// <inheritdoc/>

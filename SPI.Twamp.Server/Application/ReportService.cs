@@ -71,6 +71,7 @@ namespace SPI.Twamp.Server.Application
 
             DateTime now = DateTime.Now;
             List<string> rejected = [];
+            List<TaskInfo> tasks = [];
 
             foreach (CsvRow row in rows)
             {
@@ -84,8 +85,11 @@ namespace SPI.Twamp.Server.Application
                     rejected.Add(task.Title);
                 }
 
-                await _taskService.AddAsync(task, cancellationToken);
+                tasks.Add(task);
             }
+
+            // Пакетная заливка: одна запись в БД и один SetJobs на пачку для каждой пробы.
+            await _taskService.AddRangeAsync(tasks, cancellationToken);
 
             return rejected;
         }

@@ -20,6 +20,15 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>Сохраняет задачу и отправляет обновлённый список задач её пробе.</summary>
         Task AddAsync(TaskInfo task, CancellationToken cancellationToken);
 
+        /// <summary>
+        /// Массово сохраняет задачи и рассылает их пробам пакетами: задачи группируются
+        /// по адресу пробы, и каждой пробе уходит один SetJobs на пачку вместо
+        /// отдельного HTTP-запроса на каждую задачу.
+        /// </summary>
+        /// <param name="tasks">Задачи для сохранения и доставки.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task AddRangeAsync(IReadOnlyList<TaskInfo> tasks, CancellationToken cancellationToken);
+
         /// <summary>Помечает задачу удалённой и отправляет обновлённый список её пробе.</summary>
         Task DeleteAsync(Guid id, CancellationToken cancellationToken);
 
