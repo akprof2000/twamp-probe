@@ -225,9 +225,13 @@ namespace SPI.Twamp.Server.Parser
                     catch { }
                 }
             }
-            else if (!string.IsNullOrEmpty(error))
+
+            // Блоков twping не нашлось (например, вывод ping или прерванный замер),
+            // но есть текст ошибки — фиксируем его отдельной строкой отчёта,
+            // чтобы ответ можно было идентифицировать по строке вызова.
+            if (list.Count == 0 && !string.IsNullOrEmpty(error))
             {
-                list.Add(Parse(input, error, id));
+                list.Add(Parse(null, error, id));
             }
 
             return list;
@@ -293,7 +297,7 @@ namespace SPI.Twamp.Server.Parser
         {
             StringBuilder sb = new();
 
-            _ = sb.AppendLine(string.Join(columnSeparator, ["Title", "Id",
+            _ = sb.AppendLine(string.Join(columnSeparator, ["Title", "Id", "CallLine",
             "FromHost","FromPort","ToHost","ToPort","SID","First","Last","Sent","Lost","LossPercent",
             "RttMin","RttMedian","RttMax","SendMin","SendMedian","SendMax",
             "ReflectMin","ReflectMedian","ReflectMax","ReflectProcMin","ReflectProcMax",
@@ -305,6 +309,7 @@ namespace SPI.Twamp.Server.Parser
                 {
             CsvEscape(s.Title),
             CsvEscape(s.Id?.ToString()),
+            CsvEscape(s.CallLine),
             CsvEscape(s.FromHost),
             CsvEscape(s.FromPort?.ToString()),
             CsvEscape(s.ToHost),

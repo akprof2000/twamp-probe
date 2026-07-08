@@ -180,6 +180,7 @@ namespace SPI.Twamp.Probe.Runners
 
             return new ActionData
             {
+                CallLine = $"{execute} {arguments}", // фактическая команда — для идентификации ответа
                 Console = output,
                 ErrorConsole = error,
                 EndNode = node,

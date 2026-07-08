@@ -105,6 +105,12 @@
             Идентификатор запроса (адрес сервера-источника задачи).
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.CallLine">
+            <summary>
+            Фактическая строка вызова зонда (исполняемый файл и аргументы).
+            Служит для точной идентификации ответа в отчётах.
+            </summary>
+        </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Console">
             <summary>
             Стандартный вывод процесса зонда.

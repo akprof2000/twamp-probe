@@ -41,7 +41,14 @@ namespace SPI.Twamp.Server.Application
             List<TwPingStats> stats = [];
             foreach (ActionData action in data)
             {
-                stats.AddRange(TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId));
+                List<TwPingStats> parsed = TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId);
+                // Каждой строке статистики проставляем фактическую строку вызова —
+                // по ней в отчёте однозначно идентифицируется ответ.
+                foreach (TwPingStats row in parsed)
+                {
+                    row.CallLine = action.CallLine;
+                }
+                stats.AddRange(parsed);
             }
 
             // Подставляем понятные названия задач (с кэшированием).

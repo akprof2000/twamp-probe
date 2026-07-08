@@ -96,6 +96,8 @@ try
     _ = builder.Services.AddSingleton<ITaskService, TaskService>();
     _ = builder.Services.AddSingleton<IClientService, ClientService>();
     _ = builder.Services.AddSingleton<IReportService, ReportService>();
+    _ = builder.Services.AddSingleton<ITemplateRepository, TemplateRepository>();
+    _ = builder.Services.AddSingleton<IProvisioningService, ProvisioningService>();
 
     // --- Фоновый опрос проб: один синглтон, доступный и как IProbePoller, и как хостед-сервис ---
     _ = builder.Services.AddSingleton<ProbePollingService>();

@@ -14,6 +14,10 @@ namespace SPI.Twamp.Server.Parser
         /// </summary>
         public string? Title { get; set; }
         /// <summary>
+        /// Фактическая строка вызова зонда (для идентификации ответа).
+        /// </summary>
+        public string? CallLine { get; set; }
+        /// <summary>
         /// Хост-источник.
         /// </summary>
         public string? FromHost { get; set; }

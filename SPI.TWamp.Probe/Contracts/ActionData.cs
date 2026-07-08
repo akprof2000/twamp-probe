@@ -28,6 +28,11 @@ namespace SPI.Twamp.Probe.Contracts
         /// </summary>
         public string RequestInfo { get; set; } = "0.0.0.0";
         /// <summary>
+        /// Фактическая строка вызова зонда (исполняемый файл и аргументы).
+        /// Служит для точной идентификации ответа в отчётах.
+        /// </summary>
+        public string CallLine { get; set; } = "";
+        /// <summary>
         /// Стандартный вывод процесса зонда.
         /// </summary>
         public string Console { get; set; } = "";

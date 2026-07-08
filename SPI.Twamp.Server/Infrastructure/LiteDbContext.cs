@@ -34,6 +34,9 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <summary>Коллекция результатов зондирования.</summary>
         public ILiteCollectionAsync<ActionData> Actions => _db.GetCollection<ActionData>("actiondata");
 
+        /// <summary>Коллекция шаблонов задач.</summary>
+        public ILiteCollectionAsync<ProbeTemplate> Templates => _db.GetCollection<ProbeTemplate>("templates");
+
         /// <summary>Закрывает подключение к БД.</summary>
         public void Dispose() => _db.Dispose();
     }
