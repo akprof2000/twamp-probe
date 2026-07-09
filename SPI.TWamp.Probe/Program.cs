@@ -102,6 +102,19 @@ try
         string xmlFile = "spi.twamp.probe.xml";
         string xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
         c.IncludeXmlComments(xmlPath);
+
+        // Ключ API в Swagger UI (кнопка Authorize), если аутентификация включена.
+        c.AddSecurityDefinition("ApiKey", new Microsoft.OpenApi.OpenApiSecurityScheme
+        {
+            Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey,
+            In = Microsoft.OpenApi.ParameterLocation.Header,
+            Name = "X-Api-Key",
+            Description = "Ключ API (заголовок X-Api-Key)"
+        });
+        c.AddSecurityRequirement(doc => new Microsoft.OpenApi.OpenApiSecurityRequirement
+        {
+            { new Microsoft.OpenApi.OpenApiSecuritySchemeReference("ApiKey", doc), new List<string>() }
+        });
     });
     _ = builder.Services.AddSwaggerGenNewtonsoftSupport();
 
@@ -122,6 +135,25 @@ try
     _ = builder.Services.AddRouting(options => options.LowercaseUrls = true);
 
     WebApplication app = builder.Build();
+
+    // Аутентификация по общему ключу: включается, когда задан «Auth:ApiKey».
+    // Проба исполняет команды по сети, поэтому в бою ключ обязателен.
+    string? apiKey = builder.Configuration["Auth:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(apiKey))
+    {
+        logger.Info("Включена аутентификация API по ключу (заголовок X-Api-Key)");
+        _ = app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api") &&
+                (!context.Request.Headers.TryGetValue("X-Api-Key", out Microsoft.Extensions.Primitives.StringValues key) || key != apiKey))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsync("Неверный или отсутствующий ключ API");
+                return;
+            }
+            await next();
+        });
+    }
 
     app.UseRouting()
         .UseCors("CorsPolicy")

@@ -31,5 +31,9 @@ namespace SPI.Twamp.Probe.Contracts
         /// Идентификатор запроса (адрес, по которому обращались к пробе).
         /// </summary>
         public string RequestInfo { get; set; } = "0.0.0.0";
+        /// <summary>
+        /// Версия сборки пробы — чтобы сервер видел устаревшие пробы после обновлений.
+        /// </summary>
+        public string Version { get; set; } = "";
     }
 }

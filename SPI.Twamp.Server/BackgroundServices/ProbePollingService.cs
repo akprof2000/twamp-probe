@@ -21,8 +21,8 @@ namespace SPI.Twamp.Server.BackgroundServices
     /// </summary>
     public sealed class ProbePollingService(
         Logger logger, IConfiguration configuration, IClientRepository clients,
-        IProbeClient probe, IActionRepository actions, ITaskService taskService)
-        : IHostedService, IProbePoller, IDisposable
+        IProbeClient probe, IActionRepository actions, IStatRepository stats, ITaskService taskService)
+        : IHostedService, IProbePoller, IProbeStatusProvider, IDisposable
     {
         /// <summary>Максимальная задержка между попытками при ошибках связи, секунд.</summary>
         private const int MaxBackoffSeconds = 900;
@@ -31,6 +31,7 @@ namespace SPI.Twamp.Server.BackgroundServices
         private readonly IClientRepository _clients = clients;
         private readonly IProbeClient _probe = probe;
         private readonly IActionRepository _actions = actions;
+        private readonly IStatRepository _stats = stats;
         private readonly ITaskService _taskService = taskService;
 
         /// <summary>Интервал фоновой сверки задач с пробами, секунд.</summary>
@@ -40,15 +41,23 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Запущенные циклы опроса по адресу пробы — защита от повторного запуска.</summary>
         private readonly ConcurrentDictionary<string, Task> _pollers = new();
 
+        /// <summary>Текущее состояние опроса каждой пробы (для страницы статуса).</summary>
+        private readonly ConcurrentDictionary<string, ProbePollState> _states = new();
+
         /// <summary>Токен жизненного цикла всех фоновых циклов.</summary>
         private readonly CancellationTokenSource _cts = new();
         private bool _disposed;
+
+        /// <inheritdoc/>
+        public IReadOnlyDictionary<string, ProbePollState> GetStates() =>
+            new Dictionary<string, ProbePollState>(_states);
 
         /// <summary>Старт сервиса: индексы, опрос известных проб и цикл сверки задач.</summary>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.Info("Запуск сервиса опроса проб");
             await _actions.EnsureIndexesAsync();
+            await _stats.EnsureIndexesAsync();
 
             IReadOnlyList<Client> known = await _clients.GetAllAsync();
             foreach (Client client in known)
@@ -87,19 +96,31 @@ namespace SPI.Twamp.Server.BackgroundServices
         private async Task PollLoopAsync(string probeUrl, CancellationToken cancellationToken)
         {
             int backoffSeconds = 1;
+            long totalResults = 0;
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    ActionData[] results = await _probe.GetResultsAsync(probeUrl, cancellationToken);
-                    if (results.Length > 0)
+                    ProbeResultBatch batch = await _probe.GetResultsAsync(probeUrl, cancellationToken);
+                    if (batch.Items.Length > 0)
                     {
-                        _logger.Info("Получено {Count} результатов от пробы {ProbeUrl}", results.Length, probeUrl);
-                        await _actions.AddRangeAsync(results);
+                        _logger.Info("Получено {Count} результатов от пробы {ProbeUrl}", batch.Items.Length, probeUrl);
+
+                        // Сохраняем с отбрасыванием дубликатов (повторная доставка после сбоя).
+                        IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
+
+                        // Разбираем статистику сразу при приёме — выгрузка отчёта
+                        // потом читает готовые записи без повторного парсинга.
+                        await StoreStatsAsync(fresh);
+
+                        // Подтверждаем доставку — только теперь проба удалит пачку у себя.
+                        await _probe.ConfirmResultsAsync(probeUrl, batch.BatchId, cancellationToken);
+                        totalResults += fresh.Count;
                     }
 
                     backoffSeconds = 1; // связь есть — возвращаем минимальную задержку
+                    _states[probeUrl] = new ProbePollState(DateTime.Now, null, null, totalResults, 0);
                 }
                 catch (OperationCanceledException)
                 {
@@ -108,6 +129,8 @@ namespace SPI.Twamp.Server.BackgroundServices
                 catch (Exception ex)
                 {
                     _logger.Warn(ex, "Ошибка опроса пробы {ProbeUrl}, повтор через {Delay} c", probeUrl, backoffSeconds);
+                    ProbePollState? prev = _states.TryGetValue(probeUrl, out ProbePollState? p) ? p : null;
+                    _states[probeUrl] = new ProbePollState(prev?.LastSuccess, DateTime.Now, ex.Message, totalResults, backoffSeconds);
                     try
                     {
                         await Task.Delay(TimeSpan.FromSeconds(backoffSeconds), cancellationToken);
@@ -123,6 +146,33 @@ namespace SPI.Twamp.Server.BackgroundServices
             }
 
             _logger.Info("Опрос пробы {ProbeUrl} остановлен", probeUrl);
+        }
+
+        /// <summary>Разбирает принятые результаты в статистику и сохраняет её.</summary>
+        private async Task StoreStatsAsync(IReadOnlyList<ActionData> fresh)
+        {
+            if (fresh.Count == 0)
+            {
+                return;
+            }
+
+            List<StatRecord> records = [];
+            foreach (ActionData action in fresh)
+            {
+                foreach (Parser.TwPingStats parsed in
+                         Parser.TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId))
+                {
+                    records.Add(new StatRecord
+                    {
+                        Creation = action.Creation ?? DateTime.Now,
+                        TaskId = action.TaskId,
+                        CallLine = action.CallLine,
+                        Stats = parsed
+                    });
+                }
+            }
+
+            await _stats.AddRangeAsync(records);
         }
 
         /// <summary>

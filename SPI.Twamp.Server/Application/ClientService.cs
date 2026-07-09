@@ -37,6 +37,17 @@ namespace SPI.Twamp.Server.Application
         {
             _logger.Info("Подтверждение пробы {@Client}", client);
 
+            // Переносим из записи CheckIn данные, которые оператор не заполняет вручную
+            // (версия пробы, MAC-адрес, сведения об интерфейсе).
+            Identify? identify = await _clients.GetIdentifyAsync(client.RequestInfo);
+            if (identify is not null)
+            {
+                client.Version = string.IsNullOrEmpty(client.Version) ? identify.Version : client.Version;
+                client.MacAddress = client.MacAddress is "" or "00:00:00:00:00:00" ? identify.MacAddress : client.MacAddress;
+                client.Title ??= identify.Title;
+                client.Description ??= identify.Description;
+            }
+
             // Проба подтверждена оператором — убираем её из очереди неопознанных.
             await _clients.RemoveIdentifyAsync(client.RequestInfo);
 
@@ -54,14 +65,24 @@ namespace SPI.Twamp.Server.Application
         }
 
         /// <summary>
-        /// Регистрирует пробу как неопознанную, если она ещё не подтверждена
-        /// и не стоит в очереди на подтверждение.
+        /// Регистрирует пробу как неопознанную, если она ещё не подтверждена.
+        /// Для уже подтверждённой пробы обновляет её сведения (версию после обновления,
+        /// MAC-адрес и описание интерфейса).
         /// </summary>
         private async Task RegisterUnidentifiedAsync(Identify identify)
         {
-            if (await _clients.ExistsAsync(identify.RequestInfo))
+            Client? existing = await _clients.GetByRequestInfoAsync(identify.RequestInfo);
+            if (existing is not null)
             {
-                return; // проба уже подтверждена — ничего не делаем
+                // Проба уже подтверждена — актуализируем её данные из свежего CheckIn.
+                existing.Version = identify.Version;
+                existing.MacAddress = identify.MacAddress;
+                existing.IPAddress = identify.IPAddress;
+                existing.HostName = identify.HostName;
+                existing.Title = identify.Title;
+                existing.Description = identify.Description;
+                await _clients.UpdateAsync(existing);
+                return;
             }
 
             if (!await _clients.IdentifyExistsAsync(identify.RequestInfo))

@@ -8,6 +8,12 @@ namespace SPI.Twamp.Probe.Contracts
     public class ActionData
     {
         /// <summary>
+        /// Уникальный идентификатор результата. Присваивается пробой и позволяет
+        /// серверу отбрасывать дубликаты при повторной доставке пачки
+        /// (доставка «минимум один раз» + дедупликация = «ровно один раз»).
+        /// </summary>
+        public Guid ResultId { get; set; } = Guid.NewGuid();
+        /// <summary>
         /// Момент создания результата.
         /// </summary>
         public DateTime Creation { get; set; } = DateTime.Now;

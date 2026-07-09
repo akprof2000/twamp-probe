@@ -32,9 +32,32 @@ namespace SPI.Twamp.Server.Application
         [GeneratedRegex(@"^\s*([^|\s]+)\|IP:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})")]
         private static partial Regex RouterLineRegex();
 
-        /// <summary>Компонент длительности: число + единица (week/day/hour/min/sec, «weak» — опечатка week).</summary>
-        [GeneratedRegex(@"(\d+)\s*(week|weak|day|hour|min|sec)", RegexOptions.IgnoreCase)]
-        private static partial Regex DurationRegex();
+        /// <summary>
+        /// Разбирает строку файла маршрутизаторов: имя устройства и IP из первого поля
+        /// «ИМЯ|IP:адрес». Остальные колонки строки игнорируются.
+        /// </summary>
+        /// <param name="line">Строка файла.</param>
+        /// <param name="name">Имя устройства.</param>
+        /// <param name="ip">IP-адрес (цель зондирования).</param>
+        /// <returns><c>true</c>, если строка распознана.</returns>
+        public static bool TryParseRouterLine(string line, out string name, out string ip)
+        {
+            Match m = RouterLineRegex().Match(line);
+            name = m.Success ? m.Groups[1].Value : "";
+            ip = m.Success ? m.Groups[2].Value : "";
+            return m.Success;
+        }
+
+        /// <summary>
+        /// Детерминированный идентификатор задачи из связки «проба + узел + шаблон + устройство».
+        /// Повторная загрузка того же файла обновляет существующие задачи, а не создаёт дубли.
+        /// </summary>
+        public static Guid DeterministicTaskId(string probe, string ip, string templateName, string deviceName)
+        {
+            byte[] hash = System.Security.Cryptography.MD5.HashData(
+                Encoding.UTF8.GetBytes($"{probe}|{ip}|{templateName}|{deviceName}"));
+            return new Guid(hash);
+        }
 
         /// <inheritdoc/>
         public async Task<int> UploadTemplatesAsync(Stream csv, CancellationToken cancellationToken)
@@ -96,8 +119,7 @@ namespace SPI.Twamp.Server.Application
                         continue;
                     }
 
-                    Match m = RouterLineRegex().Match(line);
-                    if (!m.Success)
+                    if (!TryParseRouterLine(line, out string name, out string ip))
                     {
                         // Строку заголовка пропускаем молча: это либо первая строка без
                         // конструкции «|IP:», либо строка с названием колонки SNODE.
@@ -114,8 +136,6 @@ namespace SPI.Twamp.Server.Application
                     }
 
                     contentSeen = true;
-                    string name = m.Groups[1].Value;
-                    string ip = m.Groups[2].Value;
                     if (seen.Add($"{name}|{ip}"))
                     {
                         routers.Add((name, ip));
@@ -130,8 +150,8 @@ namespace SPI.Twamp.Server.Application
             foreach (ProbeTemplate template in templates)
             {
                 // Start/End шаблона: дата или длительность от момента создания.
-                DateTime start = ResolveMoment(template.Start, createdAt, createdAt, out string? startError);
-                DateTime end = ResolveMoment(template.End, createdAt, createdAt.AddDays(14), out string? endError);
+                DateTime start = TimeSpec.Resolve(template.Start, createdAt, createdAt, out string? startError);
+                DateTime end = TimeSpec.Resolve(template.End, createdAt, createdAt.AddDays(14), out string? endError);
 
                 if (startError is not null || endError is not null)
                 {
@@ -143,6 +163,9 @@ namespace SPI.Twamp.Server.Application
                 {
                     tasks.Add(new TaskInfo
                     {
+                        // Детерминированный Id: повторная загрузка того же файла
+                        // обновляет задачи, а не создаёт дубликаты.
+                        Id = DeterministicTaskId(template.Probe, ip, template.Name, name),
                         // IP включён в имя, чтобы задачи различались даже когда одно
                         // устройство встречается в файле с несколькими адресами.
                         Title = $"{name}-{ip}-{template.Name}",
@@ -210,57 +233,5 @@ namespace SPI.Twamp.Server.Application
             return Encoding.UTF8.GetBytes(sb.ToString());
         }
 
-        /// <summary>
-        /// Разбирает момент времени шаблона: пустое значение — <paramref name="fallback"/>,
-        /// абсолютная дата — как есть, длительность («2 week 3 day 2 hour») — смещение
-        /// от <paramref name="createdAt"/>.
-        /// </summary>
-        private static DateTime ResolveMoment(string? value, DateTime createdAt, DateTime fallback, out string? error)
-        {
-            error = null;
-
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return fallback;
-            }
-
-            string text = value.Trim();
-
-            // Абсолютная дата: сначала форматы «25.12.2026 10:00», затем общий разбор.
-            string[] formats = ["dd.MM.yyyy HH:mm", "dd.MM.yyyy HH:mm:ss", "dd.MM.yyyy"];
-            if (DateTime.TryParseExact(text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime exact))
-            {
-                return exact;
-            }
-            if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsed))
-            {
-                return parsed;
-            }
-
-            // Относительная длительность: «2 week 3 day 2 hour 30 min».
-            MatchCollection parts = DurationRegex().Matches(text);
-            if (parts.Count == 0)
-            {
-                error = $"не удалось разобрать время «{text}» (ожидалась дата или «N week N day N hour»)";
-                return fallback;
-            }
-
-            TimeSpan offset = TimeSpan.Zero;
-            foreach (Match part in parts)
-            {
-                int amount = int.Parse(part.Groups[1].Value);
-                offset += part.Groups[2].Value.ToLowerInvariant() switch
-                {
-                    "week" or "weak" => TimeSpan.FromDays(7 * amount),
-                    "day" => TimeSpan.FromDays(amount),
-                    "hour" => TimeSpan.FromHours(amount),
-                    "min" => TimeSpan.FromMinutes(amount),
-                    "sec" => TimeSpan.FromSeconds(amount),
-                    _ => TimeSpan.Zero
-                };
-            }
-
-            return createdAt + offset;
-        }
     }
 }

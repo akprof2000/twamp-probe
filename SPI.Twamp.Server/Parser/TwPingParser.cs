@@ -287,26 +287,25 @@ namespace SPI.Twamp.Server.Parser
 
 
         /// <summary>
-        /// Формирует CSV-таблицу из набора статистик (с заголовком).
+        /// Возвращает строку заголовка CSV-отчёта.
         /// </summary>
-        /// <param name="stats">Набор статистик.</param>
         /// <param name="columnSeparator">Разделитель колонок.</param>
-        /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
-        /// <returns>Готовое содержимое CSV.</returns>
-        public static string ToCsv(IEnumerable<TwPingStats> stats, char columnSeparator, char decimalSeparator)
-        {
-            StringBuilder sb = new();
-
-            _ = sb.AppendLine(string.Join(columnSeparator, ["Title", "Id", "CallLine",
+        public static string CsvHeader(char columnSeparator) =>
+            string.Join(columnSeparator, ["Title", "Id", "CallLine",
             "FromHost","FromPort","ToHost","ToPort","SID","First","Last","Sent","Lost","LossPercent",
             "RttMin","RttMedian","RttMax","SendMin","SendMedian","SendMax",
             "ReflectMin","ReflectMedian","ReflectMax","ReflectProcMin","ReflectProcMax",
-            "TwoWayJitter","SendJitter","ReflectJitter","SendHops","ReflectHops","Errors"]));
+            "TwoWayJitter","SendJitter","ReflectJitter","SendHops","ReflectHops","Errors"]);
 
-            foreach (var s in stats)
+        /// <summary>
+        /// Формирует одну строку CSV-отчёта из статистики (для потоковой выгрузки).
+        /// </summary>
+        /// <param name="s">Статистика сеанса.</param>
+        /// <param name="columnSeparator">Разделитель колонок.</param>
+        /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
+        public static string ToCsvLine(TwPingStats s, char columnSeparator, char decimalSeparator) =>
+            string.Join(columnSeparator, new[]
             {
-                _ = sb.AppendLine(string.Join(columnSeparator, new[]
-                {
             CsvEscape(s.Title),
             CsvEscape(s.Id?.ToString()),
             CsvEscape(s.CallLine),
@@ -336,7 +335,25 @@ namespace SPI.Twamp.Server.Parser
             CsvEscape(FormatNumber(s.ReflectJitter, decimalSeparator)),
             CsvEscape(s.SendHops?.ToString()),
             CsvEscape(s.ReflectHops?.ToString()),
-            CsvEscape(s.Errors)}));
+            CsvEscape(s.Errors)
+            });
+
+        /// <summary>
+        /// Формирует CSV-таблицу из набора статистик (с заголовком).
+        /// </summary>
+        /// <param name="stats">Набор статистик.</param>
+        /// <param name="columnSeparator">Разделитель колонок.</param>
+        /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
+        /// <returns>Готовое содержимое CSV.</returns>
+        public static string ToCsv(IEnumerable<TwPingStats> stats, char columnSeparator, char decimalSeparator)
+        {
+            StringBuilder sb = new();
+
+            _ = sb.AppendLine(CsvHeader(columnSeparator));
+
+            foreach (TwPingStats s in stats)
+            {
+                _ = sb.AppendLine(ToCsvLine(s, columnSeparator, decimalSeparator));
             }
 
             return sb.ToString();

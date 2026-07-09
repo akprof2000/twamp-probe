@@ -34,6 +34,9 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>Проверяет наличие неопознанной пробы с указанным адресом.</summary>
         Task<bool> IdentifyExistsAsync(string requestInfo);
 
+        /// <summary>Возвращает запись неопознанной пробы по адресу или <c>null</c>.</summary>
+        Task<Identify?> GetIdentifyAsync(string requestInfo);
+
         /// <summary>Добавляет неопознанную пробу в очередь на подтверждение.</summary>
         Task AddIdentifyAsync(Identify identify);
 

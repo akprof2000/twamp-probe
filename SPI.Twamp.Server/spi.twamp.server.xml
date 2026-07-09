@@ -13,10 +13,19 @@
             <summary>Создаёт необходимые индексы коллекции (вызывается при старте).</summary>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IActionRepository.AddRangeAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.ActionData})">
-            <summary>Сохраняет пачку результатов, полученных от пробы.</summary>
+            <summary>
+            Сохраняет пачку результатов, отбрасывая дубликаты по <see cref="P:SPI.Twamp.Server.Contracts.ActionData.ResultId"/>
+            (повторная доставка той же пачки после сбоя подтверждения).
+            </summary>
+            <param name="data">Результаты для сохранения.</param>
+            <returns>Фактически добавленные (новые) записи.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IActionRepository.GetByPeriodAsync(System.DateTime,System.DateTime)">
             <summary>Возвращает результаты за период (по дате создания).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IActionRepository.DeleteOlderAsync(System.DateTime)">
+            <summary>Удаляет результаты старше указанной даты (ретенция).</summary>
+            <returns>Число удалённых записей.</returns>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IClientRepository">
             <summary>
@@ -47,6 +56,9 @@
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.IdentifyExistsAsync(System.String)">
             <summary>Проверяет наличие неопознанной пробы с указанным адресом.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.GetIdentifyAsync(System.String)">
+            <summary>Возвращает запись неопознанной пробы по адресу или <c>null</c>.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.AddIdentifyAsync(SPI.Twamp.Server.Contracts.Identify)">
             <summary>Добавляет неопознанную пробу в очередь на подтверждение.</summary>
@@ -96,8 +108,20 @@
             <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetResultsAsync(System.String,System.Threading.CancellationToken)">
-            <summary>Забирает у пробы накопленные результаты (CheckData, длинный опрос).</summary>
+            <summary>
+            Забирает у пробы пачку результатов (CheckData, длинный опрос).
+            Пачку нужно подтвердить через <see cref="M:SPI.Twamp.Server.Abstractions.IProbeClient.ConfirmResultsAsync(System.String,System.Guid,System.Threading.CancellationToken)"/> после записи в БД.
+            </summary>
             <param name="probeUrl">Базовый адрес пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.ConfirmResultsAsync(System.String,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Подтверждает пробе доставку пачки результатов — только после этого
+            проба удаляет данные у себя.
+            </summary>
+            <param name="probeUrl">Базовый адрес пробы.</param>
+            <param name="batchId">Идентификатор пачки из ответа CheckData.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
@@ -120,6 +144,49 @@
             Повторный запуск для уже опрашиваемой пробы игнорируется.
             </summary>
             <param name="client">Проба, которую нужно начать опрашивать.</param>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.ProbePollState">
+            <summary>
+            Текущее состояние опроса одной пробы.
+            </summary>
+            <param name="LastSuccess">Момент последнего успешного опроса.</param>
+            <param name="LastError">Момент последней ошибки связи.</param>
+            <param name="LastErrorMessage">Текст последней ошибки.</param>
+            <param name="TotalResults">Всего результатов, полученных от пробы с момента старта сервера.</param>
+            <param name="BackoffSeconds">Текущая задержка повторных попыток (0 — связь в порядке).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ProbePollState.#ctor(System.Nullable{System.DateTime},System.Nullable{System.DateTime},System.String,System.Int64,System.Int32)">
+            <summary>
+            Текущее состояние опроса одной пробы.
+            </summary>
+            <param name="LastSuccess">Момент последнего успешного опроса.</param>
+            <param name="LastError">Момент последней ошибки связи.</param>
+            <param name="LastErrorMessage">Текст последней ошибки.</param>
+            <param name="TotalResults">Всего результатов, полученных от пробы с момента старта сервера.</param>
+            <param name="BackoffSeconds">Текущая задержка повторных попыток (0 — связь в порядке).</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.ProbePollState.LastSuccess">
+            <summary>Момент последнего успешного опроса.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.ProbePollState.LastError">
+            <summary>Момент последней ошибки связи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.ProbePollState.LastErrorMessage">
+            <summary>Текст последней ошибки.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.ProbePollState.TotalResults">
+            <summary>Всего результатов, полученных от пробы с момента старта сервера.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.ProbePollState.BackoffSeconds">
+            <summary>Текущая задержка повторных попыток (0 — связь в порядке).</summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IProbeStatusProvider">
+            <summary>
+            Доступ к состоянию фонового опроса проб — для страницы статуса.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeStatusProvider.GetStates">
+            <summary>Возвращает состояние опроса всех проб (ключ — адрес пробы).</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ProvisioningResult">
             <summary>
@@ -190,15 +257,18 @@
             загрузка задач из CSV-файла.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.IReportService.BuildCsvAsync(System.DateTime,System.DateTime,System.Char,System.Char)">
+        <member name="M:SPI.Twamp.Server.Abstractions.IReportService.StreamCsvAsync(System.DateTime,System.DateTime,System.Char,System.Char,System.IO.TextWriter,System.Threading.CancellationToken)">
             <summary>
-            Формирует CSV-отчёт по результатам зондирования за период.
+            Потоково пишет CSV-отчёт по результатам за период в указанный писатель.
+            Данные читаются из БД постранично, поэтому даже очень большой период
+            не загружается в память целиком.
             </summary>
             <param name="from">Начало периода.</param>
             <param name="to">Конец периода.</param>
             <param name="separator">Разделитель полей CSV.</param>
             <param name="decimalSeparator">Десятичный разделитель чисел.</param>
-            <returns>Содержимое файла и его имя.</returns>
+            <param name="writer">Куда писать CSV (тело HTTP-ответа).</param>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IReportService.ImportCsvAsync(System.IO.Stream,System.String,System.String,System.String,System.Threading.CancellationToken)">
             <summary>
@@ -210,6 +280,35 @@
             <param name="dateTimeFormat">Формат дат в файле.</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>Названия задач с некорректной датой окончания (не приняты).</returns>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IStatRepository">
+            <summary>
+            Репозиторий разобранной статистики замеров (парсинг выполняется при приёме
+            результатов, выгрузка читает готовые записи постранично).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IStatRepository.EnsureIndexesAsync">
+            <summary>Создаёт необходимые индексы коллекции (вызывается при старте).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IStatRepository.AddRangeAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.StatRecord})">
+            <summary>Сохраняет пачку записей статистики.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IStatRepository.CountByPeriodAsync(System.DateTime,System.DateTime)">
+            <summary>Возвращает число записей за период.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IStatRepository.GetPageAsync(System.DateTime,System.DateTime,System.Int32,System.Int32)">
+            <summary>
+            Возвращает страницу записей за период (для потоковой выгрузки без
+            загрузки всего периода в память).
+            </summary>
+            <param name="from">Начало периода.</param>
+            <param name="to">Конец периода.</param>
+            <param name="skip">Сколько записей пропустить.</param>
+            <param name="take">Размер страницы.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IStatRepository.DeleteOlderAsync(System.DateTime)">
+            <summary>Удаляет записи старше указанной даты (ретенция).</summary>
+            <returns>Число удалённых записей.</returns>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ITaskRepository">
             <summary>
@@ -234,6 +333,9 @@
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.MarkDeletedByRequestInfoAsync(System.String)">
             <summary>Помечает все задачи указанной пробы как удалённые (Delete = true).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.RemoveAsync(System.Guid)">
+            <summary>Окончательно удаляет задачу из БД (используется фоновой очисткой).</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ITaskService">
             <summary>
@@ -317,8 +419,9 @@
         </member>
         <member name="M:SPI.Twamp.Server.Application.ClientService.RegisterUnidentifiedAsync(SPI.Twamp.Server.Contracts.Identify)">
             <summary>
-            Регистрирует пробу как неопознанную, если она ещё не подтверждена
-            и не стоит в очереди на подтверждение.
+            Регистрирует пробу как неопознанную, если она ещё не подтверждена.
+            Для уже подтверждённой пробы обновляет её сведения (версию после обновления,
+            MAC-адрес и описание интерфейса).
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Application.ProvisioningService">
@@ -367,48 +470,21 @@
             </code>
             </remarks>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.DurationRegex">
-            <remarks>
-            Pattern:<br/>
-            <code>(\\d+)\\s*(week|weak|day|hour|min|sec)</code><br/>
-            Options:<br/>
-            <code>RegexOptions.IgnoreCase</code><br/>
-            Explanation:<br/>
-            <code>
-            ○ 1st capture group.<br/>
-                ○ Match a Unicode digit atomically at least once.<br/>
-            ○ Match a whitespace character atomically any number of times.<br/>
-            ○ 2nd capture group.<br/>
-                ○ Match with 5 alternative expressions, atomically.<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Ww].<br/>
-                        ○ Match with 2 alternative expressions, atomically.<br/>
-                            ○ Match a sequence of expressions.<br/>
-                                ○ Match a character in the set [Ee] exactly 2 times.<br/>
-                                ○ Match a character in the set [Kk\u212A].<br/>
-                            ○ Match a sequence of expressions.<br/>
-                                ○ Match a character in the set [Ee].<br/>
-                                ○ Match a character in the set [Aa].<br/>
-                                ○ Match a character in the set [Kk\u212A].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Dd].<br/>
-                        ○ Match a character in the set [Aa].<br/>
-                        ○ Match a character in the set [Yy].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Hh].<br/>
-                        ○ Match a character in the set [Oo].<br/>
-                        ○ Match a character in the set [Uu].<br/>
-                        ○ Match a character in the set [Rr].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Mm].<br/>
-                        ○ Match a character in the set [Ii].<br/>
-                        ○ Match a character in the set [Nn].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Ss].<br/>
-                        ○ Match a character in the set [Ee].<br/>
-                        ○ Match a character in the set [Cc].<br/>
-            </code>
-            </remarks>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.TryParseRouterLine(System.String,System.String@,System.String@)">
+            <summary>
+            Разбирает строку файла маршрутизаторов: имя устройства и IP из первого поля
+            «ИМЯ|IP:адрес». Остальные колонки строки игнорируются.
+            </summary>
+            <param name="line">Строка файла.</param>
+            <param name="name">Имя устройства.</param>
+            <param name="ip">IP-адрес (цель зондирования).</param>
+            <returns><c>true</c>, если строка распознана.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.DeterministicTaskId(System.String,System.String,System.String,System.String)">
+            <summary>
+            Детерминированный идентификатор задачи из связки «проба + узел + шаблон + устройство».
+            Повторная загрузка того же файла обновляет существующие задачи, а не создаёт дубли.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.UploadTemplatesAsync(System.IO.Stream,System.Threading.CancellationToken)">
             <inheritdoc/>
@@ -422,27 +498,25 @@
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.BuildCsv(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo})">
             <inheritdoc/>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.ResolveMoment(System.String,System.DateTime,System.DateTime,System.String@)">
-            <summary>
-            Разбирает момент времени шаблона: пустое значение — <paramref name="fallback"/>,
-            абсолютная дата — как есть, длительность («2 week 3 day 2 hour») — смещение
-            от <paramref name="createdAt"/>.
-            </summary>
-        </member>
         <member name="T:SPI.Twamp.Server.Application.ReportService">
             <summary>
-            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IReportService"/>: выгрузка результатов в CSV и импорт задач из CSV.
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IReportService"/>: потоковая выгрузка результатов в CSV
+            и импорт задач из CSV.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ReportService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.ITaskRepository,SPI.Twamp.Server.Abstractions.ITaskService,Microsoft.Extensions.Caching.Memory.IMemoryCache)">
+        <member name="M:SPI.Twamp.Server.Application.ReportService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskRepository,SPI.Twamp.Server.Abstractions.ITaskService,Microsoft.Extensions.Caching.Memory.IMemoryCache)">
             <summary>
-            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IReportService"/>: выгрузка результатов в CSV и импорт задач из CSV.
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IReportService"/>: потоковая выгрузка результатов в CSV
+            и импорт задач из CSV.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Application.ReportService.TitleCacheDuration">
             <summary>Срок хранения названия задачи в кэше.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ReportService.BuildCsvAsync(System.DateTime,System.DateTime,System.Char,System.Char)">
+        <member name="F:SPI.Twamp.Server.Application.ReportService.ExportPageSize">
+            <summary>Размер страницы при потоковом чтении статистики из БД.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ReportService.StreamCsvAsync(System.DateTime,System.DateTime,System.Char,System.Char,System.IO.TextWriter,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ReportService.ImportCsvAsync(System.IO.Stream,System.String,System.String,System.String,System.Threading.CancellationToken)">
@@ -496,6 +570,110 @@
         <member name="M:SPI.Twamp.Server.Application.TaskService.TryPushAsync(System.String,System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
             <summary>Пытается передать пробе изменения; при недоступности пробы только логирует.</summary>
         </member>
+        <member name="T:SPI.Twamp.Server.Application.TimeSpec">
+            <summary>
+            Разбор моментов времени из шаблонов задач: абсолютная дата либо относительная
+            длительность от опорного момента («2 week 3 day 2 hour», поддерживаются
+            week/day/hour/min/sec и опечатка «weak»).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.DurationRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>(\\d+)\\s*(week|weak|day|hour|min|sec)</code><br/>
+            Options:<br/>
+            <code>RegexOptions.IgnoreCase</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ 1st capture group.<br/>
+                ○ Match a Unicode digit atomically at least once.<br/>
+            ○ Match a whitespace character atomically any number of times.<br/>
+            ○ 2nd capture group.<br/>
+                ○ Match with 5 alternative expressions, atomically.<br/>
+                    ○ Match a sequence of expressions.<br/>
+                        ○ Match a character in the set [Ww].<br/>
+                        ○ Match with 2 alternative expressions, atomically.<br/>
+                            ○ Match a sequence of expressions.<br/>
+                                ○ Match a character in the set [Ee] exactly 2 times.<br/>
+                                ○ Match a character in the set [Kk\u212A].<br/>
+                            ○ Match a sequence of expressions.<br/>
+                                ○ Match a character in the set [Ee].<br/>
+                                ○ Match a character in the set [Aa].<br/>
+                                ○ Match a character in the set [Kk\u212A].<br/>
+                    ○ Match a sequence of expressions.<br/>
+                        ○ Match a character in the set [Dd].<br/>
+                        ○ Match a character in the set [Aa].<br/>
+                        ○ Match a character in the set [Yy].<br/>
+                    ○ Match a sequence of expressions.<br/>
+                        ○ Match a character in the set [Hh].<br/>
+                        ○ Match a character in the set [Oo].<br/>
+                        ○ Match a character in the set [Uu].<br/>
+                        ○ Match a character in the set [Rr].<br/>
+                    ○ Match a sequence of expressions.<br/>
+                        ○ Match a character in the set [Mm].<br/>
+                        ○ Match a character in the set [Ii].<br/>
+                        ○ Match a character in the set [Nn].<br/>
+                    ○ Match a sequence of expressions.<br/>
+                        ○ Match a character in the set [Ss].<br/>
+                        ○ Match a character in the set [Ee].<br/>
+                        ○ Match a character in the set [Cc].<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.Resolve(System.String,System.DateTime,System.DateTime,System.String@)">
+            <summary>
+            Разбирает значение времени: пустое — <paramref name="fallback"/>, дата — как есть,
+            длительность — смещение от <paramref name="origin"/>.
+            Возвращаемое значение имеет Kind=Local, чтобы при передаче пробе в другом часовом
+            поясе JSON содержал смещение и время корректно пересчиталось.
+            </summary>
+            <param name="value">Строка из шаблона (дата, длительность или пусто).</param>
+            <param name="origin">Опорный момент для относительной длительности.</param>
+            <param name="fallback">Значение по умолчанию для пустой строки.</param>
+            <param name="error">Текст ошибки разбора или <c>null</c>.</param>
+        </member>
+        <member name="T:SPI.Twamp.Server.BackgroundServices.MaintenanceService">
+            <summary>
+            Фоновая очистка БД (ретенция), чтобы база не росла бесконечно:
+            <list type="bullet">
+            <item>сырые результаты (actiondata) старше «Retention:RawDays» удаляются;</item>
+            <item>разобранная статистика (stats) старше «Retention:StatsDays» удаляется;</item>
+            <item>задачи, помеченные удалёнными более «Retention:DeletedTaskDays» назад,
+            вычищаются окончательно (пробы к этому моменту уже синхронизированы,
+            а осиротевшие копии на пробах уберёт фоновая сверка).</item>
+            </list>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskRepository)">
+            <summary>
+            Фоновая очистка БД (ретенция), чтобы база не росла бесконечно:
+            <list type="bullet">
+            <item>сырые результаты (actiondata) старше «Retention:RawDays» удаляются;</item>
+            <item>разобранная статистика (stats) старше «Retention:StatsDays» удаляется;</item>
+            <item>задачи, помеченные удалёнными более «Retention:DeletedTaskDays» назад,
+            вычищаются окончательно (пробы к этому моменту уже синхронизированы,
+            а осиротевшие копии на пробах уберёт фоновая сверка).</item>
+            </list>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._intervalMinutes">
+            <summary>Интервал между проходами очистки, минут.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._rawDays">
+            <summary>Срок хранения сырых результатов, дней.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._statsDays">
+            <summary>Срок хранения разобранной статистики, дней.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._deletedTaskDays">
+            <summary>Через сколько дней окончательно вычищать удалённые задачи.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.ExecuteAsync(System.Threading.CancellationToken)">
+            <summary>Периодический цикл очистки.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.RunOnceAsync">
+            <summary>Один проход очистки всех коллекций.</summary>
+        </member>
         <member name="T:SPI.Twamp.Server.BackgroundServices.ProbePollingService">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
@@ -509,7 +687,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.ITaskService)">
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskService)">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
             цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД, а также
@@ -531,8 +709,14 @@
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._pollers">
             <summary>Запущенные циклы опроса по адресу пробы — защита от повторного запуска.</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._states">
+            <summary>Текущее состояние опроса каждой пробы (для страницы статуса).</summary>
+        </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._cts">
             <summary>Токен жизненного цикла всех фоновых циклов.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.GetStates">
+            <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartAsync(System.Threading.CancellationToken)">
             <summary>Старт сервиса: индексы, опрос известных проб и цикл сверки задач.</summary>
@@ -545,6 +729,9 @@
             Бесконечный цикл опроса одной пробы: запрашивает результаты и сохраняет их.
             При ошибках связи ждёт с нарастающей задержкой (backoff), при успехе — сбрасывает её.
             </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StoreStatsAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ActionData})">
+            <summary>Разбирает принятые результаты в статистику и сохраняет её.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ReconcileLoopAsync(System.Threading.CancellationToken)">
             <summary>
@@ -569,6 +756,12 @@
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.Id">
             <summary>
             Идентификатор записи в БД.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ActionData.ResultId">
+            <summary>
+            Уникальный идентификатор результата, присвоенный пробой.
+            По нему отбрасываются дубликаты при повторной доставке пачки.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.Creation">
@@ -657,6 +850,28 @@
         <member name="P:SPI.Twamp.Server.Contracts.Identify.RequestInfo">
             <summary>
             Идентификатор запроса (адрес пробы).
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.Identify.Version">
+            <summary>
+            Версия сборки пробы (для контроля устаревших проб после обновлений).
+            </summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Contracts.ProbeResultBatch">
+            <summary>
+            Пачка результатов, полученная от пробы (ответ CheckData).
+            Требует подтверждения (ConfirmData) после успешной записи в БД —
+            до подтверждения проба хранит и повторно выдаёт эту пачку.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ProbeResultBatch.BatchId">
+            <summary>
+            Идентификатор пачки для подтверждения. <see cref="F:System.Guid.Empty"/> — пачка пуста.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ProbeResultBatch.Items">
+            <summary>
+            Результаты замеров в пачке.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.ProbeTemplate">
@@ -821,6 +1036,40 @@
             Дополнительные аргументы командной строки зонда.
             </summary>
         </member>
+        <member name="T:SPI.Twamp.Server.Contracts.StatRecord">
+            <summary>
+            Разобранная статистика замера, сохранённая в БД при приёме результата.
+            <para>
+            Парсинг сырого вывода зонда выполняется один раз при поступлении данных,
+            поэтому выгрузка отчёта читает готовые записи и не разбирает текст повторно.
+            </para>
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.StatRecord.Id">
+            <summary>
+            Идентификатор записи в БД.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.StatRecord.Creation">
+            <summary>
+            Момент создания исходного результата (для фильтра по периоду).
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.StatRecord.TaskId">
+            <summary>
+            Идентификатор задачи.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.StatRecord.CallLine">
+            <summary>
+            Фактическая строка вызова зонда (для идентификации ответа).
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.StatRecord.Stats">
+            <summary>
+            Разобранная статистика сеанса.
+            </summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskInfo">
             <summary>
             Описание задачи зондирования, хранимое сервером и передаваемое пробе.
@@ -908,6 +1157,12 @@
             Признак того, что задача помечена на удаление.
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.DeletedAt">
+            <summary>
+            Момент пометки задачи на удаление. Используется фоновой очисткой:
+            давно удалённые задачи окончательно вычищаются из БД.
+            </summary>
+        </member>
         <member name="P:SPI.Twamp.Server.Contracts.TaskInfo.EndNode">
             <summary>
             Список конечных узлов (адресов) через «;» или «,».
@@ -955,7 +1210,7 @@
             </summary>
             <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider)">
             <summary>
             Веб-интерфейс оператора: управление задачами, пробами и отчётами.
             Контроллер тонкий — вся логика вынесена в прикладные сервисы.
@@ -1000,12 +1255,22 @@
             <param name="client">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DownloadFile(System.Nullable{System.DateOnly},System.Nullable{System.DateOnly},System.Char,System.Char)">
-            <summary>Выгружает результаты зондирования за период в CSV-файл.</summary>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DownloadFile(System.Nullable{System.DateOnly},System.Nullable{System.DateOnly},System.Char,System.Char,System.Threading.CancellationToken)">
+            <summary>
+            Выгружает результаты зондирования за период в CSV-файл потоково:
+            данные пишутся в ответ постранично, большой период не загружается в память.
+            </summary>
             <param name="from">Начало периода (по умолчанию — 14 дней назад).</param>
             <param name="to">Конец периода (по умолчанию — сейчас).</param>
             <param name="separator">Разделитель полей.</param>
             <param name="decimalSeparator">Десятичный разделитель.</param>
+            <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeStatus">
+            <summary>
+            Возвращает состояние всех проб: связь (последний успешный опрос, ошибки,
+            backoff), версию пробы и число её задач — для страницы мониторинга.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadCsv(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken,System.String,System.String)">
             <summary>Загружает задачи из CSV-файла.</summary>
@@ -1068,6 +1333,9 @@
         <member name="M:SPI.Twamp.Server.Infrastructure.ActionRepository.GetByPeriodAsync(System.DateTime,System.DateTime)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ActionRepository.DeleteOlderAsync(System.DateTime)">
+            <inheritdoc/>
+        </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.ClientRepository">
             <summary>
             Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IClientRepository"/> поверх LiteDB (коллекции clients и identify).
@@ -1097,6 +1365,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.IdentifyExistsAsync(System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.GetIdentifyAsync(System.String)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.AddIdentifyAsync(SPI.Twamp.Server.Contracts.Identify)">
@@ -1130,20 +1401,29 @@
         <member name="P:SPI.Twamp.Server.Infrastructure.LiteDbContext.Templates">
             <summary>Коллекция шаблонов задач.</summary>
         </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.LiteDbContext.Stats">
+            <summary>Коллекция разобранной статистики замеров.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.LiteDbContext.Dispose">
             <summary>Закрывает подключение к БД.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.ProbeClient">
             <summary>
             Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IProbeClient"/> на основе Flurl.
-            Все адреса эндпоинтов пробы и таймауты собраны здесь.
+            Все адреса эндпоинтов пробы, таймауты и аутентификация собраны здесь.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Infrastructure.ProbeClient._timeoutSeconds">
             <summary>Таймаут HTTP-запросов к пробе, секунд (в т. ч. длинный опрос CheckData).</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ProbeClient._apiKey">
+            <summary>Общий ключ API (заголовок X-Api-Key); пустой — аутентификация выключена.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.#ctor(Microsoft.Extensions.Configuration.IConfiguration)">
-            <summary>Считывает таймаут из конфигурации («Probe:HttpTimeoutSec», по умолчанию 60 с).</summary>
+            <summary>Считывает таймаут («Probe:HttpTimeoutSec») и ключ API («Auth:ApiKey») из конфигурации.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.Request(System.String,System.String)">
+            <summary>Формирует запрос к пробе с таймаутом и ключом API (если настроен).</summary>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.CheckInAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
@@ -1154,7 +1434,35 @@
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetResultsAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.ConfirmResultsAsync(System.String,System.Guid,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.StatRepository">
+            <summary>
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IStatRepository"/> поверх LiteDB (коллекция stats).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.StatRepository.#ctor(SPI.Twamp.Server.Infrastructure.LiteDbContext)">
+            <summary>
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IStatRepository"/> поверх LiteDB (коллекция stats).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.StatRepository.EnsureIndexesAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.StatRepository.AddRangeAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.StatRecord})">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.StatRepository.CountByPeriodAsync(System.DateTime,System.DateTime)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.StatRepository.GetPageAsync(System.DateTime,System.DateTime,System.Int32,System.Int32)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.StatRepository.DeleteOlderAsync(System.DateTime)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.TaskRepository">
@@ -1183,6 +1491,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.MarkDeletedByRequestInfoAsync(System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.RemoveAsync(System.Guid)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.TemplateRepository">
@@ -1239,6 +1550,20 @@
             <param name="value">Значение.</param>
             <param name="decimalSeparator">Десятичный разделитель.</param>
             <returns>Строковое представление числа (или пустая строка для null).</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Parser.TwPingParser.CsvHeader(System.Char)">
+            <summary>
+            Возвращает строку заголовка CSV-отчёта.
+            </summary>
+            <param name="columnSeparator">Разделитель колонок.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Parser.TwPingParser.ToCsvLine(SPI.Twamp.Server.Parser.TwPingStats,System.Char,System.Char)">
+            <summary>
+            Формирует одну строку CSV-отчёта из статистики (для потоковой выгрузки).
+            </summary>
+            <param name="s">Статистика сеанса.</param>
+            <param name="columnSeparator">Разделитель колонок.</param>
+            <param name="decimalSeparator">Десятичный разделитель чисел.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.ToCsv(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Parser.TwPingStats},System.Char,System.Char)">
             <summary>

@@ -45,10 +45,10 @@
             <summary>
             Потокобезопасное хранилище результатов зондирования.
             <para>
-            Отвечает за накопление результатов от множества параллельных задач
-            и их асинхронную выдачу веб-интерфейсу через «длинный опрос» (long polling)
-            без блокировки потоков пула — это ключ к устойчивой работе при большом
-            числе одновременных задач.
+            Накапливает результаты от параллельных задач и выдаёт их серверу пачками
+            с подтверждением доставки: пачка удаляется только после <see cref="M:SPI.Twamp.Probe.Abstractions.IResultStore.ConfirmAsync(System.Guid)"/>,
+            а до подтверждения повторно выдаётся при следующем опросе. Ожидание новых
+            данных асинхронное и не удерживает поток пула.
             </para>
             </summary>
         </member>
@@ -61,12 +61,19 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <summary>
-            Асинхронно ожидает появления результатов и возвращает накопленную пачку.
-            Ожидание не удерживает поток пула и прекращается по таймауту или отмене.
+            Асинхронно ожидает появления результатов и возвращает пачку на доставку.
+            Если есть неподтверждённая пачка — возвращает её повторно.
             </summary>
             <param name="timeout">Максимальное время ожидания новых результатов.</param>
             <param name="cancellationToken">Токен отмены (например, разрыв соединения клиентом).</param>
-            <returns>Массив накопленных результатов (возможно пустой при таймауте).</returns>
+            <returns>Пачка результатов (пустая с <see cref="F:System.Guid.Empty"/> при таймауте).</returns>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.ConfirmAsync(System.Guid)">
+            <summary>
+            Подтверждает доставку пачки: результаты записаны сервером и могут быть удалены.
+            </summary>
+            <param name="batchId">Идентификатор подтверждаемой пачки.</param>
+            <returns><c>true</c>, если пачка найдена и удалена.</returns>
         </member>
         <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.LoadAsync(System.Threading.CancellationToken)">
             <summary>
@@ -78,6 +85,13 @@
         <member name="T:SPI.Twamp.Probe.Contracts.ActionData">
             <summary>
             Результат одного замера зонда, передаваемый серверу.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.ResultId">
+            <summary>
+            Уникальный идентификатор результата. Присваивается пробой и позволяет
+            серверу отбрасывать дубликаты при повторной доставке пачки
+            (доставка «минимум один раз» + дедупликация = «ровно один раз»).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Creation">
@@ -154,6 +168,32 @@
         <member name="P:SPI.Twamp.Probe.Contracts.Identify.RequestInfo">
             <summary>
             Идентификатор запроса (адрес, по которому обращались к пробе).
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.Identify.Version">
+            <summary>
+            Версия сборки пробы — чтобы сервер видел устаревшие пробы после обновлений.
+            </summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Contracts.ResultBatch">
+            <summary>
+            Пачка результатов, выдаваемая серверу через CheckData.
+            <para>
+            Пачка считается доставленной только после подтверждения сервером
+            (ConfirmData с тем же <see cref="P:SPI.Twamp.Probe.Contracts.ResultBatch.BatchId"/>). До подтверждения проба
+            хранит пачку и повторно выдаёт её при следующем опросе — так результаты
+            не теряются, если сервер упал между получением и записью в БД.
+            </para>
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ResultBatch.BatchId">
+            <summary>
+            Идентификатор пачки для подтверждения. <see cref="F:System.Guid.Empty"/> — пачка пуста.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ResultBatch.Items">
+            <summary>
+            Результаты замеров в пачке.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.TaskInfo">
@@ -322,12 +362,21 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
             <summary>
-            Возвращает накопленные результаты выполнения задач.
-            Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных,
-            не блокируя поток пула, и отдаёт их пачкой.
+            Возвращает накопленные результаты пачкой с идентификатором для подтверждения.
+            Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных, не блокируя
+            поток пула. Пачка хранится пробой до подтверждения через ConfirmData —
+            при потере связи она будет выдана повторно.
             </summary>
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
-            <returns>Массив результатов (возможно пустой при таймауте).</returns>
+            <returns>Пачка результатов (пустая при таймауте).</returns>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.ConfirmData(System.Guid)">
+            <summary>
+            Подтверждает доставку пачки результатов: сервер записал её в БД,
+            и проба может удалить данные.
+            </summary>
+            <param name="batchId">Идентификатор пачки из ответа CheckData.</param>
+            <returns><c>true</c>, если пачка найдена и удалена.</returns>
         </member>
         <member name="T:SPI.Twamp.Probe.Environment.HostFunctions">
             <summary>
@@ -464,27 +513,18 @@
         </member>
         <member name="T:SPI.Twamp.Probe.Server.ResultStore">
             <summary>
-            Реализация хранилища результатов на основе неблокирующей очереди и
-            «сигнального» канала.
+            Реализация хранилища результатов с подтверждением доставки.
             <para>
-            Тысячи параллельных задач могут добавлять результаты через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)"/>,
-            а веб-интерфейс забирает их пачками через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)"/>.
-            Ожидание новых данных реализовано асинхронно, поэтому во время «длинного
-            опроса» не удерживается ни один поток пула — именно это устраняло зависание
-            ответа при запуске более 300 задач одновременно.
+            Результаты копятся в неблокирующей очереди; сервер забирает их пачкой
+            (<see cref="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)"/>), пачка переходит в состояние «в полёте» и
+            удаляется только после подтверждения (<see cref="M:SPI.Twamp.Probe.Server.ResultStore.ConfirmAsync(System.Guid)"/>). Если сервер
+            упал между получением и записью в БД — при следующем опросе проба выдаст ту же
+            пачку повторно, а дубликаты сервер отбросит по <see cref="P:SPI.Twamp.Probe.Contracts.ActionData.ResultId"/>.
             </para>
-            </summary>
-        </member>
-        <member name="M:SPI.Twamp.Probe.Server.ResultStore.#ctor(NLog.Logger)">
-            <summary>
-            Реализация хранилища результатов на основе неблокирующей очереди и
-            «сигнального» канала.
             <para>
-            Тысячи параллельных задач могут добавлять результаты через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)"/>,
-            а веб-интерфейс забирает их пачками через <see cref="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)"/>.
-            Ожидание новых данных реализовано асинхронно, поэтому во время «длинного
-            опроса» не удерживается ни один поток пула — именно это устраняло зависание
-            ответа при запуске более 300 задач одновременно.
+            Очередь ограничена (настройка «Probe:MaxPendingResults»): при длительной
+            недоступности сервера старые результаты вытесняются, не давая пробе
+            исчерпать память и диск.
             </para>
             </summary>
         </member>
@@ -494,29 +534,43 @@
         <member name="F:SPI.Twamp.Probe.Server.ResultStore.PersistInterval">
             <summary>Интервал фонового сохранения снимка очереди на диск.</summary>
         </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._maxPending">
+            <summary>Максимум результатов в очереди; сверх лимита вытесняются самые старые.</summary>
+        </member>
         <member name="F:SPI.Twamp.Probe.Server.ResultStore._pending">
-            <summary>Очередь накопленных результатов — единый источник истины для выдачи и сохранения.</summary>
+            <summary>Очередь накопленных, ещё не выданных результатов.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._batchLock">
+            <summary>Выданная, но ещё не подтверждённая сервером пачка (максимум одна).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._takeLock">
+            <summary>Сериализует выдачу пачек при параллельных опросах.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ResultStore._signal">
             <summary>
-            Канал-сигнал ёмкостью 1 с режимом <see cref="F:System.Threading.Channels.BoundedChannelFullMode.DropWrite"/>.
-            Работает как асинхронный AutoResetEvent: множество добавлений «схлопываются»
-            в один сигнал, а ожидающий потребитель пробуждается без блокировки потока.
+            Канал-сигнал ёмкостью 1 (аналог асинхронного AutoResetEvent): множество
+            добавлений «схлопываются» в один сигнал для ожидающего потребителя.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ResultStore._fileLock">
             <summary>Сериализует запись файла, чтобы избежать одновременных обращений к диску.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ResultStore._persistTimer">
-            <summary>Таймер фонового сохранения снимка очереди на диск. Создаётся лениво в <see cref="M:SPI.Twamp.Probe.Server.ResultStore.EnsurePersistTimer"/>.</summary>
+            <summary>Таймер фонового сохранения снимка очереди на диск.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ResultStore._dirty">
             <summary>Признак наличия несохранённых изменений (снижает лишние записи на диск).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration)">
+            <summary>Создаёт хранилище и читает лимит очереди из конфигурации.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.ConfirmAsync(System.Guid)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.LoadAsync(System.Threading.CancellationToken)">
@@ -530,12 +584,12 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.FlushToDiskAsync">
             <summary>
-            Сохраняет текущий снимок очереди на диск (или удаляет файл, если очередь пуста).
-            Вызывается по таймеру и при выдаче пачки, чтобы результаты пережили перезапуск.
+            Сохраняет на диск снимок недоставленных результатов: неподтверждённую пачку
+            и очередь. После перезапуска всё возвращается в очередь на выдачу.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.Dispose">
-            <summary>Освобождает таймер и семафор.</summary>
+            <summary>Освобождает таймер и примитивы синхронизации.</summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Server.Worker">
             <summary>

@@ -16,6 +16,12 @@ namespace SPI.Twamp.Server.Contracts
         public ObjectId? Id { get; set; }
 
         /// <summary>
+        /// Уникальный идентификатор результата, присвоенный пробой.
+        /// По нему отбрасываются дубликаты при повторной доставке пачки.
+        /// </summary>
+        public Guid ResultId { get; set; }
+
+        /// <summary>
         /// Момент создания результата.
         /// </summary>
         public DateTime? Creation { get; set; }

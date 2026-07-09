@@ -37,6 +37,9 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <summary>Коллекция шаблонов задач.</summary>
         public ILiteCollectionAsync<ProbeTemplate> Templates => _db.GetCollection<ProbeTemplate>("templates");
 
+        /// <summary>Коллекция разобранной статистики замеров.</summary>
+        public ILiteCollectionAsync<StatRecord> Stats => _db.GetCollection<StatRecord>("stats");
+
         /// <summary>Закрывает подключение к БД.</summary>
         public void Dispose() => _db.Dispose();
     }

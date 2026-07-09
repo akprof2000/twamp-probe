@@ -90,6 +90,7 @@ try
     _ = builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
     _ = builder.Services.AddSingleton<IClientRepository, ClientRepository>();
     _ = builder.Services.AddSingleton<IActionRepository, ActionRepository>();
+    _ = builder.Services.AddSingleton<IStatRepository, StatRepository>();
     _ = builder.Services.AddSingleton<IProbeClient, ProbeClient>();
 
     // --- Прикладные сервисы ---
@@ -99,10 +100,14 @@ try
     _ = builder.Services.AddSingleton<ITemplateRepository, TemplateRepository>();
     _ = builder.Services.AddSingleton<IProvisioningService, ProvisioningService>();
 
-    // --- Фоновый опрос проб: один синглтон, доступный и как IProbePoller, и как хостед-сервис ---
+    // --- Фоновый опрос проб: один синглтон, доступный как IProbePoller, IProbeStatusProvider и хостед-сервис ---
     _ = builder.Services.AddSingleton<ProbePollingService>();
     _ = builder.Services.AddSingleton<IProbePoller>(provider => provider.GetRequiredService<ProbePollingService>());
+    _ = builder.Services.AddSingleton<IProbeStatusProvider>(provider => provider.GetRequiredService<ProbePollingService>());
     _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<ProbePollingService>());
+
+    // --- Фоновая очистка БД (ретенция) ---
+    _ = builder.Services.AddHostedService<MaintenanceService>();
 
     // Подробнее о настройке Swagger/OpenAPI: https://aka.ms/aspnetcore/swashbuckle
     _ = builder.Services.AddEndpointsApiExplorer();
@@ -112,6 +117,19 @@ try
         string xmlFile = "spi.twamp.server.xml";
         string xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
         c.IncludeXmlComments(xmlPath);
+
+        // Ключ API в Swagger UI (кнопка Authorize), если аутентификация включена.
+        c.AddSecurityDefinition("ApiKey", new Microsoft.OpenApi.OpenApiSecurityScheme
+        {
+            Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey,
+            In = Microsoft.OpenApi.ParameterLocation.Header,
+            Name = "X-Api-Key",
+            Description = "Ключ API (заголовок X-Api-Key)"
+        });
+        c.AddSecurityRequirement(doc => new Microsoft.OpenApi.OpenApiSecurityRequirement
+        {
+            { new Microsoft.OpenApi.OpenApiSecuritySchemeReference("ApiKey", doc), new List<string>() }
+        });
     });
     _ = builder.Services.AddSwaggerGenNewtonsoftSupport();
 
@@ -132,6 +150,26 @@ try
     _ = builder.Services.AddRouting(options => options.LowercaseUrls = true);
 
     WebApplication app = builder.Build();
+
+    // Аутентификация по общему ключу: включается, когда задан «Auth:ApiKey».
+    // Тот же ключ сервер передаёт пробам в исходящих запросах (ProbeClient).
+    string? apiKey = builder.Configuration["Auth:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(apiKey))
+    {
+        logger.Info("Включена аутентификация API по ключу (заголовок X-Api-Key)");
+        _ = app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api") &&
+                (!context.Request.Headers.TryGetValue("X-Api-Key", out Microsoft.Extensions.Primitives.StringValues key) || key != apiKey))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsync("Неверный или отсутствующий ключ API");
+                return;
+            }
+            await next();
+        });
+    }
+
     // Только один из них, в зависимости от среды
     if (app.Environment.IsDevelopment())
     {

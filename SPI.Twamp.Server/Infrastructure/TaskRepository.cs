@@ -47,8 +47,12 @@ namespace SPI.Twamp.Server.Infrastructure
             foreach (TaskInfo task in data)
             {
                 task.Delete = true;
+                task.DeletedAt ??= DateTime.Now;
                 _ = await _context.Tasks.UpsertAsync(task);
             }
         }
+
+        /// <inheritdoc/>
+        public async Task RemoveAsync(Guid id) => _ = await _context.Tasks.DeleteAsync(id);
     }
 }

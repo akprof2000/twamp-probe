@@ -21,10 +21,22 @@ namespace SPI.Twamp.Server.Abstractions
         /// <param name="cancellationToken">Токен отмены.</param>
         Task PushTasksAsync(string probeUrl, IEnumerable<TaskInfo> tasks, CancellationToken cancellationToken);
 
-        /// <summary>Забирает у пробы накопленные результаты (CheckData, длинный опрос).</summary>
+        /// <summary>
+        /// Забирает у пробы пачку результатов (CheckData, длинный опрос).
+        /// Пачку нужно подтвердить через <see cref="ConfirmResultsAsync"/> после записи в БД.
+        /// </summary>
         /// <param name="probeUrl">Базовый адрес пробы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        Task<ActionData[]> GetResultsAsync(string probeUrl, CancellationToken cancellationToken);
+        Task<ProbeResultBatch> GetResultsAsync(string probeUrl, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Подтверждает пробе доставку пачки результатов — только после этого
+        /// проба удаляет данные у себя.
+        /// </summary>
+        /// <param name="probeUrl">Базовый адрес пробы.</param>
+        /// <param name="batchId">Идентификатор пачки из ответа CheckData.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task ConfirmResultsAsync(string probeUrl, Guid batchId, CancellationToken cancellationToken);
 
         /// <summary>
         /// Запрашивает у пробы идентификаторы задач по расписанию, которые она знает.

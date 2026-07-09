@@ -14,12 +14,35 @@ namespace SPI.Twamp.Server.Infrastructure
         private readonly LiteDbContext _context = context;
 
         /// <inheritdoc/>
-        public async Task EnsureIndexesAsync() =>
+        public async Task EnsureIndexesAsync()
+        {
             _ = await _context.Actions.EnsureIndexAsync("Creation", "$.Creation");
+            // Индекс для быстрой проверки дубликатов при повторной доставке пачек.
+            _ = await _context.Actions.EnsureIndexAsync("ResultId", "$.ResultId");
+        }
 
         /// <inheritdoc/>
-        public async Task AddRangeAsync(IEnumerable<ActionData> data) =>
-            _ = await _context.Actions.InsertAsync(data);
+        public async Task<IReadOnlyList<ActionData>> AddRangeAsync(IEnumerable<ActionData> data)
+        {
+            // Доставка «минимум один раз»: после сбоя подтверждения проба пришлёт ту же
+            // пачку повторно. Отбрасываем записи, чьи ResultId уже есть в БД.
+            List<ActionData> fresh = [];
+            foreach (ActionData item in data)
+            {
+                bool isDuplicate = item.ResultId != Guid.Empty &&
+                    await _context.Actions.ExistsAsync(x => x.ResultId == item.ResultId);
+                if (!isDuplicate)
+                {
+                    fresh.Add(item);
+                }
+            }
+
+            if (fresh.Count > 0)
+            {
+                _ = await _context.Actions.InsertAsync(fresh);
+            }
+            return fresh;
+        }
 
         /// <inheritdoc/>
         public async Task<IReadOnlyList<ActionData>> GetByPeriodAsync(DateTime from, DateTime to)
@@ -29,5 +52,9 @@ namespace SPI.Twamp.Server.Infrastructure
                 x => x.Creation == null || (x.Creation >= from && x.Creation <= to));
             return [.. data];
         }
+
+        /// <inheritdoc/>
+        public async Task<int> DeleteOlderAsync(DateTime cutoff) =>
+            await _context.Actions.DeleteManyAsync(x => x.Creation != null && x.Creation < cutoff);
     }
 }

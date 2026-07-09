@@ -27,5 +27,8 @@ namespace SPI.Twamp.Server.Abstractions
 
         /// <summary>Помечает все задачи указанной пробы как удалённые (Delete = true).</summary>
         Task MarkDeletedByRequestInfoAsync(string requestInfo);
+
+        /// <summary>Окончательно удаляет задачу из БД (используется фоновой очисткой).</summary>
+        Task RemoveAsync(Guid id);
     }
 }

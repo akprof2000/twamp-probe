@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="SPI.TWamp.Probe/SPI.TWamp.Probe.csproj" />
   <Project Path="SPI.Twamp.Server/SPI.Twamp.Server.csproj" />
+  <Project Path="SPI.Twamp.Tests/SPI.Twamp.Tests.csproj" />
 </Solution>

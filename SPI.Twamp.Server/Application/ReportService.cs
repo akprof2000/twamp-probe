@@ -14,52 +14,73 @@ using System.Text;
 namespace SPI.Twamp.Server.Application
 {
     /// <summary>
-    /// Реализация <see cref="IReportService"/>: выгрузка результатов в CSV и импорт задач из CSV.
+    /// Реализация <see cref="IReportService"/>: потоковая выгрузка результатов в CSV
+    /// и импорт задач из CSV.
     /// </summary>
     public sealed class ReportService(
-        Logger logger, IActionRepository actions, ITaskRepository tasks, ITaskService taskService, IMemoryCache cache)
+        Logger logger, IActionRepository actions, IStatRepository stats,
+        ITaskRepository tasks, ITaskService taskService, IMemoryCache cache)
         : IReportService
     {
         /// <summary>Срок хранения названия задачи в кэше.</summary>
         private static readonly TimeSpan TitleCacheDuration = TimeSpan.FromMinutes(60);
 
+        /// <summary>Размер страницы при потоковом чтении статистики из БД.</summary>
+        private const int ExportPageSize = 5000;
+
         private readonly Logger _logger = logger;
         private readonly IActionRepository _actions = actions;
+        private readonly IStatRepository _stats = stats;
         private readonly ITaskRepository _tasks = tasks;
         private readonly ITaskService _taskService = taskService;
         private readonly IMemoryCache _cache = cache;
 
         /// <inheritdoc/>
-        public async Task<(byte[] Content, string FileName)> BuildCsvAsync(
-            DateTime from, DateTime to, char separator, char decimalSeparator)
+        public async Task StreamCsvAsync(
+            DateTime from, DateTime to, char separator, char decimalSeparator,
+            TextWriter writer, CancellationToken cancellationToken)
         {
-            _logger.Info("Формирование CSV за период {From} — {To}", from, to);
+            _logger.Info("Потоковая выгрузка CSV за период {From} — {To}", from, to);
+            await writer.WriteLineAsync(TwPingParser.CsvHeader(separator));
 
-            IReadOnlyList<ActionData> data = await _actions.GetByPeriodAsync(from, to);
-
-            // Разбираем «сырые» ответы зондов в структурированную статистику.
-            List<TwPingStats> stats = [];
-            foreach (ActionData action in data)
+            int total = await _stats.CountByPeriodAsync(from, to);
+            if (total > 0)
             {
-                List<TwPingStats> parsed = TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId);
-                // Каждой строке статистики проставляем фактическую строку вызова —
-                // по ней в отчёте однозначно идентифицируется ответ.
-                foreach (TwPingStats row in parsed)
+                // Основной путь: статистика уже разобрана при приёме — читаем постранично.
+                for (int skip = 0; skip < total; skip += ExportPageSize)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    IReadOnlyList<StatRecord> page = await _stats.GetPageAsync(from, to, skip, ExportPageSize);
+                    if (page.Count == 0)
+                    {
+                        break;
+                    }
+
+                    foreach (StatRecord record in page)
+                    {
+                        record.Stats.CallLine = record.CallLine;
+                        record.Stats.Title = await GetTitleAsync(record.TaskId);
+                        await writer.WriteLineAsync(TwPingParser.ToCsvLine(record.Stats, separator, decimalSeparator));
+                    }
+                    await writer.FlushAsync(cancellationToken);
+                }
+                return;
+            }
+
+            // Совместимость: данные, накопленные до внедрения разбора при приёме,
+            // разбираем по-старому из сырых ответов.
+            IReadOnlyList<ActionData> raw = await _actions.GetByPeriodAsync(from, to);
+            foreach (ActionData action in raw)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (TwPingStats row in TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId))
                 {
                     row.CallLine = action.CallLine;
+                    row.Title = await GetTitleAsync(row.Id ?? Guid.Empty);
+                    await writer.WriteLineAsync(TwPingParser.ToCsvLine(row, separator, decimalSeparator));
                 }
-                stats.AddRange(parsed);
             }
-
-            // Подставляем понятные названия задач (с кэшированием).
-            foreach (TwPingStats row in stats)
-            {
-                row.Title = await GetTitleAsync(row.Id ?? Guid.Empty);
-            }
-
-            byte[] content = Encoding.UTF8.GetBytes(TwPingParser.ToCsv(stats, separator, decimalSeparator));
-            string fileName = $"data_{from:yyyyMMdd}_{to:yyyyMMdd}.csv";
-            return (content, fileName);
+            await writer.FlushAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -122,8 +143,10 @@ namespace SPI.Twamp.Server.Application
             CronExpression = row.Cron,
             CronWithSeconds = false,
             Delete = false,
-            Start = row.Start,
-            End = row.End,
+            // Kind=Local: при передаче пробе в другом часовом поясе JSON будет
+            // содержать смещение, и время корректно пересчитается на её стороне.
+            Start = DateTime.SpecifyKind(row.Start, DateTimeKind.Local),
+            End = DateTime.SpecifyKind(row.End, DateTimeKind.Local),
             EndNode = row.Ip,
             Mode = row.Mode,
             Parameters = row.Request is null

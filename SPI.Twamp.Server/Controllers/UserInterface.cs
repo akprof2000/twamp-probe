@@ -17,7 +17,8 @@ namespace SPI.Twamp.Server.Controllers
     [ApiController]
     public class UserInterface(
         Logger logger, ITaskService taskService, IClientService clientService,
-        IReportService reportService, IProvisioningService provisioningService)
+        IReportService reportService, IProvisioningService provisioningService,
+        IProbeStatusProvider probeStatus)
         : ControllerBase
     {
         private readonly Logger _logger = logger;
@@ -25,6 +26,7 @@ namespace SPI.Twamp.Server.Controllers
         private readonly IClientService _clientService = clientService;
         private readonly IReportService _reportService = reportService;
         private readonly IProvisioningService _provisioningService = provisioningService;
+        private readonly IProbeStatusProvider _probeStatus = probeStatus;
 
         /// <summary>Возвращает полный список задач.</summary>
         [HttpGet("tasks")]
@@ -115,21 +117,64 @@ namespace SPI.Twamp.Server.Controllers
             return Ok();
         }
 
-        /// <summary>Выгружает результаты зондирования за период в CSV-файл.</summary>
+        /// <summary>
+        /// Выгружает результаты зондирования за период в CSV-файл потоково:
+        /// данные пишутся в ответ постранично, большой период не загружается в память.
+        /// </summary>
         /// <param name="from">Начало периода (по умолчанию — 14 дней назад).</param>
         /// <param name="to">Конец периода (по умолчанию — сейчас).</param>
         /// <param name="separator">Разделитель полей.</param>
         /// <param name="decimalSeparator">Десятичный разделитель.</param>
+        /// <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
         [HttpGet("[action]")]
-        public async Task<IActionResult> DownloadFile(
+        public async Task DownloadFile(
             [FromQuery] DateOnly? from, [FromQuery] DateOnly? to,
-            [FromQuery] char separator = ';', [FromQuery] char decimalSeparator = ',')
+            [FromQuery] char separator = ';', [FromQuery] char decimalSeparator = ',',
+            CancellationToken cancellationToken = default)
         {
             DateTime dateTo = to?.ToDateTime(TimeOnly.MaxValue) ?? DateTime.Now;
             DateTime dateFrom = from?.ToDateTime(TimeOnly.MinValue) ?? dateTo.AddDays(-14);
 
-            (byte[] content, string fileName) = await _reportService.BuildCsvAsync(dateFrom, dateTo, separator, decimalSeparator);
-            return File(content, "text/csv", fileName);
+            Response.ContentType = "text/csv; charset=utf-8";
+            Response.Headers.ContentDisposition =
+                $"attachment; filename=data_{dateFrom:yyyyMMdd}_{dateTo:yyyyMMdd}.csv";
+
+            await using StreamWriter writer = new(Response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
+            await _reportService.StreamCsvAsync(dateFrom, dateTo, separator, decimalSeparator, writer, cancellationToken);
+        }
+
+        /// <summary>
+        /// Возвращает состояние всех проб: связь (последний успешный опрос, ошибки,
+        /// backoff), версию пробы и число её задач — для страницы мониторинга.
+        /// </summary>
+        [HttpGet("[action]")]
+        public async Task<ActionResult> ProbeStatus()
+        {
+            IReadOnlyList<Client> clients = await _clientService.GetClientsAsync();
+            IReadOnlyDictionary<string, ProbePollState> states = _probeStatus.GetStates();
+            IReadOnlyList<TaskInfo> allTasks = await _taskService.GetAllAsync();
+
+            var status = clients.Select(c =>
+            {
+                ProbePollState? state = states.TryGetValue(c.RequestInfo, out ProbePollState? s) ? s : null;
+                return new
+                {
+                    c.RequestInfo,
+                    c.Name,
+                    c.HostName,
+                    c.IPAddress,
+                    c.Version,
+                    LastSuccess = state?.LastSuccess,
+                    LastError = state?.LastError,
+                    LastErrorMessage = state?.LastErrorMessage,
+                    BackoffSeconds = state?.BackoffSeconds ?? 0,
+                    TotalResults = state?.TotalResults ?? 0,
+                    ActiveTasks = allTasks.Count(t => t.RequestInfo == c.RequestInfo && !t.Delete),
+                    DeletedTasks = allTasks.Count(t => t.RequestInfo == c.RequestInfo && t.Delete)
+                };
+            });
+
+            return Ok(status);
         }
 
         /// <summary>Загружает задачи из CSV-файла.</summary>

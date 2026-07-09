@@ -73,6 +73,7 @@ namespace SPI.Twamp.Server.Application
 
             _logger.Info("Удаление задачи {Id}", id);
             task.Delete = true;
+            task.DeletedAt = DateTime.Now; // для фоновой очистки давно удалённых
             await _tasks.UpsertAsync(task);
             await TryPushAsync(task.RequestInfo, [task], cancellationToken); // отправляем удаление
         }
@@ -98,6 +99,7 @@ namespace SPI.Twamp.Server.Application
             IReadOnlyList<TaskInfo> all = await _tasks.GetByRequestInfoAsync(requestInfo);
             DateTime now = DateTime.Now;
             List<TaskInfo> toPush = [];
+            HashSet<Guid> knownSchedulers = []; // задачи по расписанию, известные серверу
 
             foreach (TaskInfo task in all)
             {
@@ -106,6 +108,8 @@ namespace SPI.Twamp.Server.Application
                 {
                     continue;
                 }
+
+                _ = knownSchedulers.Add(task.Id);
 
                 // Уже помеченные на удаление — убрать с пробы, если она их ещё держит.
                 if (task.Delete)
@@ -121,6 +125,7 @@ namespace SPI.Twamp.Server.Application
                 if (task.End <= now)
                 {
                     task.Delete = true;
+                    task.DeletedAt = now;
                     await _tasks.UpsertAsync(task);
                     if (onProbe.Contains(task.Id))
                     {
@@ -134,6 +139,20 @@ namespace SPI.Twamp.Server.Application
                 {
                     toPush.Add(task);
                 }
+            }
+
+            // Задачи-«сироты»: есть на пробе, но серверу неизвестны (например, БД сервера
+            // восстановили из резервной копии или задачу уже вычистила ретенция).
+            // Отправляем пробе заглушки на удаление.
+            foreach (Guid orphan in onProbe.Where(id => !knownSchedulers.Contains(id)))
+            {
+                toPush.Add(new TaskInfo
+                {
+                    Id = orphan,
+                    RequestInfo = requestInfo,
+                    Type = TaskType.Scheduler,
+                    Delete = true
+                });
             }
 
             if (toPush.Count > 0)

@@ -46,6 +46,10 @@ namespace SPI.Twamp.Server.Infrastructure
             await _context.Identify.ExistsAsync(x => x.RequestInfo == requestInfo);
 
         /// <inheritdoc/>
+        public async Task<Identify?> GetIdentifyAsync(string requestInfo) =>
+            await _context.Identify.FindOneAsync(x => x.RequestInfo == requestInfo);
+
+        /// <inheritdoc/>
         public async Task AddIdentifyAsync(Identify identify) => _ = await _context.Identify.InsertAsync(identify);
 
         /// <inheritdoc/>

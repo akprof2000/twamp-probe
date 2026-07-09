@@ -9,15 +9,19 @@ namespace SPI.Twamp.Server.Abstractions
     public interface IReportService
     {
         /// <summary>
-        /// Формирует CSV-отчёт по результатам зондирования за период.
+        /// Потоково пишет CSV-отчёт по результатам за период в указанный писатель.
+        /// Данные читаются из БД постранично, поэтому даже очень большой период
+        /// не загружается в память целиком.
         /// </summary>
         /// <param name="from">Начало периода.</param>
         /// <param name="to">Конец периода.</param>
         /// <param name="separator">Разделитель полей CSV.</param>
         /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
-        /// <returns>Содержимое файла и его имя.</returns>
-        Task<(byte[] Content, string FileName)> BuildCsvAsync(
-            DateTime from, DateTime to, char separator, char decimalSeparator);
+        /// <param name="writer">Куда писать CSV (тело HTTP-ответа).</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task StreamCsvAsync(
+            DateTime from, DateTime to, char separator, char decimalSeparator,
+            TextWriter writer, CancellationToken cancellationToken);
 
         /// <summary>
         /// Импортирует задачи из CSV-потока и ставит их на выполнение.

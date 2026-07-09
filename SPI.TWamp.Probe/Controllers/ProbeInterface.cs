@@ -43,7 +43,10 @@ namespace SPI.Twamp.Probe.Controllers
                 HostName = Dns.GetHostName(),
                 Description = descr,
                 Title = name,
-                RequestInfo = requestInfo
+                RequestInfo = requestInfo,
+                // Версия сборки — сервер показывает её в списке проб и может
+                // обнаруживать устаревшие пробы после обновления.
+                Version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? ""
             };
             logger.Info("Ответ CheckIn {@Identify}", res);
 
@@ -76,18 +79,33 @@ namespace SPI.Twamp.Probe.Controllers
         }
 
         /// <summary>
-        /// Возвращает накопленные результаты выполнения задач.
-        /// Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных,
-        /// не блокируя поток пула, и отдаёт их пачкой.
+        /// Возвращает накопленные результаты пачкой с идентификатором для подтверждения.
+        /// Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных, не блокируя
+        /// поток пула. Пачка хранится пробой до подтверждения через ConfirmData —
+        /// при потере связи она будет выдана повторно.
         /// </summary>
         /// <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
-        /// <returns>Массив результатов (возможно пустой при таймауте).</returns>
+        /// <returns>Пачка результатов (пустая при таймауте).</returns>
         [HttpGet("[action]")]
-        public async Task<ActionResult<ActionData[]>> CheckData(CancellationToken cancellationToken)
+        public async Task<ActionResult<ResultBatch>> CheckData(CancellationToken cancellationToken)
         {
             logger.Info("Запрос результатов зондирования");
-            ActionData[] results = await resultStore.TakeBatchAsync(TimeSpan.FromSeconds(30), cancellationToken);
-            return Ok(results);
+            ResultBatch batch = await resultStore.TakeBatchAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            return Ok(batch);
+        }
+
+        /// <summary>
+        /// Подтверждает доставку пачки результатов: сервер записал её в БД,
+        /// и проба может удалить данные.
+        /// </summary>
+        /// <param name="batchId">Идентификатор пачки из ответа CheckData.</param>
+        /// <returns><c>true</c>, если пачка найдена и удалена.</returns>
+        [HttpPost("[action]")]
+        public async Task<ActionResult<bool>> ConfirmData([FromQuery][Required] Guid batchId)
+        {
+            bool confirmed = await resultStore.ConfirmAsync(batchId);
+            logger.Debug("Подтверждение пачки {BatchId}: {Confirmed}", batchId, confirmed);
+            return Ok(confirmed);
         }
     }
 }

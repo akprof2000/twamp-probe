@@ -74,6 +74,11 @@ namespace SPI.Twamp.Server.Contracts
         /// </summary>
         public bool Delete { get; set; } = false;
         /// <summary>
+        /// Момент пометки задачи на удаление. Используется фоновой очисткой:
+        /// давно удалённые задачи окончательно вычищаются из БД.
+        /// </summary>
+        public DateTime? DeletedAt { get; set; }
+        /// <summary>
         /// Список конечных узлов (адресов) через «;» или «,».
         /// </summary>
         public string EndNode { get; set; } = "0.0.0.0";
