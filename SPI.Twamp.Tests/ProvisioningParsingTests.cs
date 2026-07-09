@@ -32,6 +32,74 @@ namespace SPI.Twamp.Tests
             Assert.False(ProvisioningService.TryParseRouterLine(line, out _, out _));
         }
 
+        [Fact(DisplayName = "CSV «;» с заголовком: SNODE вида «ИМЯ|IP:адрес»")]
+        public void RouterFile_CsvWithSnodePipe()
+        {
+            string[] lines =
+            [
+                "SNODE;CELL_TYPE;VENDOR;IP;RNUM",
+                "231101|IP:10.106.23.33;4;HUAWEI;10.106.23.33;1",
+                "ADCTO24G|IP:10.23.179.54;4;HUAWEI;10.23.179.54;2"
+            ];
+
+            var (routers, rejected) = SPI.Twamp.Server.Application.ProvisioningService.ParseRouterFile(lines);
+
+            Assert.Empty(rejected);
+            Assert.Equal(2, routers.Count);
+            Assert.Equal(("231101", "10.106.23.33"), routers[0]);
+        }
+
+        [Fact(DisplayName = "CSV «;» с заголовком: имя из SNODE, адрес из колонки IP")]
+        public void RouterFile_CsvWithSeparateIpColumn()
+        {
+            string[] lines =
+            [
+                "SNODE;VENDOR;IP;RNUM",
+                "231101;HUAWEI;10.106.23.33;1",
+                "R2;HUAWEI;10.0.0.2;2"
+            ];
+
+            var (routers, rejected) = SPI.Twamp.Server.Application.ProvisioningService.ParseRouterFile(lines);
+
+            Assert.Empty(rejected);
+            Assert.Equal(2, routers.Count);
+            Assert.Equal(("231101", "10.106.23.33"), routers[0]);
+            Assert.Equal(("R2", "10.0.0.2"), routers[1]);
+        }
+
+        [Fact(DisplayName = "Формат с табуляцией без заголовка по-прежнему работает")]
+        public void RouterFile_TabWithoutHeader()
+        {
+            string[] lines =
+            [
+                "231101|IP:10.106.23.33\t4\tHUAWEI",
+                "СЛОМАННАЯ СТРОКА",
+                "ADCTO24G|IP:10.23.179.54\t4\tHUAWEI"
+            ];
+
+            var (routers, rejected) = SPI.Twamp.Server.Application.ProvisioningService.ParseRouterFile(lines);
+
+            Assert.Equal(2, routers.Count);
+            _ = Assert.Single(rejected);
+        }
+
+        [Fact(DisplayName = "Дубликаты имя+IP отбрасываются, одно имя с разными IP — две записи")]
+        public void RouterFile_Deduplication()
+        {
+            string[] lines =
+            [
+                "SNODE;IP",
+                "R1;10.0.0.1",
+                "R1;10.0.0.1",
+                "R1;10.0.0.2"
+            ];
+
+            var (routers, rejected) = SPI.Twamp.Server.Application.ProvisioningService.ParseRouterFile(lines);
+
+            Assert.Empty(rejected);
+            Assert.Equal(2, routers.Count);
+        }
+
         [Fact(DisplayName = "Детерминированный Id: одинаковые входные данные — одинаковый Guid")]
         public void DeterministicId_Stable()
         {

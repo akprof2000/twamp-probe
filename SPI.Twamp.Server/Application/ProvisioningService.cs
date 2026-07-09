@@ -48,6 +48,103 @@ namespace SPI.Twamp.Server.Application
             return m.Success;
         }
 
+        /// <summary>Проверка, что строка — корректный IPv4-адрес.</summary>
+        [GeneratedRegex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")]
+        private static partial Regex IpRegex();
+
+        /// <summary>
+        /// Разбирает файл маршрутизаторов. Поддерживаются форматы:
+        /// <list type="bullet">
+        /// <item>CSV с разделителем «;» и заголовками (колонки SNODE и IP находятся по именам);</item>
+        /// <item>выгрузка с табуляцией или пробелами, с заголовком или без.</item>
+        /// </list>
+        /// Имя и IP берутся из поля SNODE вида «ИМЯ|IP:адрес»; если в SNODE нет
+        /// конструкции «|IP:», именем считается само значение SNODE, а адрес берётся
+        /// из отдельной колонки IP. Дубликаты (имя+IP) отбрасываются.
+        /// </summary>
+        /// <param name="lines">Строки файла.</param>
+        /// <returns>Список маршрутизаторов и список нераспознанных строк.</returns>
+        public static (IReadOnlyList<(string Name, string Ip)> Routers, IReadOnlyList<string> Rejected)
+            ParseRouterFile(IEnumerable<string> lines)
+        {
+            List<(string Name, string Ip)> routers = [];
+            List<string> rejected = [];
+            HashSet<string> seen = [];      // защита от дублей в файле
+
+            char? separator = null;         // ';' или '\t' — определяется по первой строке
+            int snodeIndex = 0;             // колонка SNODE (по умолчанию — первая)
+            int ipIndex = -1;               // колонка IP (если найдена в заголовке)
+            bool contentSeen = false;
+            int lineNo = 0;
+
+            foreach (string line in lines)
+            {
+                lineNo++;
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                // Строка заголовка: определяем разделитель и позиции колонок SNODE/IP.
+                if (!contentSeen && line.Contains("SNODE", StringComparison.OrdinalIgnoreCase))
+                {
+                    separator = line.Contains(';') ? ';' : '\t';
+                    string[] header = line.Split(separator.Value);
+                    for (int i = 0; i < header.Length; i++)
+                    {
+                        string column = header[i].Trim().ToUpperInvariant();
+                        if (column == "SNODE")
+                        {
+                            snodeIndex = i;
+                        }
+                        else if (column == "IP")
+                        {
+                            ipIndex = i;
+                        }
+                    }
+                    continue;
+                }
+
+                // Разделитель для файлов без заголовка — по первой строке данных.
+                separator ??= line.Contains(';') ? ';' : '\t';
+
+                string[] fields = line.Split(separator.Value);
+                string snode = snodeIndex < fields.Length ? fields[snodeIndex].Trim() : "";
+
+                string name;
+                string ip;
+                if (TryParseRouterLine(snode, out name, out ip))
+                {
+                    // Классический вид «ИМЯ|IP:адрес» — всё в одном поле.
+                }
+                else if (snode.Length > 0 && ipIndex >= 0 && ipIndex < fields.Length &&
+                         IpRegex().IsMatch(fields[ipIndex].Trim()))
+                {
+                    // SNODE без «|IP:» — имя из SNODE, адрес из колонки IP.
+                    name = snode;
+                    ip = fields[ipIndex].Trim();
+                }
+                else
+                {
+                    // Первую непохожую на данные строку молча считаем заголовком.
+                    if (!contentSeen && !line.Contains("|IP:"))
+                    {
+                        continue;
+                    }
+                    rejected.Add($"Строка {lineNo}: не удалось определить имя и IP маршрутизатора");
+                    continue;
+                }
+
+                contentSeen = true;
+                if (seen.Add($"{name}|{ip}"))
+                {
+                    routers.Add((name, ip));
+                }
+            }
+
+            return (routers, rejected);
+        }
+
         /// <summary>
         /// Детерминированный идентификатор задачи из связки «проба + узел + шаблон + устройство».
         /// Повторная загрузка того же файла обновляет существующие задачи, а не создаёт дубли.
@@ -102,46 +199,20 @@ namespace SPI.Twamp.Server.Application
                 return new ProvisioningResult([], 0, 0, rejected);
             }
 
-            // --- Разбор файла маршрутизаторов: имя и IP из первого поля «ИМЯ|IP:адрес» ---
-            // Файл может быть с заголовком (SNODE CELL_TYPE … RNUM) или без него.
-            List<(string Name, string Ip)> routers = [];
-            HashSet<string> seen = []; // защита от дублей в файле
+            // --- Разбор файла маршрутизаторов (CSV «;», табуляция или пробелы) ---
+            List<string> lines = [];
             using (StreamReader reader = new(routersFile, Encoding.UTF8))
             {
                 string? line;
-                int lineNo = 0;
-                bool contentSeen = false; // встречали ли уже строку с данными
                 while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
                 {
-                    lineNo++;
-                    if (string.IsNullOrWhiteSpace(line))
-                    {
-                        continue;
-                    }
-
-                    if (!TryParseRouterLine(line, out string name, out string ip))
-                    {
-                        // Строку заголовка пропускаем молча: это либо первая строка без
-                        // конструкции «|IP:», либо строка с названием колонки SNODE.
-                        bool looksLikeHeader = (!contentSeen && !line.Contains("|IP:")) ||
-                                               line.Contains("SNODE", StringComparison.OrdinalIgnoreCase);
-                        if (looksLikeHeader)
-                        {
-                            _logger.Debug("Строка {Line} распознана как заголовок и пропущена", lineNo);
-                            continue;
-                        }
-
-                        rejected.Add($"Строка {lineNo}: не удалось разобрать «ИМЯ|IP:адрес»");
-                        continue;
-                    }
-
-                    contentSeen = true;
-                    if (seen.Add($"{name}|{ip}"))
-                    {
-                        routers.Add((name, ip));
-                    }
+                    lines.Add(line);
                 }
             }
+
+            (IReadOnlyList<(string Name, string Ip)> routers, IReadOnlyList<string> parseErrors) =
+                ParseRouterFile(lines);
+            rejected.AddRange(parseErrors);
 
             // --- Наложение шаблонов: задач = маршрутизаторы × шаблоны ---
             DateTime createdAt = DateTime.Now;
