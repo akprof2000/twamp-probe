@@ -232,58 +232,82 @@ namespace SPI.Twamp.Server.Controllers
         }
 
         /// <summary>
-        /// Загружает файл шаблонов задач (CSV с заголовками, разделитель «;»).
+        /// Загружает файл шаблонов задач (CSV с заголовками, разделитель «;») в набор.
         /// Поддерживаемые колонки: Name, Probe, Request, Type, Repeats, Circles, Pause,
         /// Cron, Start, End, Mode, TimeOut — порядок любой, большинство необязательны.
-        /// Загрузка замещает предыдущий набор шаблонов.
+        /// Повторная загрузка набора с тем же именем обновляет его; другие наборы не трогаются.
         /// </summary>
         /// <param name="file">CSV-файл шаблонов.</param>
+        /// <param name="name">Имя набора; по умолчанию — имя файла без расширения.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        /// <returns>Число загруженных шаблонов.</returns>
+        /// <returns>Имя набора и число загруженных шаблонов.</returns>
         [HttpPost("[action]")]
         [Consumes("multipart/form-data")]
-        public async Task<ActionResult> UploadTemplates(IFormFile file, CancellationToken cancellationToken)
+        public async Task<ActionResult> UploadTemplates(IFormFile file, [FromQuery] string? name, CancellationToken cancellationToken)
         {
             if (file is null || file.Length == 0)
             {
                 return BadRequest("Файл пуст");
             }
 
-            _logger.Info("Загрузка шаблонов из {FileName}, размер {Size}", file.FileName, file.Length);
+            // Имя набора по умолчанию — имя загруженного файла без расширения.
+            string setName = string.IsNullOrWhiteSpace(name)
+                ? Path.GetFileNameWithoutExtension(file.FileName)
+                : name.Trim();
+
+            _logger.Info("Загрузка шаблонов из {FileName} в набор «{Set}», размер {Size}", file.FileName, setName, file.Length);
             using Stream stream = file.OpenReadStream();
-            int count = await _provisioningService.UploadTemplatesAsync(stream, cancellationToken);
-            return Ok(new { Templates = count });
+            int count = await _provisioningService.UploadTemplatesAsync(stream, setName, cancellationToken);
+            return Ok(new { Set = setName, Templates = count });
         }
 
-        /// <summary>Возвращает текущий набор шаблонов.</summary>
+        /// <summary>Возвращает все шаблоны всех наборов.</summary>
         [HttpGet("[action]")]
         public async Task<ActionResult<IEnumerable<ProbeTemplate>>> Templates()
         {
             return Ok(await _provisioningService.GetTemplatesAsync());
         }
 
+        /// <summary>Возвращает список наборов шаблонов (имя и число шаблонов).</summary>
+        [HttpGet("[action]")]
+        public async Task<ActionResult> TemplateSets()
+        {
+            IReadOnlyList<(string SetName, int Count)> sets = await _provisioningService.GetTemplateSetsAsync();
+            return Ok(sets.Select(s => new { Set = s.SetName, Templates = s.Count }));
+        }
+
+        /// <summary>Удаляет набор шаблонов целиком.</summary>
+        /// <param name="set">Имя набора.</param>
+        [HttpDelete("templates")]
+        public async Task<ActionResult> DeleteTemplates([FromQuery][Required] string set)
+        {
+            int removed = await _provisioningService.DeleteTemplateSetAsync(set);
+            return removed > 0 ? Ok(new { Set = set, Removed = removed }) : NotFound($"Набор «{set}» не найден");
+        }
+
         /// <summary>
-        /// Загружает файл со списком маршрутизаторов, накладывает на него сохранённые
-        /// шаблоны и сразу создаёт задачи (маршрутизаторы × шаблоны). Имя задачи —
-        /// «устройство-шаблон», время создания — момент вызова.
+        /// Загружает файл со списком маршрутизаторов, накладывает на него набор шаблонов
+        /// и сразу создаёт задачи (маршрутизаторы × шаблоны). Имя задачи —
+        /// «устройство-IP-шаблон», время создания — момент вызова.
         /// </summary>
-        /// <param name="file">Файл маршрутизаторов (строки «ИМЯ|IP:адрес …»).</param>
+        /// <param name="file">CSV-файл маршрутизаторов.</param>
+        /// <param name="set">Имя применяемого набора шаблонов; пусто — все наборы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         /// <returns>Отчёт: маршрутизаторов, шаблонов, создано задач, ошибки разбора.</returns>
         [HttpPost("[action]")]
         [RequestFormLimits(MultipartBodyLengthLimit = 209715200)]
         [RequestSizeLimit(209715200)]
         [Consumes("multipart/form-data")]
-        public async Task<ActionResult> UploadRouters(IFormFile file, CancellationToken cancellationToken)
+        public async Task<ActionResult> UploadRouters(IFormFile file, [FromQuery] string? set, CancellationToken cancellationToken)
         {
             if (file is null || file.Length == 0)
             {
                 return BadRequest("Файл пуст");
             }
 
-            _logger.Info("Загрузка маршрутизаторов из {FileName}, размер {Size}", file.FileName, file.Length);
+            _logger.Info("Загрузка маршрутизаторов из {FileName} (набор «{Set}»), размер {Size}", file.FileName, set ?? "все", file.Length);
             using Stream stream = file.OpenReadStream();
-            ProvisioningResult result = await _provisioningService.GenerateAsync(stream, cancellationToken);
+            ProvisioningResult result = await _provisioningService.GenerateAsync(stream, set, cancellationToken);
 
             // Пакетная заливка: одна запись в БД и один SetJobs на пачку для каждой пробы.
             await _taskService.AddRangeAsync(result.Tasks, cancellationToken);
@@ -302,23 +326,24 @@ namespace SPI.Twamp.Server.Controllers
         /// формата «Base test.csv» БЕЗ создания задач — для предварительной проверки.
         /// Полученный файл можно загрузить существующим методом UploadCsv.
         /// </summary>
-        /// <param name="file">Файл маршрутизаторов (строки «ИМЯ|IP:адрес …»).</param>
+        /// <param name="file">CSV-файл маршрутизаторов.</param>
+        /// <param name="set">Имя применяемого набора шаблонов; пусто — все наборы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         /// <returns>CSV-файл с задачами.</returns>
         [HttpPost("[action]")]
         [RequestFormLimits(MultipartBodyLengthLimit = 209715200)]
         [RequestSizeLimit(209715200)]
         [Consumes("multipart/form-data")]
-        public async Task<IActionResult> PreviewRouters(IFormFile file, CancellationToken cancellationToken)
+        public async Task<IActionResult> PreviewRouters(IFormFile file, [FromQuery] string? set, CancellationToken cancellationToken)
         {
             if (file is null || file.Length == 0)
             {
                 return BadRequest("Файл пуст");
             }
 
-            _logger.Info("Предпросмотр задач из {FileName}, размер {Size}", file.FileName, file.Length);
+            _logger.Info("Предпросмотр задач из {FileName} (набор «{Set}»), размер {Size}", file.FileName, set ?? "все", file.Length);
             using Stream stream = file.OpenReadStream();
-            ProvisioningResult result = await _provisioningService.GenerateAsync(stream, cancellationToken);
+            ProvisioningResult result = await _provisioningService.GenerateAsync(stream, set, cancellationToken);
 
             byte[] csv = _provisioningService.BuildCsv(result.Tasks);
             string name = $"tasks_{DateTime.Now:yyyyMMdd_HHmmss}.csv";

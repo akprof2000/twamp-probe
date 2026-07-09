@@ -82,14 +82,23 @@
 
 <section id="tab-upload">
   <div class="card">
-    <h2>1. Шаблоны задач (CSV: Name;Probe;Request;Type;Repeats;Circles;Pause;Cron;Start;End;Mode;TimeOut)</h2>
-    <div class="row"><input id="fileTemplates" type="file" accept=".csv"><button class="act" onclick="uploadTemplates()">Загрузить шаблоны</button></div>
+    <h2>1. Наборы шаблонов (CSV: Name;Probe;Request;Type;Repeats;Circles;Pause;Cron;Start;End;Mode;TimeOut)</h2>
+    <div class="row">
+      <input id="fileTemplates" type="file" accept=".csv">
+      <input id="setName" type="text" placeholder="имя набора (по умолчанию — имя файла)" style="width:260px">
+      <button class="act" onclick="uploadTemplates()">Загрузить набор</button>
+    </div>
+    <div class="scroll"><table id="tblSets">
+      <thead><tr><th>Набор</th><th>Шаблонов</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
     <div class="msg" id="msgTemplates"></div>
   </div>
   <div class="card">
-    <h2>2. Файл маршрутизаторов (строки «ИМЯ|IP:адрес …»)</h2>
+    <h2>2. Файл маршрутизаторов (CSV «;» с заголовками SNODE/IP)</h2>
     <div class="row">
       <input id="fileRouters" type="file">
+      <select id="routerSet" style="padding:6px;border:1px solid var(--line);border-radius:6px"></select>
       <button class="act" onclick="uploadRouters(false)">Предпросмотр (CSV)</button>
       <button class="act" onclick="uploadRouters(true)">Создать задачи</button>
     </div>
@@ -130,6 +139,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   $('#tab-' + b.dataset.tab).classList.add('active');
   if (b.dataset.tab === 'status') loadStatus();
   if (b.dataset.tab === 'tasks') loadTasks();
+  if (b.dataset.tab === 'upload') loadSets();
 });
 
 async function jget(p) {
@@ -196,6 +206,26 @@ async function delTask(id) {
   catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
 }
 
+// --- Наборы шаблонов ---
+async function loadSets() {
+  try {
+    const sets = await jget('templatesets');
+    $('#tblSets tbody').innerHTML = sets.map(s => `<tr>
+      <td>${s.set}</td><td>${s.templates}</td>
+      <td><button class="del" onclick="delSet('${s.set.replace(/'/g, "\\'")}')">удалить</button></td></tr>`).join('')
+      || '<tr><td colspan="3">наборы не загружены</td></tr>';
+    // Выпадающий список для применения набора к файлу маршрутизаторов.
+    $('#routerSet').innerHTML = '<option value="">— все наборы —</option>' +
+      sets.map(s => `<option value="${s.set}">${s.set} (${s.templates})</option>`).join('');
+  } catch (e) { $('#msgTemplates').textContent = 'Ошибка: ' + e.message; }
+}
+async function delSet(name) {
+  if (!confirm('Удалить набор шаблонов «' + name + '»?')) return;
+  try { await jsend('templates?set=' + encodeURIComponent(name), 'DELETE');
+    $('#msgTemplates').textContent = 'Набор «' + name + '» удалён'; loadSets();
+  } catch (e) { $('#msgTemplates').textContent = 'Ошибка: ' + e.message; }
+}
+
 // --- Загрузка файлов ---
 async function postFile(input, path, msgEl) {
   const f = $(input).files[0];
@@ -204,13 +234,18 @@ async function postFile(input, path, msgEl) {
   return jsend(path, 'POST', fd, true);
 }
 async function uploadTemplates() {
-  try { const r = await postFile('#fileTemplates', 'uploadtemplates', '#msgTemplates');
-    if (r) $('#msgTemplates').textContent = 'Загружено: ' + JSON.stringify(await r.json());
+  try {
+    const name = $('#setName').value.trim();
+    const path = 'uploadtemplates' + (name ? '?name=' + encodeURIComponent(name) : '');
+    const r = await postFile('#fileTemplates', path, '#msgTemplates');
+    if (r) { $('#msgTemplates').textContent = 'Загружено: ' + JSON.stringify(await r.json()); loadSets(); }
   } catch (e) { $('#msgTemplates').textContent = 'Ошибка: ' + e.message; }
 }
 async function uploadRouters(create) {
   try {
-    const r = await postFile('#fileRouters', create ? 'uploadrouters' : 'previewrouters', '#msgRouters');
+    const set = $('#routerSet').value;
+    const q = set ? '?set=' + encodeURIComponent(set) : '';
+    const r = await postFile('#fileRouters', (create ? 'uploadrouters' : 'previewrouters') + q, '#msgRouters');
     if (!r) return;
     if (create) { $('#msgRouters').textContent = 'Создано: ' + JSON.stringify(await r.json()); }
     else {

@@ -220,27 +220,38 @@
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProvisioningService">
             <summary>
-            Сервис массового создания задач: хранит шаблоны и накладывает их на файл
-            со списком маршрутизаторов (задач = маршрутизаторы × шаблоны).
+            Сервис массового создания задач: хранит именованные наборы шаблонов и
+            накладывает выбранный набор на файл маршрутизаторов
+            (задач = маршрутизаторы × шаблоны набора).
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.UploadTemplatesAsync(System.IO.Stream,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.UploadTemplatesAsync(System.IO.Stream,System.String,System.Threading.CancellationToken)">
             <summary>
-            Загружает файл шаблонов (CSV с заголовками, «;»), замещая предыдущий набор.
+            Загружает файл шаблонов (CSV с заголовками, «;») в набор с указанным именем.
+            Повторная загрузка с тем же именем обновляет набор; другие наборы не трогаются.
             </summary>
             <param name="csv">Поток с содержимым CSV.</param>
+            <param name="setName">Имя набора (по умолчанию — имя файла).</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>Число загруженных шаблонов.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.GetTemplatesAsync">
-            <summary>Возвращает текущий набор шаблонов.</summary>
+            <summary>Возвращает все шаблоны всех наборов.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.GenerateAsync(System.IO.Stream,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.GetTemplateSetsAsync">
+            <summary>Возвращает список наборов шаблонов (имя и число шаблонов).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.DeleteTemplateSetAsync(System.String)">
+            <summary>Удаляет набор шаблонов целиком.</summary>
+            <returns>Число удалённых шаблонов.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.GenerateAsync(System.IO.Stream,System.String,System.Threading.CancellationToken)">
             <summary>
-            Разбирает файл маршрутизаторов и накладывает на него сохранённые шаблоны.
+            Разбирает файл маршрутизаторов и накладывает на него шаблоны.
             Время создания задач — момент вызова; Start/End вычисляются из шаблона.
             </summary>
             <param name="routersFile">Поток с файлом маршрутизаторов.</param>
+            <param name="setName">Имя применяемого набора; пусто — все наборы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.BuildCsv(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo})">
@@ -380,18 +391,31 @@
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ITemplateRepository">
             <summary>
-            Репозиторий шаблонов задач: хранение набора шаблонов, загружаемых из CSV.
+            Репозиторий шаблонов задач. Шаблоны объединены в именованные наборы:
+            каждый загруженный CSV-файл — отдельный набор, который можно применять
+            к файлам маршрутизаторов и удалять независимо от других.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.ITemplateRepository.ReplaceAllAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.ProbeTemplate})">
+        <member name="M:SPI.Twamp.Server.Abstractions.ITemplateRepository.ReplaceSetAsync(System.String,System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.ProbeTemplate})">
             <summary>
-            Полностью заменяет набор шаблонов новым (загрузка файла шаблонов
-            замещает предыдущий набор).
+            Заменяет содержимое набора с указанным именем (повторная загрузка файла
+            обновляет набор); остальные наборы не затрагиваются.
             </summary>
-            <param name="templates">Новый набор шаблонов.</param>
+            <param name="setName">Имя набора.</param>
+            <param name="templates">Шаблоны набора.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITemplateRepository.GetAllAsync">
-            <summary>Возвращает все сохранённые шаблоны.</summary>
+            <summary>Возвращает все шаблоны всех наборов.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITemplateRepository.GetBySetAsync(System.String)">
+            <summary>Возвращает шаблоны одного набора.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITemplateRepository.GetSetsAsync">
+            <summary>Возвращает имена наборов с числом шаблонов в каждом.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITemplateRepository.DeleteSetAsync(System.String)">
+            <summary>Удаляет набор целиком.</summary>
+            <returns>Число удалённых шаблонов.</returns>
         </member>
         <member name="T:SPI.Twamp.Server.Application.ClientService">
             <summary>
@@ -518,13 +542,19 @@
             Повторная загрузка того же файла обновляет существующие задачи, а не создаёт дубли.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.UploadTemplatesAsync(System.IO.Stream,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.UploadTemplatesAsync(System.IO.Stream,System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.GetTemplatesAsync">
             <inheritdoc/>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.GenerateAsync(System.IO.Stream,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.GetTemplateSetsAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.DeleteTemplateSetAsync(System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.GenerateAsync(System.IO.Stream,System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.BuildCsv(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo})">
@@ -926,6 +956,13 @@
             Идентификатор записи в БД (не является колонкой CSV).
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ProbeTemplate.SetName">
+            <summary>
+            Имя набора шаблонов (не колонка CSV — задаётся при загрузке файла,
+            по умолчанию — имя файла). Наборы загружаются, применяются к файлам
+            маршрутизаторов и удаляются независимо друг от друга.
+            </summary>
+        </member>
         <member name="P:SPI.Twamp.Server.Contracts.ProbeTemplate.Name">
             <summary>
             Название шаблона — попадает в имя создаваемой задачи («устройство-шаблон»).
@@ -1312,37 +1349,47 @@
             <param name="formatDateTime">Формат дат в файле.</param>
             <returns>Названия задач с некорректной датой окончания.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadTemplates(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadTemplates(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
             <summary>
-            Загружает файл шаблонов задач (CSV с заголовками, разделитель «;»).
+            Загружает файл шаблонов задач (CSV с заголовками, разделитель «;») в набор.
             Поддерживаемые колонки: Name, Probe, Request, Type, Repeats, Circles, Pause,
             Cron, Start, End, Mode, TimeOut — порядок любой, большинство необязательны.
-            Загрузка замещает предыдущий набор шаблонов.
+            Повторная загрузка набора с тем же именем обновляет его; другие наборы не трогаются.
             </summary>
             <param name="file">CSV-файл шаблонов.</param>
+            <param name="name">Имя набора; по умолчанию — имя файла без расширения.</param>
             <param name="cancellationToken">Токен отмены.</param>
-            <returns>Число загруженных шаблонов.</returns>
+            <returns>Имя набора и число загруженных шаблонов.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.UserInterface.Templates">
-            <summary>Возвращает текущий набор шаблонов.</summary>
+            <summary>Возвращает все шаблоны всех наборов.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadRouters(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TemplateSets">
+            <summary>Возвращает список наборов шаблонов (имя и число шаблонов).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DeleteTemplates(System.String)">
+            <summary>Удаляет набор шаблонов целиком.</summary>
+            <param name="set">Имя набора.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadRouters(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
             <summary>
-            Загружает файл со списком маршрутизаторов, накладывает на него сохранённые
-            шаблоны и сразу создаёт задачи (маршрутизаторы × шаблоны). Имя задачи —
-            «устройство-шаблон», время создания — момент вызова.
+            Загружает файл со списком маршрутизаторов, накладывает на него набор шаблонов
+            и сразу создаёт задачи (маршрутизаторы × шаблоны). Имя задачи —
+            «устройство-IP-шаблон», время создания — момент вызова.
             </summary>
-            <param name="file">Файл маршрутизаторов (строки «ИМЯ|IP:адрес …»).</param>
+            <param name="file">CSV-файл маршрутизаторов.</param>
+            <param name="set">Имя применяемого набора шаблонов; пусто — все наборы.</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>Отчёт: маршрутизаторов, шаблонов, создано задач, ошибки разбора.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.PreviewRouters(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.PreviewRouters(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
             <summary>
             Загружает файл со списком маршрутизаторов и возвращает сгенерированный CSV
             формата «Base test.csv» БЕЗ создания задач — для предварительной проверки.
             Полученный файл можно загрузить существующим методом UploadCsv.
             </summary>
-            <param name="file">Файл маршрутизаторов (строки «ИМЯ|IP:адрес …»).</param>
+            <param name="file">CSV-файл маршрутизаторов.</param>
+            <param name="set">Имя применяемого набора шаблонов; пусто — все наборы.</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>CSV-файл с задачами.</returns>
         </member>
@@ -1530,18 +1577,27 @@
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.TemplateRepository">
             <summary>
-            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITemplateRepository"/> поверх LiteDB.
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITemplateRepository"/> поверх LiteDB (наборы шаблонов).
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.#ctor(SPI.Twamp.Server.Infrastructure.LiteDbContext)">
             <summary>
-            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITemplateRepository"/> поверх LiteDB.
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITemplateRepository"/> поверх LiteDB (наборы шаблонов).
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.ReplaceAllAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.ProbeTemplate})">
+        <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.ReplaceSetAsync(System.String,System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.ProbeTemplate})">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.GetAllAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.GetBySetAsync(System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.GetSetsAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.TemplateRepository.DeleteSetAsync(System.String)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Parser.TwPingParser">

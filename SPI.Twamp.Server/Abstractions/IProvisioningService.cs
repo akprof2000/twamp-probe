@@ -18,29 +18,40 @@ namespace SPI.Twamp.Server.Abstractions
         IReadOnlyList<string> Rejected);
 
     /// <summary>
-    /// Сервис массового создания задач: хранит шаблоны и накладывает их на файл
-    /// со списком маршрутизаторов (задач = маршрутизаторы × шаблоны).
+    /// Сервис массового создания задач: хранит именованные наборы шаблонов и
+    /// накладывает выбранный набор на файл маршрутизаторов
+    /// (задач = маршрутизаторы × шаблоны набора).
     /// </summary>
     public interface IProvisioningService
     {
         /// <summary>
-        /// Загружает файл шаблонов (CSV с заголовками, «;»), замещая предыдущий набор.
+        /// Загружает файл шаблонов (CSV с заголовками, «;») в набор с указанным именем.
+        /// Повторная загрузка с тем же именем обновляет набор; другие наборы не трогаются.
         /// </summary>
         /// <param name="csv">Поток с содержимым CSV.</param>
+        /// <param name="setName">Имя набора (по умолчанию — имя файла).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         /// <returns>Число загруженных шаблонов.</returns>
-        Task<int> UploadTemplatesAsync(Stream csv, CancellationToken cancellationToken);
+        Task<int> UploadTemplatesAsync(Stream csv, string setName, CancellationToken cancellationToken);
 
-        /// <summary>Возвращает текущий набор шаблонов.</summary>
+        /// <summary>Возвращает все шаблоны всех наборов.</summary>
         Task<IReadOnlyList<ProbeTemplate>> GetTemplatesAsync();
 
+        /// <summary>Возвращает список наборов шаблонов (имя и число шаблонов).</summary>
+        Task<IReadOnlyList<(string SetName, int Count)>> GetTemplateSetsAsync();
+
+        /// <summary>Удаляет набор шаблонов целиком.</summary>
+        /// <returns>Число удалённых шаблонов.</returns>
+        Task<int> DeleteTemplateSetAsync(string setName);
+
         /// <summary>
-        /// Разбирает файл маршрутизаторов и накладывает на него сохранённые шаблоны.
+        /// Разбирает файл маршрутизаторов и накладывает на него шаблоны.
         /// Время создания задач — момент вызова; Start/End вычисляются из шаблона.
         /// </summary>
         /// <param name="routersFile">Поток с файлом маршрутизаторов.</param>
+        /// <param name="setName">Имя применяемого набора; пусто — все наборы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        Task<ProvisioningResult> GenerateAsync(Stream routersFile, CancellationToken cancellationToken);
+        Task<ProvisioningResult> GenerateAsync(Stream routersFile, string? setName, CancellationToken cancellationToken);
 
         /// <summary>
         /// Формирует CSV формата «Base test.csv» из сгенерированных задач

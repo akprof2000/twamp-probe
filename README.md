@@ -190,7 +190,9 @@ Swagger доступен по `/swagger` на обоих приложениях 
 
 ### 1. Файл шаблонов (CSV, разделитель `;`, с заголовками)
 
-Порядок колонок **любой** (маппинг по имени заголовка), большинство колонок необязательны. Загрузка **замещает** предыдущий набор шаблонов.
+Шаблоны организованы в **именованные наборы**: каждый загруженный файл — отдельный набор (имя по умолчанию — имя файла, можно задать параметром `name`). Наборов может быть сколько угодно; при заливке маршрутизаторов выбирается **конкретный набор** (или все сразу); ненужный набор удаляется одной командой. Повторная загрузка набора с тем же именем обновляет его, не трогая остальные.
+
+Порядок колонок **любой** (маппинг по имени заголовка), большинство колонок необязательны.
 
 ```csv
 Name;Probe;Request;Type;Repeats;Circles;Pause;Cron;Start;End;Mode;TimeOut
@@ -283,10 +285,12 @@ CSV с колонками: `Title; Id; CallLine; FromHost; FromPort; ToHost; ToP
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| POST | `/api/userinterface/uploadtemplates` | загрузить файл шаблонов (multipart, поле `file`) |
-| GET | `/api/userinterface/templates` | текущий набор шаблонов |
-| POST | `/api/userinterface/uploadrouters` | файл маршрутизаторов → **создать** задачи (шаблоны × строки) |
-| POST | `/api/userinterface/previewrouters` | то же, но вернуть CSV **без создания** |
+| POST | `/api/userinterface/uploadtemplates?name=…` | загрузить набор шаблонов (multipart, поле `file`; имя по умолчанию — имя файла) |
+| GET | `/api/userinterface/templatesets` | список наборов (имя + число шаблонов) |
+| GET | `/api/userinterface/templates` | все шаблоны всех наборов |
+| DELETE | `/api/userinterface/templates?set=…` | удалить набор шаблонов |
+| POST | `/api/userinterface/uploadrouters?set=…` | файл маршрутизаторов → **создать** задачи (набор × строки; без `set` — все наборы) |
+| POST | `/api/userinterface/previewrouters?set=…` | то же, но вернуть CSV **без создания** |
 | POST | `/api/userinterface/UploadCsv` | загрузить готовый CSV задач |
 | GET | `/api/userinterface/downloadfile?from=…&to=…` | потоковая выгрузка отчёта CSV |
 

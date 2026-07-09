@@ -157,7 +157,7 @@ namespace SPI.Twamp.Server.Application
         }
 
         /// <inheritdoc/>
-        public async Task<int> UploadTemplatesAsync(Stream csv, CancellationToken cancellationToken)
+        public async Task<int> UploadTemplatesAsync(Stream csv, string setName, CancellationToken cancellationToken)
         {
             using StreamReader reader = new(csv, Encoding.UTF8);
 
@@ -178,9 +178,9 @@ namespace SPI.Twamp.Server.Application
             // Шаблон без адреса пробы бесполезен — отбрасываем.
             ProbeTemplate[] valid = [.. parsed.Where(t => !string.IsNullOrWhiteSpace(t.Probe))];
 
-            await _templates.ReplaceAllAsync(valid);
-            _logger.Info("Загружено шаблонов: {Count} (отброшено без адреса пробы: {Bad})",
-                valid.Length, parsed.Length - valid.Length);
+            await _templates.ReplaceSetAsync(setName, valid);
+            _logger.Info("Набор шаблонов «{Set}»: загружено {Count} (отброшено без адреса пробы: {Bad})",
+                setName, valid.Length, parsed.Length - valid.Length);
             return valid.Length;
         }
 
@@ -188,14 +188,30 @@ namespace SPI.Twamp.Server.Application
         public Task<IReadOnlyList<ProbeTemplate>> GetTemplatesAsync() => _templates.GetAllAsync();
 
         /// <inheritdoc/>
-        public async Task<ProvisioningResult> GenerateAsync(Stream routersFile, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<(string SetName, int Count)>> GetTemplateSetsAsync() => _templates.GetSetsAsync();
+
+        /// <inheritdoc/>
+        public async Task<int> DeleteTemplateSetAsync(string setName)
         {
-            IReadOnlyList<ProbeTemplate> templates = await _templates.GetAllAsync();
+            int removed = await _templates.DeleteSetAsync(setName);
+            _logger.Info("Набор шаблонов «{Set}» удалён ({Count} шаблонов)", setName, removed);
+            return removed;
+        }
+
+        /// <inheritdoc/>
+        public async Task<ProvisioningResult> GenerateAsync(Stream routersFile, string? setName, CancellationToken cancellationToken)
+        {
+            // Применяем конкретный набор шаблонов, либо все наборы, если имя не задано.
+            IReadOnlyList<ProbeTemplate> templates = string.IsNullOrWhiteSpace(setName)
+                ? await _templates.GetAllAsync()
+                : await _templates.GetBySetAsync(setName);
             List<string> rejected = [];
 
             if (templates.Count == 0)
             {
-                rejected.Add("Шаблоны не загружены — сначала вызовите UploadTemplates");
+                rejected.Add(string.IsNullOrWhiteSpace(setName)
+                    ? "Шаблоны не загружены — сначала вызовите UploadTemplates"
+                    : $"Набор шаблонов «{setName}» не найден или пуст");
                 return new ProvisioningResult([], 0, 0, rejected);
             }
 
@@ -235,8 +251,9 @@ namespace SPI.Twamp.Server.Application
                     tasks.Add(new TaskInfo
                     {
                         // Детерминированный Id: повторная загрузка того же файла
-                        // обновляет задачи, а не создаёт дубликаты.
-                        Id = DeterministicTaskId(template.Probe, ip, template.Name, name),
+                        // обновляет задачи, а не создаёт дубликаты. Имя набора включено,
+                        // чтобы одноимённые шаблоны из разных наборов не пересекались.
+                        Id = DeterministicTaskId(template.Probe, ip, $"{template.SetName}/{template.Name}", name),
                         // IP включён в имя, чтобы задачи различались даже когда одно
                         // устройство встречается в файле с несколькими адресами.
                         Title = $"{name}-{ip}-{template.Name}",
