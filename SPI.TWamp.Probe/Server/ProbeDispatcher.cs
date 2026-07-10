@@ -91,7 +91,7 @@ namespace SPI.Twamp.Probe.Server
                     catch (Exception ex)
                     {
                         _logger.Error(ex, "Ошибка обработки задачи {Guid}", task.Id);
-                        _runRegistry.ReportError(task.Id, ex.Message);
+                        _runRegistry.ReportOutcome(task.Id, RunOutcome.StartFailed, null, ex.Message);
                     }
                     finally
                     {

@@ -27,6 +27,30 @@
             <summary>Удаляет результаты старше указанной даты (ретенция).</summary>
             <returns>Число удалённых записей.</returns>
         </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IChangeNotifier">
+            <summary>
+            Шина уведомлений об изменениях состояния сервера (задачи, результаты, пробы)
+            для «длинного опроса» веб-интерфейса: вместо периодического поллинга клиент
+            висит на <see cref="M:SPI.Twamp.Server.Abstractions.IChangeNotifier.WaitAsync(System.Int64,System.TimeSpan,System.Threading.CancellationToken)"/> и получает ответ сразу при изменении.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IChangeNotifier.Version">
+            <summary>Текущая версия состояния (монотонно растёт при каждом изменении).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IChangeNotifier.Notify">
+            <summary>Фиксирует изменение состояния и будит всех ожидающих клиентов.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IChangeNotifier.WaitAsync(System.Int64,System.TimeSpan,System.Threading.CancellationToken)">
+            <summary>
+            Ожидает изменения состояния: если текущая версия уже больше
+            <paramref name="knownVersion"/> — возвращается немедленно, иначе ждёт
+            уведомления или таймаута. Ожидание асинхронное, поток пула не удерживается.
+            </summary>
+            <param name="knownVersion">Версия, известная клиенту.</param>
+            <param name="timeout">Максимальное время ожидания.</param>
+            <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+            <returns>Актуальная версия состояния.</returns>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IClientRepository">
             <summary>
             Репозиторий проб (клиентов) и «неопознанных» проб, ожидающих подтверждения.
@@ -458,7 +482,7 @@
             запуск их фонового опроса.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ClientService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IProbePoller)">
+        <member name="M:SPI.Twamp.Server.Application.ClientService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IProbePoller,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IClientService"/>: регистрация и подтверждение проб,
             запуск их фонового опроса.
@@ -634,7 +658,7 @@
             доставкой пробе и фоновой сверкой состояния.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.TaskService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskRepository,SPI.Twamp.Server.Abstractions.IProbeClient)">
+        <member name="M:SPI.Twamp.Server.Application.TaskService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Реализация <see cref="T:SPI.Twamp.Server.Abstractions.ITaskService"/>: изменения задач в хранилище с инкрементальной
             доставкой пробе и фоновой сверкой состояния.
@@ -785,7 +809,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskService)">
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
             цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД, а также
@@ -892,6 +916,12 @@
             <summary>
             Фактическая строка вызова зонда на пробе (исполняемый файл и аргументы).
             Служит для точной идентификации ответа в отчётах.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ActionData.ExitCode">
+            <summary>
+            Код выхода процесса зонда (0 — корректное завершение;
+            null — процесс не удалось запустить).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.Console">
@@ -1321,7 +1351,7 @@
             </summary>
             <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider,SPI.Twamp.Server.Abstractions.IProbeClient)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Веб-интерфейс оператора: управление задачами, пробами и отчётами.
             Контроллер тонкий — вся логика вынесена в прикладные сервисы.
@@ -1376,6 +1406,17 @@
             <param name="separator">Разделитель полей.</param>
             <param name="decimalSeparator">Десятичный разделитель.</param>
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.WaitChanges(System.Int64,System.Threading.CancellationToken)">
+            <summary>
+            «Длинный опрос» изменений для веб-интерфейса: висит до 25 секунд и отвечает
+            сразу, как только на сервере изменились задачи, результаты или состояние проб.
+            Клиент передаёт последнюю известную версию и обновляет экран при её росте —
+            это события вместо периодического поллинга, ожидание не держит поток.
+            </summary>
+            <param name="version">Версия состояния, известная клиенту (0 — первая загрузка).</param>
+            <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+            <returns>Актуальная версия состояния.</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.UserInterface.LastResults">
             <summary>
@@ -1471,6 +1512,25 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ActionRepository.DeleteOlderAsync(System.DateTime)">
+            <inheritdoc/>
+        </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.ChangeNotifier">
+            <summary>
+            Реализация шины изменений: счётчик версии + широковещательный
+            <see cref="T:System.Threading.Tasks.TaskCompletionSource"/>, пересоздаваемый на каждом уведомлении.
+            Все ожидающие клиенты пробуждаются одним сигналом; ожидание не держит поток.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ChangeNotifier.NewSignal">
+            <summary>Создаёт сигнал с асинхронным пробуждением ожидающих (без инлайнинга продолжений).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ChangeNotifier.Version">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ChangeNotifier.Notify">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ChangeNotifier.WaitAsync(System.Int64,System.TimeSpan,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.ClientRepository">

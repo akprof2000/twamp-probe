@@ -11,12 +11,14 @@ namespace SPI.Twamp.Server.Application
     /// запуск их фонового опроса.
     /// </summary>
     public sealed class ClientService(
-        Logger logger, IClientRepository clients, IProbeClient probe, IProbePoller poller) : IClientService
+        Logger logger, IClientRepository clients, IProbeClient probe, IProbePoller poller,
+        IChangeNotifier changeNotifier) : IClientService
     {
         private readonly Logger _logger = logger;
         private readonly IClientRepository _clients = clients;
         private readonly IProbeClient _probe = probe;
         private readonly IProbePoller _poller = poller;
+        private readonly IChangeNotifier _changeNotifier = changeNotifier;
 
         /// <inheritdoc/>
         public Task<IReadOnlyList<Client>> GetClientsAsync() => _clients.GetAllAsync();
@@ -30,6 +32,7 @@ namespace SPI.Twamp.Server.Application
             _logger.Info("CheckIn пробы {ProbeUrl}", probeUrl);
             Identify identify = await _probe.CheckInAsync(probeUrl, cancellationToken);
             await RegisterUnidentifiedAsync(identify);
+            _changeNotifier.Notify(); // данные проб изменились — событие для интерфейса
         }
 
         /// <inheritdoc/>
@@ -62,6 +65,8 @@ namespace SPI.Twamp.Server.Application
                 client.Id = existing.Id;
                 await _clients.UpdateAsync(client);
             }
+
+            _changeNotifier.Notify(); // список проб изменился — событие для интерфейса
         }
 
         /// <summary>

@@ -92,4 +92,65 @@ namespace SPI.Twamp.Tests
             Assert.Single(worker.GetKnownTaskIds(), id);
         }
     }
+
+    /// <summary>
+    /// Тесты составного статуса выполнения задач (TaskRunRegistry).
+    /// </summary>
+    public class TaskRunRegistryTests
+    {
+        [Fact(DisplayName = "Жизненный цикл: старт → выполняется, успех → счётчик и результат")]
+        public void Lifecycle_Success()
+        {
+            TaskRunRegistry registry = new();
+            TaskInfo task = new() { Id = Guid.NewGuid(), Title = "t1" };
+
+            registry.MarkStarted(task);
+            TaskRunInfo running = Assert.Single(registry.GetAll());
+            Assert.Equal(RunOutcome.Running, running.LastOutcome);
+            Assert.Equal(1, running.Running);
+
+            registry.ReportOutcome(task.Id, RunOutcome.Success, 0, "итоговая строка");
+            registry.MarkFinished(task.Id);
+
+            TaskRunInfo done = Assert.Single(registry.GetAll());
+            Assert.Equal(RunOutcome.Success, done.LastOutcome);
+            Assert.Equal(0, done.LastExitCode);
+            Assert.Equal("итоговая строка", done.LastResult);
+            Assert.Equal(1, done.SuccessTotal);
+            Assert.Equal(0, done.ErrorTotal);
+            Assert.Null(done.LastError);
+        }
+
+        [Fact(DisplayName = "Ненулевой код выхода — ошибка со счётчиком и текстом")]
+        public void Lifecycle_ExitCodeError()
+        {
+            TaskRunRegistry registry = new();
+            TaskInfo task = new() { Id = Guid.NewGuid(), Title = "t2" };
+
+            registry.MarkStarted(task);
+            registry.ReportOutcome(task.Id, RunOutcome.ExitCodeError, 1, "Процесс зонда завершился с кодом 1.");
+            registry.MarkFinished(task.Id);
+
+            TaskRunInfo info = Assert.Single(registry.GetAll());
+            Assert.Equal(RunOutcome.ExitCodeError, info.LastOutcome);
+            Assert.Equal(1, info.LastExitCode);
+            Assert.Equal(1, info.ErrorTotal);
+            Assert.NotNull(info.LastError);
+        }
+
+        [Fact(DisplayName = "Успех после ошибки снимает залипшую ошибку")]
+        public void Success_ClearsLastError()
+        {
+            TaskRunRegistry registry = new();
+            Guid id = Guid.NewGuid();
+
+            registry.ReportOutcome(id, RunOutcome.StartFailed, null, "не найден TWping");
+            registry.ReportOutcome(id, RunOutcome.Success, 0, "ок");
+
+            TaskRunInfo info = Assert.Single(registry.GetAll());
+            Assert.Null(info.LastError);
+            Assert.Equal(1, info.SuccessTotal);
+            Assert.Equal(1, info.ErrorTotal);
+        }
+    }
 }

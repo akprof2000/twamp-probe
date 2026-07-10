@@ -144,7 +144,7 @@ namespace SPI.Twamp.Probe.Runners
                 // «молча пропавшей» и оператору непонятно, что происходит.
                 string message = $"Не удалось запустить зонд «{execute}»: {ex.Message}";
                 _logger.Error("Задача {Guid}: {Message}", task.Id, message);
-                _runRegistry.ReportError(task.Id, message);
+                _runRegistry.ReportOutcome(task.Id, RunOutcome.StartFailed, null, message);
 
                 return new ActionData
                 {
@@ -189,15 +189,31 @@ namespace SPI.Twamp.Probe.Runners
             // и вернёт то, что процесс успел напечатать до принудительного завершения.
             string output = await outputTask;
             string error = await errorTask;
+            int exitCode = process.ExitCode;
 
+            // В ErrorConsole собираются ВСЕ ошибки запуска: stderr процесса, прерывание
+            // по таймауту и некорректный код выхода. Именно это поле сервер помещает
+            // в колонку Errors отчёта — там видна полная картина сбоя.
             if (timedOut)
             {
                 string note = $"Задача прервана по таймауту {timeout.TotalSeconds:0.###} c и принудительно завершена.";
                 error = string.IsNullOrEmpty(error) ? note : $"{error}{System.Environment.NewLine}{note}";
-                _runRegistry.ReportError(task.Id, note); // видно в статусе задач пробы
+            }
+            else if (exitCode != 0)
+            {
+                string note = $"Процесс зонда завершился с кодом {exitCode}.";
+                error = string.IsNullOrEmpty(error) ? note : $"{error}{System.Environment.NewLine}{note}";
             }
 
-            _logger.Debug("Зонд для узла {Node} завершён. Вывод: {Output}", node, output);
+            // Составной исход для статуса задачи: запустилась ли, как завершился процесс
+            // и краткий результат (итоговая строка вывода либо текст ошибки).
+            RunOutcome outcome = timedOut ? RunOutcome.TimedOut
+                : exitCode != 0 ? RunOutcome.ExitCodeError
+                : RunOutcome.Success;
+            string? summary = outcome == RunOutcome.Success ? LastLine(output) : error;
+            _runRegistry.ReportOutcome(task.Id, outcome, exitCode, summary);
+
+            _logger.Debug("Зонд для узла {Node} завершён с кодом {Code}. Вывод: {Output}", node, exitCode, output);
             if (!string.IsNullOrEmpty(error))
             {
                 _logger.Warn("Зонд для узла {Node} вернул ошибку: {Error}", node, error);
@@ -206,6 +222,7 @@ namespace SPI.Twamp.Probe.Runners
             return new ActionData
             {
                 CallLine = $"{execute} {arguments}", // фактическая команда — для идентификации ответа
+                ExitCode = exitCode,
                 Console = output,
                 ErrorConsole = error,
                 EndNode = node,
@@ -213,6 +230,23 @@ namespace SPI.Twamp.Probe.Runners
                 TaskId = task.Id,
                 RequestInfo = task.RequestInfo
             };
+        }
+
+        /// <summary>
+        /// Возвращает последнюю непустую строку вывода (итоговую статистику зонда),
+        /// обрезанную до разумной длины — как краткий результат для статуса задачи.
+        /// </summary>
+        private static string? LastLine(string output)
+        {
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                return null;
+            }
+
+            string? line = output
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .LastOrDefault(l => l.Length > 0);
+            return line is { Length: > 200 } ? line[..200] : line;
         }
 
         /// <summary>Возвращает индивидуальный таймаут задачи или бесконечность, если он не задан.</summary>

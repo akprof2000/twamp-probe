@@ -39,6 +39,11 @@ namespace SPI.Twamp.Probe.Contracts
         /// </summary>
         public string CallLine { get; set; } = "";
         /// <summary>
+        /// Код выхода процесса зонда (0 — корректное завершение;
+        /// null — процесс не удалось запустить).
+        /// </summary>
+        public int? ExitCode { get; set; }
+        /// <summary>
         /// Стандартный вывод процесса зонда.
         /// </summary>
         public string Console { get; set; } = "";

@@ -34,6 +34,30 @@ namespace SPI.Twamp.Probe.Server
                 info.Running++;
                 info.LastStart = DateTime.Now;
                 info.Executions++;
+                info.LastOutcome = RunOutcome.Running;
+            }
+        }
+
+        /// <inheritdoc/>
+        public void ReportOutcome(Guid taskId, RunOutcome outcome, int? exitCode, string? result)
+        {
+            TaskRunInfo info = Get(taskId);
+            lock (info)
+            {
+                info.LastOutcome = outcome;
+                info.LastExitCode = exitCode;
+                info.LastResult = result;
+
+                if (outcome == RunOutcome.Success)
+                {
+                    info.SuccessTotal++;
+                    info.LastError = null; // успех снимает «залипшую» ошибку
+                }
+                else
+                {
+                    info.ErrorTotal++;
+                    info.LastError = result;
+                }
             }
         }
 

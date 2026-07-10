@@ -92,6 +92,8 @@ try
     _ = builder.Services.AddSingleton<IActionRepository, ActionRepository>();
     _ = builder.Services.AddSingleton<IStatRepository, StatRepository>();
     _ = builder.Services.AddSingleton<IProbeClient, ProbeClient>();
+    // Шина изменений для «длинного опроса» веб-интерфейса (WaitChanges).
+    _ = builder.Services.AddSingleton<IChangeNotifier, ChangeNotifier>();
 
     // --- Прикладные сервисы ---
     _ = builder.Services.AddSingleton<ITaskService, TaskService>();

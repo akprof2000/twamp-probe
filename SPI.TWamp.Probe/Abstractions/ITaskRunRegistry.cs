@@ -5,6 +5,26 @@ using SPI.Twamp.Probe.Contracts;
 namespace SPI.Twamp.Probe.Abstractions
 {
     /// <summary>
+    /// Исход последнего запуска зонда — составной статус жизненного цикла:
+    /// запускалась ли задача, корректно ли завершился процесс и каков результат.
+    /// </summary>
+    public enum RunOutcome
+    {
+        /// <summary>Задача ещё ни разу не запускалась пробой.</summary>
+        NotStarted,
+        /// <summary>Задача выполняется прямо сейчас.</summary>
+        Running,
+        /// <summary>Процесс зонда завершился корректно (код выхода 0).</summary>
+        Success,
+        /// <summary>Процесс завершился с ненулевым кодом выхода (см. LastExitCode).</summary>
+        ExitCodeError,
+        /// <summary>Процесс зонда не удалось запустить (например, файл не найден).</summary>
+        StartFailed,
+        /// <summary>Процесс превысил таймаут задачи и был принудительно завершён.</summary>
+        TimedOut
+    }
+
+    /// <summary>
     /// Текущее состояние выполнения одной задачи на пробе.
     /// </summary>
     public class TaskRunInfo
@@ -23,6 +43,20 @@ namespace SPI.Twamp.Probe.Abstractions
         public long Executions { get; set; }
         /// <summary>Ближайший запланированный запуск (для задач по расписанию).</summary>
         public DateTime? NextRun { get; set; }
+
+        /// <summary>Исход последнего завершившегося запуска зонда.</summary>
+        public RunOutcome LastOutcome { get; set; } = RunOutcome.NotStarted;
+        /// <summary>Код выхода последнего процесса зонда (0 — корректное завершение).</summary>
+        public int? LastExitCode { get; set; }
+        /// <summary>
+        /// Краткий результат последнего запуска: при успехе — итоговая строка вывода
+        /// зонда (статистика), при ошибке — её текст.
+        /// </summary>
+        public string? LastResult { get; set; }
+        /// <summary>Число успешных запусков (код выхода 0) с момента старта пробы.</summary>
+        public long SuccessTotal { get; set; }
+        /// <summary>Число неуспешных запусков (ошибка запуска, таймаут, код ≠ 0).</summary>
+        public long ErrorTotal { get; set; }
         /// <summary>Текст последней ошибки выполнения (например, зонд не найден).</summary>
         public string? LastError { get; set; }
     }
@@ -39,6 +73,16 @@ namespace SPI.Twamp.Probe.Abstractions
 
         /// <summary>Фиксирует завершение выполнения задачи.</summary>
         void MarkFinished(Guid taskId);
+
+        /// <summary>
+        /// Фиксирует исход одного запуска зонда: запустился ли процесс, как завершился
+        /// (код выхода) и каков краткий результат. Ведёт счётчики успехов и ошибок.
+        /// </summary>
+        /// <param name="taskId">Идентификатор задачи.</param>
+        /// <param name="outcome">Исход запуска.</param>
+        /// <param name="exitCode">Код выхода процесса (если процесс запускался).</param>
+        /// <param name="result">Краткий результат: итоговая строка вывода или текст ошибки.</param>
+        void ReportOutcome(Guid taskId, RunOutcome outcome, int? exitCode, string? result);
 
         /// <summary>Фиксирует ошибку выполнения (не сбрасывается до следующей ошибки или успеха).</summary>
         void ReportError(Guid taskId, string error);

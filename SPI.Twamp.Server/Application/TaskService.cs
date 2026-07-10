@@ -10,11 +10,13 @@ namespace SPI.Twamp.Server.Application
     /// Реализация <see cref="ITaskService"/>: изменения задач в хранилище с инкрементальной
     /// доставкой пробе и фоновой сверкой состояния.
     /// </summary>
-    public sealed class TaskService(Logger logger, ITaskRepository tasks, IProbeClient probe) : ITaskService
+    public sealed class TaskService(
+        Logger logger, ITaskRepository tasks, IProbeClient probe, IChangeNotifier changeNotifier) : ITaskService
     {
         private readonly Logger _logger = logger;
         private readonly ITaskRepository _tasks = tasks;
         private readonly IProbeClient _probe = probe;
+        private readonly IChangeNotifier _changeNotifier = changeNotifier;
 
         /// <inheritdoc/>
         public Task<IReadOnlyList<TaskInfo>> GetAllAsync() => _tasks.GetAllAsync();
@@ -31,6 +33,7 @@ namespace SPI.Twamp.Server.Application
         {
             _logger.Info("Сохранение задачи {@Task}", task);
             await _tasks.UpsertAsync(task);
+            _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
             // Передаём пробе только изменившуюся задачу. Если проба недоступна —
             // ничего страшного: недостающее досошлёт фоновая сверка.
             await TryPushAsync(task.RequestInfo, [task], cancellationToken);
@@ -46,6 +49,7 @@ namespace SPI.Twamp.Server.Application
 
             _logger.Info("Массовое сохранение задач: {Count}", tasks.Count);
             await _tasks.UpsertRangeAsync(tasks);
+            _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
 
             // Группируем по пробе и отправляем большими пачками: один HTTP-запрос
             // на пачку вместо запроса на каждую задачу. Отправка best-effort —
@@ -75,6 +79,7 @@ namespace SPI.Twamp.Server.Application
             task.Delete = true;
             task.DeletedAt = DateTime.Now; // для фоновой очистки давно удалённых
             await _tasks.UpsertAsync(task);
+            _changeNotifier.Notify(); // задача удалена — событие для интерфейса
             await TryPushAsync(task.RequestInfo, [task], cancellationToken); // отправляем удаление
         }
 
@@ -83,6 +88,7 @@ namespace SPI.Twamp.Server.Application
         {
             _logger.Info("Удаление всех задач пробы {RequestInfo}", requestInfo);
             await _tasks.MarkDeletedByRequestInfoAsync(requestInfo);
+            _changeNotifier.Notify(); // задачи пробы удалены — событие для интерфейса
 
             IReadOnlyList<TaskInfo> all = await _tasks.GetByRequestInfoAsync(requestInfo);
             TaskInfo[] deleted = [.. all.Where(t => t.Delete)];
@@ -159,6 +165,7 @@ namespace SPI.Twamp.Server.Application
             {
                 _logger.Info("Синхронизация пробы {RequestInfo}: отправляем изменений {Count}", requestInfo, toPush.Count);
                 await _probe.PushTasksAsync(requestInfo, toPush, cancellationToken);
+                _changeNotifier.Notify(); // сверка изменила состояние задач
             }
         }
 

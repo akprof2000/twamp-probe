@@ -57,7 +57,7 @@
   <div class="card" id="cardProbeTasks" style="display:none">
     <h2>Выполнение задач на пробе <span id="probeTasksAddr" style="color:var(--mut);font-weight:400"></span></h2>
     <div class="scroll"><table id="tblProbeTasks">
-      <thead><tr><th>Задача</th><th>Сейчас</th><th>Последний старт</th><th>Завершение</th><th>Выполнений</th><th>Следующий запуск</th><th>Последняя ошибка</th></tr></thead>
+      <thead><tr><th>Задача</th><th>Состояние</th><th>Последний старт</th><th>Завершение</th><th>Успех / ошибки</th><th>Следующий запуск</th><th>Результат</th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgProbeTasks"></div>
@@ -175,18 +175,39 @@ async function withBusy(btn, fn) {
 }
 
 // --- Выполнение задач на пробе (статус в реальном времени) ---
+let currentProbe = null; // проба, чья таблица задач сейчас открыта (для автообновления)
+
+// Составной статус жизненного цикла: запустилась ли задача пробой,
+// корректно ли завершился процесс зонда и каков итог.
+function outcomeCell(t) {
+  if (t.running) return `<span class="ok">выполняется (${t.running})</span>`;
+  switch (t.lastOutcome) {
+    case 'Success':       return '<span class="ok">успех (код 0)</span>';
+    case 'ExitCodeError': return `<span class="bad">ошибка (код ${t.lastExitCode ?? '?'})</span>`;
+    case 'StartFailed':   return '<span class="bad">не запустился</span>';
+    case 'TimedOut':      return '<span class="bad">таймаут</span>';
+    case 'Running':       return '<span class="ok">выполняется</span>';
+    default:              return '<span style="color:var(--mut)">ещё не запускалась</span>';
+  }
+}
 async function loadProbeTasks(btn, probe) {
   await withBusy(btn, async () => {
     try {
       const list = await jget('probetaskstatus?probe=' + encodeURIComponent(probe));
+      currentProbe = probe;
       $('#cardProbeTasks').style.display = '';
       $('#probeTasksAddr').textContent = probe;
-      list.sort((a, b) => (b.running - a.running) || (a.title > b.title ? 1 : -1));
+      // Сначала выполняющиеся и проблемные, затем по имени.
+      const bad = o => o === 'ExitCodeError' || o === 'StartFailed' || o === 'TimedOut';
+      list.sort((a, b) => (b.running - a.running) ||
+        (bad(b.lastOutcome) - bad(a.lastOutcome)) || (a.title > b.title ? 1 : -1));
       $('#tblProbeTasks tbody').innerHTML = list.map(t => `<tr>
         <td class="wrap">${t.title || t.taskId}</td>
-        <td>${t.running ? '<span class="ok">выполняется (' + t.running + ')</span>' : 'ожидает'}</td>
-        <td>${fmt(t.lastStart)}</td><td>${fmt(t.lastFinish)}</td><td>${t.executions}</td>
-        <td>${fmt(t.nextRun)}</td><td class="wrap">${t.lastError || ''}</td></tr>`).join('')
+        <td>${outcomeCell(t)}</td>
+        <td>${fmt(t.lastStart)}</td><td>${fmt(t.lastFinish)}</td>
+        <td><span class="ok">${t.successTotal}</span> / <span class="${t.errorTotal ? 'bad' : ''}">${t.errorTotal}</span></td>
+        <td>${fmt(t.nextRun)}</td>
+        <td class="wrap">${t.lastResult || t.lastError || ''}</td></tr>`).join('')
         || '<tr><td colspan="7">задачи ещё не запускались</td></tr>';
       $('#msgProbeTasks').textContent = 'Всего: ' + list.length + ' | обновлено ' + new Date().toLocaleTimeString('ru-RU');
     } catch (e) { $('#msgProbeTasks').textContent = 'Ошибка: ' + e.message; $('#cardProbeTasks').style.display = ''; }
@@ -326,6 +347,41 @@ async function downloadReport() {
   a.href = URL.createObjectURL(blob); a.download = 'report.csv'; a.click();
 }
 
+// --- Автообновление по событиям сервера (длинный опрос) ---
+// Клиент висит на waitchanges (до 25 c): при любом изменении на сервере
+// (новые результаты, задачи, состояние проб) ответ приходит сразу, и активная
+// вкладка обновляется мгновенно. Возврат по таймауту тоже освежает экран
+// (страховочное обновление раз в ~25 c). Скрытое окно — пауза без соединения.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let changeVersion = 0;
+
+function refreshActiveTab() {
+  const tab = document.querySelector('nav button.active')?.dataset.tab;
+  if (tab === 'status') {
+    loadStatus();
+    if (currentProbe) loadProbeTasks(null, currentProbe);
+  } else if (tab === 'tasks') {
+    loadTasks();
+  }
+}
+
+async function changeLoop() {
+  for (;;) {
+    try {
+      if (document.hidden) { await sleep(3000); continue; }
+      const r = await fetch(api('waitchanges?version=' + changeVersion), { headers: hdrs() });
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
+      const changed = data.version > changeVersion;
+      changeVersion = data.version;
+      if (changed || !document.hidden) refreshActiveTab();
+    } catch {
+      await sleep(5000); // сервер недоступен — не частим с повторами
+    }
+  }
+}
+
+changeLoop();
 loadStatus();
 </script>
 </body>

@@ -82,6 +82,30 @@
             </summary>
             <param name="cancellationToken">Токен отмены операции запуска.</param>
         </member>
+        <member name="T:SPI.Twamp.Probe.Abstractions.RunOutcome">
+            <summary>
+            Исход последнего запуска зонда — составной статус жизненного цикла:
+            запускалась ли задача, корректно ли завершился процесс и каков результат.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Abstractions.RunOutcome.NotStarted">
+            <summary>Задача ещё ни разу не запускалась пробой.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Abstractions.RunOutcome.Running">
+            <summary>Задача выполняется прямо сейчас.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Abstractions.RunOutcome.Success">
+            <summary>Процесс зонда завершился корректно (код выхода 0).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Abstractions.RunOutcome.ExitCodeError">
+            <summary>Процесс завершился с ненулевым кодом выхода (см. LastExitCode).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Abstractions.RunOutcome.StartFailed">
+            <summary>Процесс зонда не удалось запустить (например, файл не найден).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Abstractions.RunOutcome.TimedOut">
+            <summary>Процесс превысил таймаут задачи и был принудительно завершён.</summary>
+        </member>
         <member name="T:SPI.Twamp.Probe.Abstractions.TaskRunInfo">
             <summary>
             Текущее состояние выполнения одной задачи на пробе.
@@ -108,6 +132,24 @@
         <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.NextRun">
             <summary>Ближайший запланированный запуск (для задач по расписанию).</summary>
         </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastOutcome">
+            <summary>Исход последнего завершившегося запуска зонда.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastExitCode">
+            <summary>Код выхода последнего процесса зонда (0 — корректное завершение).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastResult">
+            <summary>
+            Краткий результат последнего запуска: при успехе — итоговая строка вывода
+            зонда (статистика), при ошибке — её текст.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.SuccessTotal">
+            <summary>Число успешных запусков (код выхода 0) с момента старта пробы.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.ErrorTotal">
+            <summary>Число неуспешных запусков (ошибка запуска, таймаут, код ≠ 0).</summary>
+        </member>
         <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastError">
             <summary>Текст последней ошибки выполнения (например, зонд не найден).</summary>
         </member>
@@ -123,6 +165,16 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.MarkFinished(System.Guid)">
             <summary>Фиксирует завершение выполнения задачи.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.ReportOutcome(System.Guid,SPI.Twamp.Probe.Abstractions.RunOutcome,System.Nullable{System.Int32},System.String)">
+            <summary>
+            Фиксирует исход одного запуска зонда: запустился ли процесс, как завершился
+            (код выхода) и каков краткий результат. Ведёт счётчики успехов и ошибок.
+            </summary>
+            <param name="taskId">Идентификатор задачи.</param>
+            <param name="outcome">Исход запуска.</param>
+            <param name="exitCode">Код выхода процесса (если процесс запускался).</param>
+            <param name="result">Краткий результат: итоговая строка вывода или текст ошибки.</param>
         </member>
         <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.ReportError(System.Guid,System.String)">
             <summary>Фиксирует ошибку выполнения (не сбрасывается до следующей ошибки или успеха).</summary>
@@ -177,6 +229,12 @@
             <summary>
             Фактическая строка вызова зонда (исполняемый файл и аргументы).
             Служит для точной идентификации ответа в отчётах.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.ExitCode">
+            <summary>
+            Код выхода процесса зонда (0 — корректное завершение;
+            null — процесс не удалось запустить).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Console">
@@ -532,6 +590,12 @@
         <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.ExecuteOnceAsync(SPI.Twamp.Probe.Contracts.TaskInfo,System.String,System.String,System.String,System.Threading.CancellationToken)">
             <summary>Запускает дочерний процесс один раз и возвращает собранный результат замера.</summary>
         </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.LastLine(System.String)">
+            <summary>
+            Возвращает последнюю непустую строку вывода (итоговую статистику зонда),
+            обрезанную до разумной длины — как краткий результат для статуса задачи.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.GetTimeout(SPI.Twamp.Probe.Contracts.TaskInfo)">
             <summary>Возвращает индивидуальный таймаут задачи или бесконечность, если он не задан.</summary>
         </member>
@@ -662,6 +726,9 @@
             <summary>Возвращает (или создаёт) запись состояния задачи.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.MarkStarted(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.ReportOutcome(System.Guid,SPI.Twamp.Probe.Abstractions.RunOutcome,System.Nullable{System.Int32},System.String)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.MarkFinished(System.Guid)">

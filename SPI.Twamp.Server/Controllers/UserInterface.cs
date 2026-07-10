@@ -18,7 +18,7 @@ namespace SPI.Twamp.Server.Controllers
     public class UserInterface(
         Logger logger, ITaskService taskService, IClientService clientService,
         IReportService reportService, IProvisioningService provisioningService,
-        IProbeStatusProvider probeStatus, IProbeClient probeClient)
+        IProbeStatusProvider probeStatus, IProbeClient probeClient, IChangeNotifier changeNotifier)
         : ControllerBase
     {
         private readonly Logger _logger = logger;
@@ -28,6 +28,7 @@ namespace SPI.Twamp.Server.Controllers
         private readonly IProvisioningService _provisioningService = provisioningService;
         private readonly IProbeStatusProvider _probeStatus = probeStatus;
         private readonly IProbeClient _probeClient = probeClient;
+        private readonly IChangeNotifier _changeNotifier = changeNotifier;
 
         /// <summary>Возвращает полный список задач.</summary>
         [HttpGet("tasks")]
@@ -142,6 +143,22 @@ namespace SPI.Twamp.Server.Controllers
 
             await using StreamWriter writer = new(Response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
             await _reportService.StreamCsvAsync(dateFrom, dateTo, separator, decimalSeparator, writer, cancellationToken);
+        }
+
+        /// <summary>
+        /// «Длинный опрос» изменений для веб-интерфейса: висит до 25 секунд и отвечает
+        /// сразу, как только на сервере изменились задачи, результаты или состояние проб.
+        /// Клиент передаёт последнюю известную версию и обновляет экран при её росте —
+        /// это события вместо периодического поллинга, ожидание не держит поток.
+        /// </summary>
+        /// <param name="version">Версия состояния, известная клиенту (0 — первая загрузка).</param>
+        /// <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        /// <returns>Актуальная версия состояния.</returns>
+        [HttpGet("[action]")]
+        public async Task<ActionResult> WaitChanges([FromQuery] long version = 0, CancellationToken cancellationToken = default)
+        {
+            long current = await _changeNotifier.WaitAsync(version, TimeSpan.FromSeconds(25), cancellationToken);
+            return Ok(new { Version = current });
         }
 
         /// <summary>

@@ -21,7 +21,8 @@ namespace SPI.Twamp.Server.BackgroundServices
     /// </summary>
     public sealed class ProbePollingService(
         Logger logger, IConfiguration configuration, IClientRepository clients,
-        IProbeClient probe, IActionRepository actions, IStatRepository stats, ITaskService taskService)
+        IProbeClient probe, IActionRepository actions, IStatRepository stats,
+        ITaskService taskService, IChangeNotifier changeNotifier)
         : IHostedService, IProbePoller, IProbeStatusProvider, IDisposable
     {
         /// <summary>Максимальная задержка между попытками при ошибках связи, секунд.</summary>
@@ -33,6 +34,7 @@ namespace SPI.Twamp.Server.BackgroundServices
         private readonly IActionRepository _actions = actions;
         private readonly IStatRepository _stats = stats;
         private readonly ITaskService _taskService = taskService;
+        private readonly IChangeNotifier _changeNotifier = changeNotifier;
 
         /// <summary>Интервал фоновой сверки задач с пробами, секунд.</summary>
         private readonly int _reconcileIntervalSeconds =
@@ -118,12 +120,14 @@ namespace SPI.Twamp.Server.BackgroundServices
                         IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
 
                         // Обновляем «последний результат» каждой задачи — он показывается
-                        // в списке задач веб-интерфейса.
+                        // в списке задач веб-интерфейса. Ошибкой считается и текст ошибки,
+                        // и некорректный код выхода процесса зонда.
                         foreach (ActionData action in fresh)
                         {
+                            bool hasError = !string.IsNullOrEmpty(action.ErrorConsole) ||
+                                            action.ExitCode is not (null or 0);
                             _lastResults[action.TaskId] = new TaskLastResult(
-                                action.Creation ?? DateTime.Now,
-                                !string.IsNullOrEmpty(action.ErrorConsole));
+                                action.Creation ?? DateTime.Now, hasError);
                         }
 
                         // Разбираем статистику сразу при приёме — выгрузка отчёта
@@ -133,10 +137,22 @@ namespace SPI.Twamp.Server.BackgroundServices
                         // Подтверждаем доставку — только теперь проба удалит пачку у себя.
                         await _probe.ConfirmResultsAsync(probeUrl, batch.BatchId, cancellationToken);
                         totalResults += fresh.Count;
+
+                        if (fresh.Count > 0)
+                        {
+                            _changeNotifier.Notify(); // новые результаты — будим веб-интерфейс
+                        }
                     }
 
+                    // Восстановление связи после ошибки — тоже событие для интерфейса.
+                    bool wasFailing = _states.TryGetValue(probeUrl, out ProbePollState? prevState) &&
+                                      prevState.BackoffSeconds > 0;
                     backoffSeconds = 1; // связь есть — возвращаем минимальную задержку
                     _states[probeUrl] = new ProbePollState(DateTime.Now, null, null, totalResults, 0);
+                    if (wasFailing)
+                    {
+                        _changeNotifier.Notify();
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -146,7 +162,12 @@ namespace SPI.Twamp.Server.BackgroundServices
                 {
                     _logger.Warn(ex, "Ошибка опроса пробы {ProbeUrl}, повтор через {Delay} c", probeUrl, backoffSeconds);
                     ProbePollState? prev = _states.TryGetValue(probeUrl, out ProbePollState? p) ? p : null;
+                    bool becameFailing = prev is null || prev.BackoffSeconds == 0;
                     _states[probeUrl] = new ProbePollState(prev?.LastSuccess, DateTime.Now, ex.Message, totalResults, backoffSeconds);
+                    if (becameFailing)
+                    {
+                        _changeNotifier.Notify(); // проба перестала отвечать — событие для интерфейса
+                    }
                     try
                     {
                         await Task.Delay(TimeSpan.FromSeconds(backoffSeconds), cancellationToken);
