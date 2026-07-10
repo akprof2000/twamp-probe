@@ -17,11 +17,12 @@ namespace SPI.Twamp.Probe.Controllers
     /// <seealso cref="ControllerBase" />
     [Route("api/[controller]")]
     [ApiController]
-    public class ProbeInterface(Logger logger, Worker storage, IResultStore resultStore) : ControllerBase
+    public class ProbeInterface(Logger logger, Worker storage, IResultStore resultStore, ITaskRunRegistry runRegistry) : ControllerBase
     {
         private readonly Logger logger = logger;
         private readonly Worker storage = storage;
         private readonly IResultStore resultStore = resultStore;
+        private readonly ITaskRunRegistry runRegistry = runRegistry;
 
 
         /// <summary>
@@ -76,6 +77,17 @@ namespace SPI.Twamp.Probe.Controllers
         public ActionResult<Guid[]> TaskIds()
         {
             return Ok(storage.GetKnownTaskIds());
+        }
+
+        /// <summary>
+        /// Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
+        /// когда был последний запуск/завершение, сколько раз выполнялась,
+        /// ближайший запланированный запуск и последняя ошибка.
+        /// </summary>
+        [HttpGet("[action]")]
+        public ActionResult<IReadOnlyList<TaskRunInfo>> TaskStatus()
+        {
+            return Ok(runRegistry.GetAll());
         }
 
         /// <summary>

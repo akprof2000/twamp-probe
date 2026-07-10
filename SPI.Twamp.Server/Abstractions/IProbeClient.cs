@@ -45,5 +45,14 @@ namespace SPI.Twamp.Server.Abstractions
         /// <param name="probeUrl">Базовый адрес пробы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         Task<Guid[]> GetTaskIdsAsync(string probeUrl, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Запрашивает у пробы состояние выполнения задач (запущена ли сейчас,
+        /// последний старт/финиш, ближайший запуск, последняя ошибка).
+        /// Ответ отдаётся как есть (сырой JSON) — сервер лишь проксирует его в UI.
+        /// </summary>
+        /// <param name="probeUrl">Базовый адрес пробы.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task<string> GetTaskStatusRawAsync(string probeUrl, CancellationToken cancellationToken);
     }
 }

@@ -4,27 +4,31 @@ using NLog;
 using spi.twamp.server.Environment;
 using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.Contracts;
+using SPI.Twamp.Server.Infrastructure;
 
 namespace SPI.Twamp.Server.BackgroundServices
 {
     /// <summary>
-    /// Фоновая очистка БД (ретенция), чтобы база не росла бесконечно:
+    /// Фоновое обслуживание БД:
     /// <list type="bullet">
-    /// <item>сырые результаты (actiondata) старше «Retention:RawDays» удаляются;</item>
-    /// <item>разобранная статистика (stats) старше «Retention:StatsDays» удаляется;</item>
-    /// <item>задачи, помеченные удалёнными более «Retention:DeletedTaskDays» назад,
-    /// вычищаются окончательно (пробы к этому моменту уже синхронизированы,
-    /// а осиротевшие копии на пробах уберёт фоновая сверка).</item>
+    /// <item>частый checkpoint LiteDB (каждые «Database:CheckpointMin» минут) — переносит
+    /// WAL-журнал («*-log.db») в основную базу, иначе журнал растёт бесконечно;</item>
+    /// <item>ретенция: сырые результаты старше «Retention:RawDays», статистика старше
+    /// «Retention:StatsDays», задачи, удалённые более «Retention:DeletedTaskDays» назад.</item>
     /// </list>
     /// </summary>
     public sealed class MaintenanceService(Logger logger, IConfiguration configuration,
-        IActionRepository actions, IStatRepository stats, ITaskRepository tasks)
+        LiteDbContext dbContext, IActionRepository actions, IStatRepository stats, ITaskRepository tasks)
         : BackgroundService
     {
         private readonly Logger _logger = logger;
+        private readonly LiteDbContext _dbContext = dbContext;
         private readonly IActionRepository _actions = actions;
         private readonly IStatRepository _stats = stats;
         private readonly ITaskRepository _tasks = tasks;
+
+        /// <summary>Интервал переноса WAL-журнала в основную базу, минут.</summary>
+        private readonly int _checkpointMinutes = configuration["Database:CheckpointMin"].ConvertTo(5);
 
         /// <summary>Интервал между проходами очистки, минут.</summary>
         private readonly int _intervalMinutes = configuration["Retention:IntervalMin"].ConvertTo(60);
@@ -38,26 +42,38 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Через сколько дней окончательно вычищать удалённые задачи.</summary>
         private readonly int _deletedTaskDays = configuration["Retention:DeletedTaskDays"].ConvertTo(7);
 
-        /// <summary>Периодический цикл очистки.</summary>
+        /// <summary>Периодический цикл: checkpoint — часто, полная очистка — редко.</summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.Info("Очистка БД: raw {Raw} дн., stats {Stats} дн., удалённые задачи {Del} дн., интервал {Int} мин.",
-                _rawDays, _statsDays, _deletedTaskDays, _intervalMinutes);
+            _logger.Info(
+                "Обслуживание БД: checkpoint каждые {Chk} мин.; ретенция raw {Raw} дн., stats {Stats} дн., удалённые задачи {Del} дн., каждые {Int} мин.",
+                _checkpointMinutes, _rawDays, _statsDays, _deletedTaskDays, _intervalMinutes);
+
+            DateTime lastCleanup = DateTime.MinValue;
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await RunOnceAsync();
+                    // Редкая полная очистка по своему интервалу.
+                    if ((DateTime.Now - lastCleanup).TotalMinutes >= _intervalMinutes)
+                    {
+                        await RunOnceAsync();
+                        lastCleanup = DateTime.Now;
+                    }
+
+                    // Частый checkpoint: WAL-журнал переносится в основную базу и очищается.
+                    await _dbContext.CheckpointAsync();
+                    _logger.Debug("Checkpoint LiteDB выполнен");
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, "Ошибка фоновой очистки БД");
+                    _logger.Error(ex, "Ошибка фонового обслуживания БД");
                 }
 
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMinutes(_intervalMinutes), stoppingToken);
+                    await Task.Delay(TimeSpan.FromMinutes(_checkpointMinutes), stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {

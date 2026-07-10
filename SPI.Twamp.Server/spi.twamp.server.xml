@@ -132,6 +132,15 @@
             <param name="probeUrl">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTaskStatusRawAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Запрашивает у пробы состояние выполнения задач (запущена ли сейчас,
+            последний старт/финиш, ближайший запуск, последняя ошибка).
+            Ответ отдаётся как есть (сырой JSON) — сервер лишь проксирует его в UI.
+            </summary>
+            <param name="probeUrl">Базовый адрес пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbePoller">
             <summary>
             Управление фоновым опросом проб. Позволяет запустить опрос вновь
@@ -180,6 +189,26 @@
         <member name="P:SPI.Twamp.Server.Abstractions.ProbePollState.BackoffSeconds">
             <summary>Текущая задержка повторных попыток (0 — связь в порядке).</summary>
         </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.TaskLastResult">
+            <summary>
+            Последний известный результат выполнения задачи.
+            </summary>
+            <param name="Time">Момент результата.</param>
+            <param name="HasError">Была ли ошибка в этом результате.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.TaskLastResult.#ctor(System.DateTime,System.Boolean)">
+            <summary>
+            Последний известный результат выполнения задачи.
+            </summary>
+            <param name="Time">Момент результата.</param>
+            <param name="HasError">Была ли ошибка в этом результате.</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.Time">
+            <summary>Момент результата.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.HasError">
+            <summary>Была ли ошибка в этом результате.</summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbeStatusProvider">
             <summary>
             Доступ к состоянию фонового опроса проб — для страницы статуса.
@@ -187,6 +216,12 @@
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProbeStatusProvider.GetStates">
             <summary>Возвращает состояние опроса всех проб (ключ — адрес пробы).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeStatusProvider.GetLastResults">
+            <summary>
+            Возвращает последние результаты по задачам (ключ — идентификатор задачи).
+            Заполняется по мере поступления результатов после старта сервера.
+            </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ProvisioningResult">
             <summary>
@@ -696,27 +731,28 @@
         </member>
         <member name="T:SPI.Twamp.Server.BackgroundServices.MaintenanceService">
             <summary>
-            Фоновая очистка БД (ретенция), чтобы база не росла бесконечно:
+            Фоновое обслуживание БД:
             <list type="bullet">
-            <item>сырые результаты (actiondata) старше «Retention:RawDays» удаляются;</item>
-            <item>разобранная статистика (stats) старше «Retention:StatsDays» удаляется;</item>
-            <item>задачи, помеченные удалёнными более «Retention:DeletedTaskDays» назад,
-            вычищаются окончательно (пробы к этому моменту уже синхронизированы,
-            а осиротевшие копии на пробах уберёт фоновая сверка).</item>
+            <item>частый checkpoint LiteDB (каждые «Database:CheckpointMin» минут) — переносит
+            WAL-журнал («*-log.db») в основную базу, иначе журнал растёт бесконечно;</item>
+            <item>ретенция: сырые результаты старше «Retention:RawDays», статистика старше
+            «Retention:StatsDays», задачи, удалённые более «Retention:DeletedTaskDays» назад.</item>
             </list>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskRepository)">
+        <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Infrastructure.LiteDbContext,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskRepository)">
             <summary>
-            Фоновая очистка БД (ретенция), чтобы база не росла бесконечно:
+            Фоновое обслуживание БД:
             <list type="bullet">
-            <item>сырые результаты (actiondata) старше «Retention:RawDays» удаляются;</item>
-            <item>разобранная статистика (stats) старше «Retention:StatsDays» удаляется;</item>
-            <item>задачи, помеченные удалёнными более «Retention:DeletedTaskDays» назад,
-            вычищаются окончательно (пробы к этому моменту уже синхронизированы,
-            а осиротевшие копии на пробах уберёт фоновая сверка).</item>
+            <item>частый checkpoint LiteDB (каждые «Database:CheckpointMin» минут) — переносит
+            WAL-журнал («*-log.db») в основную базу, иначе журнал растёт бесконечно;</item>
+            <item>ретенция: сырые результаты старше «Retention:RawDays», статистика старше
+            «Retention:StatsDays», задачи, удалённые более «Retention:DeletedTaskDays» назад.</item>
             </list>
             </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._checkpointMinutes">
+            <summary>Интервал переноса WAL-журнала в основную базу, минут.</summary>
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._intervalMinutes">
             <summary>Интервал между проходами очистки, минут.</summary>
@@ -731,7 +767,7 @@
             <summary>Через сколько дней окончательно вычищать удалённые задачи.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.ExecuteAsync(System.Threading.CancellationToken)">
-            <summary>Периодический цикл очистки.</summary>
+            <summary>Периодический цикл: checkpoint — часто, полная очистка — редко.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.RunOnceAsync">
             <summary>Один проход очистки всех коллекций.</summary>
@@ -774,10 +810,16 @@
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._states">
             <summary>Текущее состояние опроса каждой пробы (для страницы статуса).</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._lastResults">
+            <summary>Последний результат каждой задачи (для колонки статуса в списке задач).</summary>
+        </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._cts">
             <summary>Токен жизненного цикла всех фоновых циклов.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.GetStates">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.GetLastResults">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartAsync(System.Threading.CancellationToken)">
@@ -1279,7 +1321,7 @@
             </summary>
             <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider,SPI.Twamp.Server.Abstractions.IProbeClient)">
             <summary>
             Веб-интерфейс оператора: управление задачами, пробами и отчётами.
             Контроллер тонкий — вся логика вынесена в прикладные сервисы.
@@ -1334,6 +1376,22 @@
             <param name="separator">Разделитель полей.</param>
             <param name="decimalSeparator">Десятичный разделитель.</param>
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.LastResults">
+            <summary>
+            Возвращает последние результаты по задачам (момент и признак ошибки) —
+            колонка «последний результат» в списке задач. Заполняется по мере
+            поступления результатов после старта сервера.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeTaskStatus(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Проксирует состояние выполнения задач с пробы: запущена ли задача сейчас,
+            последний старт/завершение, счётчик выполнений, ближайший запуск, ошибка.
+            Отвечает на вопрос «запустились ли задачи», не дожидаясь первых результатов.
+            </summary>
+            <param name="probe">Адрес пробы (RequestInfo).</param>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeStatus">
             <summary>
@@ -1483,6 +1541,13 @@
         <member name="P:SPI.Twamp.Server.Infrastructure.LiteDbContext.Stats">
             <summary>Коллекция разобранной статистики замеров.</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.LiteDbContext.CheckpointAsync">
+            <summary>
+            Переносит накопленные изменения из WAL-журнала (файл «*-log.db») в основную
+            базу и очищает журнал. Без периодического вызова журнал растёт бесконечно
+            при интенсивной записи результатов.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.LiteDbContext.Dispose">
             <summary>Закрывает подключение к БД.</summary>
         </member>
@@ -1517,6 +1582,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskStatusRawAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.StatRepository">

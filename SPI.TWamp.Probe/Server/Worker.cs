@@ -24,7 +24,9 @@ namespace SPI.Twamp.Probe.Server
     /// <see cref="IResultStore"/>.
     /// </para>
     /// </summary>
-    public sealed class Worker(Logger logger, IProbeDispatcher dispatcher, IResultStore resultStore) : IHostedService, IDisposable
+    public sealed class Worker(
+        Logger logger, IProbeDispatcher dispatcher, IResultStore resultStore, ITaskRunRegistry runRegistry)
+        : IHostedService, IDisposable
     {
         /// <summary>Файл с сохранённым реестром задач по расписанию.</summary>
         private const string TasksFileName = "TaskInfo.json";
@@ -32,6 +34,7 @@ namespace SPI.Twamp.Probe.Server
         private readonly Logger _logger = logger;
         private readonly IProbeDispatcher _dispatcher = dispatcher;
         private readonly IResultStore _resultStore = resultStore;
+        private readonly ITaskRunRegistry _runRegistry = runRegistry;
 
         /// <summary>Реестр задач по расписанию (единственный вид задач, хранимый между запусками).</summary>
         private readonly List<TaskInfo> _tasks = [];
@@ -128,7 +131,7 @@ namespace SPI.Twamp.Probe.Server
 
             // Новая задача по расписанию.
             _tasks.Add(item);
-            CronExecuter executer = new(_logger, item, _dispatcher);
+            CronExecuter executer = new(_logger, item, _dispatcher, _runRegistry);
             _cron[item.Id] = executer;
             await executer.SetNextExecute();
             _logger.Debug("Задача {Id} добавлена", item.Id);
@@ -143,6 +146,7 @@ namespace SPI.Twamp.Probe.Server
             if (_cron.TryRemove(id, out CronExecuter? cron))
             {
                 cron.Dispose();
+                _runRegistry.Remove(id); // задача удалена — убираем и её статус выполнения
                 changed = true;
             }
 

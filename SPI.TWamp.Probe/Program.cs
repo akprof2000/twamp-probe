@@ -81,8 +81,9 @@ try
                                 .AllowAnyHeader());
     });
     _ = builder.Services.AddSingleton(logger);
-    // Хранилище результатов и исполнитель зондов — синглтоны, общие для всех запросов.
+    // Хранилище результатов, реестр статусов и исполнитель зондов — синглтоны.
     _ = builder.Services.AddSingleton<IResultStore, ResultStore>();
+    _ = builder.Services.AddSingleton<ITaskRunRegistry, TaskRunRegistry>();
     _ = builder.Services.AddSingleton<IProbeRunner, ProbeRunner>();
 
     // Диспетчер зондов: пул воркеров ограниченного размера. Регистрируем его хостед-сервисом

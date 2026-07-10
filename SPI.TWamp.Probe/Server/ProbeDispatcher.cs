@@ -33,16 +33,20 @@ namespace SPI.Twamp.Probe.Server
         private readonly CancellationTokenSource _cts = new();
         private Task[] _workers = [];
 
+        private readonly ITaskRunRegistry _runRegistry;
+
         /// <summary>Создаёт диспетчер и вычисляет число воркеров (предел параллелизма) из конфигурации.</summary>
-        public ProbeDispatcher(Logger logger, IConfiguration configuration, IProbeRunner runner)
+        public ProbeDispatcher(Logger logger, IConfiguration configuration, IProbeRunner runner, ITaskRunRegistry runRegistry)
         {
             _logger = logger;
             _runner = runner;
+            _runRegistry = runRegistry;
 
-            // Каждый зонд — это отдельный процесс ОС (ping/TWamp), нагружающий CPU при запуске.
-            // Нагрузочные тесты показали: слишком большой параллелизм насыщает процессор и
-            // «вытесняет» обработку HTTP-запросов. Разумный дефолт — кратно числу ядер;
-            // при необходимости точное значение задаётся ключом «Probe:MaxParallel».
+            // Каждый зонд — это отдельный процесс ОС (ping/TWamp). Для коротких
+            // CPU-активных зондов (ping) разумно немного воркеров (~4 × ядра), а для
+            // длинных I/O-зондов (twping -c 300 живёт минуты и почти спит) параллелизм
+            // должен покрывать число одновременно активных задач — сотни и тысячи.
+            // Точное значение задаётся ключом «Probe:MaxParallel».
             int defaultCount = Math.Max(16, System.Environment.ProcessorCount * 4);
             int count = configuration["Probe:MaxParallel"].ConvertTo(defaultCount);
             _workerCount = count > 0 ? count : defaultCount;
@@ -71,9 +75,14 @@ namespace SPI.Twamp.Probe.Server
             {
                 await foreach (TaskInfo task in _queue.Reader.ReadAllAsync(cancellationToken))
                 {
+                    // Фиксируем начало и конец выполнения — это видно в логе и в
+                    // эндпоинте TaskStatus (ответ на вопрос «запустилась ли задача»).
+                    _runRegistry.MarkStarted(task);
+                    _logger.Info("Начало выполнения задачи {Guid} «{Title}»", task.Id, task.Title);
                     try
                     {
                         await _runner.RunForNodesAsync(task, cancellationToken);
+                        _logger.Info("Задача {Guid} «{Title}» выполнена", task.Id, task.Title);
                     }
                     catch (OperationCanceledException)
                     {
@@ -82,6 +91,11 @@ namespace SPI.Twamp.Probe.Server
                     catch (Exception ex)
                     {
                         _logger.Error(ex, "Ошибка обработки задачи {Guid}", task.Id);
+                        _runRegistry.ReportError(task.Id, ex.Message);
+                    }
+                    finally
+                    {
+                        _runRegistry.MarkFinished(task.Id);
                     }
                 }
             }

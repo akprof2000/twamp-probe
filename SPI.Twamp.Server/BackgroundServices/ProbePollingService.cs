@@ -44,6 +44,9 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Текущее состояние опроса каждой пробы (для страницы статуса).</summary>
         private readonly ConcurrentDictionary<string, ProbePollState> _states = new();
 
+        /// <summary>Последний результат каждой задачи (для колонки статуса в списке задач).</summary>
+        private readonly ConcurrentDictionary<Guid, TaskLastResult> _lastResults = new();
+
         /// <summary>Токен жизненного цикла всех фоновых циклов.</summary>
         private readonly CancellationTokenSource _cts = new();
         private bool _disposed;
@@ -51,6 +54,10 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <inheritdoc/>
         public IReadOnlyDictionary<string, ProbePollState> GetStates() =>
             new Dictionary<string, ProbePollState>(_states);
+
+        /// <inheritdoc/>
+        public IReadOnlyDictionary<Guid, TaskLastResult> GetLastResults() =>
+            new Dictionary<Guid, TaskLastResult>(_lastResults);
 
         /// <summary>Старт сервиса: индексы, опрос известных проб и цикл сверки задач.</summary>
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -109,6 +116,15 @@ namespace SPI.Twamp.Server.BackgroundServices
 
                         // Сохраняем с отбрасыванием дубликатов (повторная доставка после сбоя).
                         IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
+
+                        // Обновляем «последний результат» каждой задачи — он показывается
+                        // в списке задач веб-интерфейса.
+                        foreach (ActionData action in fresh)
+                        {
+                            _lastResults[action.TaskId] = new TaskLastResult(
+                                action.Creation ?? DateTime.Now,
+                                !string.IsNullOrEmpty(action.ErrorConsole));
+                        }
 
                         // Разбираем статистику сразу при приёме — выгрузка отчёта
                         // потом читает готовые записи без повторного парсинга.

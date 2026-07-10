@@ -40,6 +40,13 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <summary>Коллекция разобранной статистики замеров.</summary>
         public ILiteCollectionAsync<StatRecord> Stats => _db.GetCollection<StatRecord>("stats");
 
+        /// <summary>
+        /// Переносит накопленные изменения из WAL-журнала (файл «*-log.db») в основную
+        /// базу и очищает журнал. Без периодического вызова журнал растёт бесконечно
+        /// при интенсивной записи результатов.
+        /// </summary>
+        public Task CheckpointAsync() => _db.CheckpointAsync();
+
         /// <summary>Закрывает подключение к БД.</summary>
         public void Dispose() => _db.Dispose();
     }

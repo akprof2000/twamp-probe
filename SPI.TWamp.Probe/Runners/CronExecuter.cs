@@ -12,10 +12,12 @@ namespace SPI.Twamp.Probe.Runners
     /// Вычисляет момент следующего запуска и по срабатыванию ставит задачу в очередь
     /// диспетчера, после чего сразу планирует следующее срабатывание.
     /// </summary>
-    internal sealed class CronExecuter(Logger logger, TaskInfo task, IProbeDispatcher dispatcher) : IDisposable
+    internal sealed class CronExecuter(
+        Logger logger, TaskInfo task, IProbeDispatcher dispatcher, ITaskRunRegistry runRegistry) : IDisposable
     {
         private readonly Logger _logger = logger;
         private readonly IProbeDispatcher _dispatcher = dispatcher;
+        private readonly ITaskRunRegistry _runRegistry = runRegistry;
 
         /// <summary>Источник токена отмены — останавливает планирование при удалении задачи или остановке.</summary>
         private readonly CancellationTokenSource _cts = new();
@@ -32,6 +34,7 @@ namespace SPI.Twamp.Probe.Runners
             if (_task.Delete)
             {
                 _logger.Info("Задача {Guid} помечена на удаление — расписание остановлено", _task.Id);
+                _runRegistry.SetNextRun(_task.Id, _task.Title, null);
                 return;
             }
 
@@ -43,9 +46,12 @@ namespace SPI.Twamp.Probe.Runners
             if (next >= _task.End)
             {
                 _logger.Info("Задача {Guid} завершена по дате окончания {Date}", _task.Id, _task.End);
+                _runRegistry.SetNextRun(_task.Id, _task.Title, null);
                 return;
             }
 
+            // Фиксируем план в реестре — оператор видит, когда следующий запуск.
+            _runRegistry.SetNextRun(_task.Id, _task.Title, next);
             ScheduleAt(next);
         }
 

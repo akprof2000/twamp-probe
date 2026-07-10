@@ -82,6 +82,60 @@
             </summary>
             <param name="cancellationToken">Токен отмены операции запуска.</param>
         </member>
+        <member name="T:SPI.Twamp.Probe.Abstractions.TaskRunInfo">
+            <summary>
+            Текущее состояние выполнения одной задачи на пробе.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.TaskId">
+            <summary>Идентификатор задачи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.Title">
+            <summary>Название задачи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.Running">
+            <summary>Сколько экземпляров задачи выполняется прямо сейчас.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastStart">
+            <summary>Момент последнего старта выполнения.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastFinish">
+            <summary>Момент последнего завершения выполнения.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.Executions">
+            <summary>Сколько раз задача выполнялась с момента старта пробы.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.NextRun">
+            <summary>Ближайший запланированный запуск (для задач по расписанию).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.LastError">
+            <summary>Текст последней ошибки выполнения (например, зонд не найден).</summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry">
+            <summary>
+            Реестр состояния выполнения задач — отвечает на вопрос «что сейчас происходит
+            с задачами на пробе»: запускались ли, выполняются ли прямо сейчас, когда
+            следующий запуск и какая была последняя ошибка.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.MarkStarted(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <summary>Фиксирует начало выполнения задачи.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.MarkFinished(System.Guid)">
+            <summary>Фиксирует завершение выполнения задачи.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.ReportError(System.Guid,System.String)">
+            <summary>Фиксирует ошибку выполнения (не сбрасывается до следующей ошибки или успеха).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.SetNextRun(System.Guid,System.String,System.Nullable{System.DateTime})">
+            <summary>Обновляет время следующего запланированного запуска.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.Remove(System.Guid)">
+            <summary>Удаляет задачу из реестра (задача удалена с пробы).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.GetAll">
+            <summary>Снимок состояния всех задач.</summary>
+        </member>
         <member name="T:SPI.Twamp.Probe.Contracts.ActionData">
             <summary>
             Результат одного замера зонда, передаваемый серверу.
@@ -334,7 +388,7 @@
             </summary>
             <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker,SPI.Twamp.Probe.Abstractions.IResultStore)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>
             Веб-интерфейс зонда: приём задач и выдача результатов их выполнения.
             </summary>
@@ -358,6 +412,13 @@
             <summary>
             Возвращает идентификаторы задач по расписанию, известных пробе.
             Используется сервером для сверки состояния и досылки недостающих задач.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.TaskStatus">
+            <summary>
+            Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
+            когда был последний запуск/завершение, сколько раз выполнялась,
+            ближайший запланированный запуск и последняя ошибка.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
@@ -397,7 +458,7 @@
             диспетчера, после чего сразу планирует следующее срабатывание.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,SPI.Twamp.Probe.Abstractions.IProbeDispatcher)">
+        <member name="M:SPI.Twamp.Probe.Runners.CronExecuter.#ctor(NLog.Logger,SPI.Twamp.Probe.Contracts.TaskInfo,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>
             Планировщик одной задачи по cron-расписанию.
             Вычисляет момент следующего запуска и по срабатыванию ставит задачу в очередь
@@ -439,7 +500,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IResultStore)">
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>
             Выполняет внешний зонд (системный ping или утилита TWamp) для узлов задачи.
             <para>
@@ -496,7 +557,7 @@
         <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher._cts">
             <summary>Токен жизненного цикла пула воркеров.</summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IProbeRunner)">
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IProbeRunner,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>Создаёт диспетчер и вычисляет число воркеров (предел параллелизма) из конфигурации.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.Enqueue(SPI.Twamp.Probe.Contracts.TaskInfo)">
@@ -591,6 +652,33 @@
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.Dispose">
             <summary>Освобождает таймер и примитивы синхронизации.</summary>
         </member>
+        <member name="T:SPI.Twamp.Probe.Server.TaskRunRegistry">
+            <summary>
+            Потокобезопасная реализация реестра состояния выполнения задач.
+            Хранит всё в памяти — после перезапуска пробы статистика начинается заново.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.Get(System.Guid,System.String)">
+            <summary>Возвращает (или создаёт) запись состояния задачи.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.MarkStarted(SPI.Twamp.Probe.Contracts.TaskInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.MarkFinished(System.Guid)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.ReportError(System.Guid,System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.SetNextRun(System.Guid,System.String,System.Nullable{System.DateTime})">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.Remove(System.Guid)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.GetAll">
+            <inheritdoc/>
+        </member>
         <member name="T:SPI.Twamp.Probe.Server.Worker">
             <summary>
             Фоновый сервис-оркестратор. Хранит реестр задач по расписанию, регистрирует под
@@ -608,7 +696,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.IResultStore)">
+        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>
             Фоновый сервис-оркестратор. Хранит реестр задач по расписанию, регистрирует под
             них исполнителей и применяет инкрементальные изменения, приходящие от сервера.

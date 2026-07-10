@@ -18,11 +18,24 @@ namespace SPI.Twamp.Server.Abstractions
         int BackoffSeconds);
 
     /// <summary>
+    /// Последний известный результат выполнения задачи.
+    /// </summary>
+    /// <param name="Time">Момент результата.</param>
+    /// <param name="HasError">Была ли ошибка в этом результате.</param>
+    public record TaskLastResult(DateTime Time, bool HasError);
+
+    /// <summary>
     /// Доступ к состоянию фонового опроса проб — для страницы статуса.
     /// </summary>
     public interface IProbeStatusProvider
     {
         /// <summary>Возвращает состояние опроса всех проб (ключ — адрес пробы).</summary>
         IReadOnlyDictionary<string, ProbePollState> GetStates();
+
+        /// <summary>
+        /// Возвращает последние результаты по задачам (ключ — идентификатор задачи).
+        /// Заполняется по мере поступления результатов после старта сервера.
+        /// </summary>
+        IReadOnlyDictionary<Guid, TaskLastResult> GetLastResults();
     }
 }

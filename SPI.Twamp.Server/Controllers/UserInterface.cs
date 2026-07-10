@@ -18,7 +18,7 @@ namespace SPI.Twamp.Server.Controllers
     public class UserInterface(
         Logger logger, ITaskService taskService, IClientService clientService,
         IReportService reportService, IProvisioningService provisioningService,
-        IProbeStatusProvider probeStatus)
+        IProbeStatusProvider probeStatus, IProbeClient probeClient)
         : ControllerBase
     {
         private readonly Logger _logger = logger;
@@ -27,6 +27,7 @@ namespace SPI.Twamp.Server.Controllers
         private readonly IReportService _reportService = reportService;
         private readonly IProvisioningService _provisioningService = provisioningService;
         private readonly IProbeStatusProvider _probeStatus = probeStatus;
+        private readonly IProbeClient _probeClient = probeClient;
 
         /// <summary>Возвращает полный список задач.</summary>
         [HttpGet("tasks")]
@@ -141,6 +142,37 @@ namespace SPI.Twamp.Server.Controllers
 
             await using StreamWriter writer = new(Response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
             await _reportService.StreamCsvAsync(dateFrom, dateTo, separator, decimalSeparator, writer, cancellationToken);
+        }
+
+        /// <summary>
+        /// Возвращает последние результаты по задачам (момент и признак ошибки) —
+        /// колонка «последний результат» в списке задач. Заполняется по мере
+        /// поступления результатов после старта сервера.
+        /// </summary>
+        [HttpGet("[action]")]
+        public ActionResult LastResults()
+        {
+            IReadOnlyDictionary<Guid, TaskLastResult> results = _probeStatus.GetLastResults();
+            return Ok(results.Select(kv => new
+            {
+                TaskId = kv.Key,
+                kv.Value.Time,
+                kv.Value.HasError
+            }));
+        }
+
+        /// <summary>
+        /// Проксирует состояние выполнения задач с пробы: запущена ли задача сейчас,
+        /// последний старт/завершение, счётчик выполнений, ближайший запуск, ошибка.
+        /// Отвечает на вопрос «запустились ли задачи», не дожидаясь первых результатов.
+        /// </summary>
+        /// <param name="probe">Адрес пробы (RequestInfo).</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        [HttpGet("[action]")]
+        public async Task<ActionResult> ProbeTaskStatus([FromQuery][Required] string probe, CancellationToken cancellationToken)
+        {
+            string json = await _probeClient.GetTaskStatusRawAsync(probe, cancellationToken);
+            return Content(json, "application/json");
         }
 
         /// <summary>

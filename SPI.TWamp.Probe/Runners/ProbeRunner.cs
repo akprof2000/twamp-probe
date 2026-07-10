@@ -21,7 +21,8 @@ namespace SPI.Twamp.Probe.Runners
     /// что ему передал диспетчер.
     /// </para>
     /// </summary>
-    public sealed class ProbeRunner(Logger logger, IConfiguration configuration, IResultStore resultStore) : IProbeRunner
+    public sealed class ProbeRunner(
+        Logger logger, IConfiguration configuration, IResultStore resultStore, ITaskRunRegistry runRegistry) : IProbeRunner
     {
         /// <summary>Разделители списка узлов в поле <see cref="TaskInfo.EndNode"/>.</summary>
         private static readonly char[] NodeSeparators = [';', ','];
@@ -29,6 +30,7 @@ namespace SPI.Twamp.Probe.Runners
         private readonly Logger _logger = logger;
         private readonly IConfiguration _configuration = configuration;
         private readonly IResultStore _resultStore = resultStore;
+        private readonly ITaskRunRegistry _runRegistry = runRegistry;
 
         /// <inheritdoc/>
         public async Task RunForNodesAsync(TaskInfo task, CancellationToken cancellationToken)
@@ -131,7 +133,29 @@ namespace SPI.Twamp.Probe.Runners
                 }
             };
 
-            _ = process.Start();
+            try
+            {
+                _ = process.Start();
+            }
+            catch (Exception ex)
+            {
+                // Зонд не запустился (например, TWping не установлен на этой машине).
+                // Ошибка обязана дойти до сервера как результат — иначе задача выглядит
+                // «молча пропавшей» и оператору непонятно, что происходит.
+                string message = $"Не удалось запустить зонд «{execute}»: {ex.Message}";
+                _logger.Error("Задача {Guid}: {Message}", task.Id, message);
+                _runRegistry.ReportError(task.Id, message);
+
+                return new ActionData
+                {
+                    CallLine = $"{execute} {arguments}",
+                    ErrorConsole = message,
+                    EndNode = node,
+                    IPAddress = task.IpAddress,
+                    TaskId = task.Id,
+                    RequestInfo = task.RequestInfo
+                };
+            }
 
             // Читаем stdout и stderr одновременно, чтобы избежать взаимоблокировки
             // при переполнении буфера одного из потоков вывода.
@@ -170,6 +194,7 @@ namespace SPI.Twamp.Probe.Runners
             {
                 string note = $"Задача прервана по таймауту {timeout.TotalSeconds:0.###} c и принудительно завершена.";
                 error = string.IsNullOrEmpty(error) ? note : $"{error}{System.Environment.NewLine}{note}";
+                _runRegistry.ReportError(task.Id, note); // видно в статусе задач пробы
             }
 
             _logger.Debug("Зонд для узла {Node} завершён. Вывод: {Output}", node, output);

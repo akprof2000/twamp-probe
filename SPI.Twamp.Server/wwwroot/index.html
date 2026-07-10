@@ -47,12 +47,20 @@
 
 <section id="tab-status" class="active">
   <div class="card">
-    <h2>Пробы <button class="act" style="float:right" onclick="loadStatus()">Обновить</button></h2>
+    <h2>Пробы <button class="act" style="float:right" onclick="withBusy(this, loadStatus)">Обновить</button></h2>
     <div class="scroll"><table id="tblStatus">
-      <thead><tr><th>Проба</th><th>Имя</th><th>Хост</th><th>Версия</th><th>Связь</th><th>Последний ответ</th><th>Ошибка</th><th>Задач</th><th>Результатов</th></tr></thead>
+      <thead><tr><th>Проба</th><th>Имя</th><th>Хост</th><th>Версия</th><th>Связь</th><th>Последний ответ</th><th>Ошибка</th><th>Задач</th><th>Результатов</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgStatus"></div>
+  </div>
+  <div class="card" id="cardProbeTasks" style="display:none">
+    <h2>Выполнение задач на пробе <span id="probeTasksAddr" style="color:var(--mut);font-weight:400"></span></h2>
+    <div class="scroll"><table id="tblProbeTasks">
+      <thead><tr><th>Задача</th><th>Сейчас</th><th>Последний старт</th><th>Завершение</th><th>Выполнений</th><th>Следующий запуск</th><th>Последняя ошибка</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="msg" id="msgProbeTasks"></div>
   </div>
   <div class="card">
     <h2>Неопознанные пробы (ожидают подтверждения)</h2>
@@ -62,7 +70,7 @@
     </table></div>
     <div class="row" style="margin-top:10px">
       <input id="probeUrl" type="text" placeholder="http://адрес-пробы:443" style="width:280px">
-      <button class="act" onclick="checkIn()">Опросить пробу (CheckIn)</button>
+      <button class="act" onclick="withBusy(this, checkIn)">Опросить пробу (CheckIn)</button>
     </div>
     <div class="msg" id="msgUnident"></div>
   </div>
@@ -70,10 +78,10 @@
 
 <section id="tab-tasks">
   <div class="card">
-    <h2>Задачи <button class="act" style="float:right" onclick="loadTasks()">Обновить</button></h2>
+    <h2>Задачи <button class="act" style="float:right" onclick="withBusy(this, loadTasks)">Обновить</button></h2>
     <div class="row"><input id="taskFilter" type="text" placeholder="фильтр по имени/пробе/узлу" style="width:300px" oninput="renderTasks()"></div>
     <div class="scroll"><table id="tblTasks">
-      <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th></th></tr></thead>
+      <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th>Последний результат</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgTasks"></div>
@@ -86,7 +94,7 @@
     <div class="row">
       <input id="fileTemplates" type="file" accept=".csv">
       <input id="setName" type="text" placeholder="имя набора (по умолчанию — имя файла)" style="width:260px">
-      <button class="act" onclick="uploadTemplates()">Загрузить набор</button>
+      <button class="act" onclick="withBusy(this, uploadTemplates)">Загрузить набор</button>
     </div>
     <div class="scroll"><table id="tblSets">
       <thead><tr><th>Набор</th><th>Шаблонов</th><th></th></tr></thead>
@@ -99,14 +107,14 @@
     <div class="row">
       <input id="fileRouters" type="file">
       <select id="routerSet" style="padding:6px;border:1px solid var(--line);border-radius:6px"></select>
-      <button class="act" onclick="uploadRouters(false)">Предпросмотр (CSV)</button>
-      <button class="act" onclick="uploadRouters(true)">Создать задачи</button>
+      <button class="act" onclick="withBusy(this, () => uploadRouters(false))">Предпросмотр (CSV)</button>
+      <button class="act" onclick="withBusy(this, () => uploadRouters(true))">Создать задачи</button>
     </div>
     <div class="msg" id="msgRouters"></div>
   </div>
   <div class="card">
     <h2>3. Готовый CSV задач (формат Base test.csv)</h2>
-    <div class="row"><input id="fileCsv" type="file" accept=".csv"><button class="act" onclick="uploadCsv()">Загрузить задачи</button></div>
+    <div class="row"><input id="fileCsv" type="file" accept=".csv"><button class="act" onclick="withBusy(this, uploadCsv)">Загрузить задачи</button></div>
     <div class="msg" id="msgCsv"></div>
   </div>
 </section>
@@ -116,7 +124,7 @@
     <h2>Выгрузка результатов (CSV)</h2>
     <div class="row">
       С <input id="repFrom" type="date"> по <input id="repTo" type="date">
-      <button class="act" onclick="downloadReport()">Скачать CSV</button>
+      <button class="act" onclick="withBusy(this, downloadReport)">Скачать CSV</button>
     </div>
     <div class="msg">Если даты не заданы — последние 14 дней. Колонка CallLine содержит фактическую строку вызова зонда.</div>
   </div>
@@ -156,6 +164,35 @@ async function jsend(p, method, body, isForm) {
 }
 const fmt = d => d ? new Date(d).toLocaleString('ru-RU') : '—';
 
+// Индикация ожидания: на время запроса кнопка блокируется и показывает «⏳».
+// Так всегда видно, что нажатие принято и операция выполняется.
+async function withBusy(btn, fn) {
+  if (!btn || btn.disabled) { if (btn) return; }
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + old; }
+  try { await fn(); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+
+// --- Выполнение задач на пробе (статус в реальном времени) ---
+async function loadProbeTasks(btn, probe) {
+  await withBusy(btn, async () => {
+    try {
+      const list = await jget('probetaskstatus?probe=' + encodeURIComponent(probe));
+      $('#cardProbeTasks').style.display = '';
+      $('#probeTasksAddr').textContent = probe;
+      list.sort((a, b) => (b.running - a.running) || (a.title > b.title ? 1 : -1));
+      $('#tblProbeTasks tbody').innerHTML = list.map(t => `<tr>
+        <td class="wrap">${t.title || t.taskId}</td>
+        <td>${t.running ? '<span class="ok">выполняется (' + t.running + ')</span>' : 'ожидает'}</td>
+        <td>${fmt(t.lastStart)}</td><td>${fmt(t.lastFinish)}</td><td>${t.executions}</td>
+        <td>${fmt(t.nextRun)}</td><td class="wrap">${t.lastError || ''}</td></tr>`).join('')
+        || '<tr><td colspan="7">задачи ещё не запускались</td></tr>';
+      $('#msgProbeTasks').textContent = 'Всего: ' + list.length + ' | обновлено ' + new Date().toLocaleTimeString('ru-RU');
+    } catch (e) { $('#msgProbeTasks').textContent = 'Ошибка: ' + e.message; $('#cardProbeTasks').style.display = ''; }
+  });
+}
+
 // --- Статус ---
 async function loadStatus() {
   try {
@@ -164,7 +201,8 @@ async function loadStatus() {
       <td class="wrap">${p.requestInfo}</td><td>${p.name||''}</td><td>${p.hostName||''}</td><td>${p.version||'—'}</td>
       <td>${p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
       <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
-      <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td></tr>`).join('');
+      <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
+      <td><button class="act" onclick="loadProbeTasks(this,'${p.requestInfo.replace(/'/g,"\\'")}')">задачи</button></td></tr>`).join('');
     $('#msgStatus').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
     const un = await jget('listnotidentifyclients');
     $('#tblUnident tbody').innerHTML = un.map(u => `<tr>
@@ -185,10 +223,24 @@ async function approve(requestInfo, hostName, ipAddress) {
 
 // --- Задачи ---
 let tasksCache = [];
+let lastResults = {}; // taskId -> {time, hasError}
 async function loadTasks() {
-  try { tasksCache = await jget('tasks'); renderTasks();
-    $('#msgTasks').textContent = 'Всего: ' + tasksCache.length;
+  try {
+    // Задачи и последние результаты загружаются параллельно и мержатся при отрисовке.
+    const [tasks, results] = await Promise.all([jget('tasks'), jget('lastresults')]);
+    tasksCache = tasks;
+    lastResults = Object.fromEntries(results.map(r => [r.taskId, r]));
+    renderTasks();
+    $('#msgTasks').textContent = 'Всего: ' + tasksCache.length +
+      ' (последние результаты копятся с момента старта сервера)';
   } catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
+}
+function lastResultCell(taskId) {
+  const r = lastResults[taskId];
+  if (!r) return '<span style="color:var(--mut)">нет данных</span>';
+  const cls = r.hasError ? 'bad' : 'ok';
+  const label = r.hasError ? 'ошибка' : 'успех';
+  return `<span class="${cls}">${label}</span> ${fmt(r.time)}`;
 }
 function renderTasks() {
   const f = $('#taskFilter').value.toLowerCase();
@@ -197,8 +249,9 @@ function renderTasks() {
     <td class="wrap">${t.title}</td><td class="wrap">${t.requestInfo}</td><td>${t.endNode}</td>
     <td>${t.type}</td><td>${t.cronExpression||''}</td><td>${fmt(t.end)}</td><td>${t.timeoutSec||0}</td>
     <td>${t.delete ? '<span class="bad">удалена</span>' : '<span class="ok">активна</span>'}</td>
+    <td>${lastResultCell(t.id)}</td>
     <td>${t.delete ? '' : `<button class="del" onclick="delTask('${t.id}')">удалить</button>`}</td></tr>`).join('')
-    + (rows.length > 500 ? `<tr><td colspan="9">… показаны первые 500 из ${rows.length}</td></tr>` : '');
+    + (rows.length > 500 ? `<tr><td colspan="10">… показаны первые 500 из ${rows.length}</td></tr>` : '');
 }
 async function delTask(id) {
   if (!confirm('Удалить задачу?')) return;

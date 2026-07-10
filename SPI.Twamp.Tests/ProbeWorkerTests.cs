@@ -38,10 +38,15 @@ namespace SPI.Twamp.Tests
             End = DateTime.Now.AddDays(1)
         };
 
+        /// <summary>Создаёт Worker с фейками и реальным реестром статусов.</summary>
+        private static Worker CreateWorker(FakeDispatcher? dispatcher = null) =>
+            new(LogManager.GetLogger("test"), dispatcher ?? new FakeDispatcher(),
+                new FakeResultStore(), new TaskRunRegistry());
+
         [Fact(DisplayName = "Новая задача по расписанию попадает в реестр")]
         public async Task Merge_AddsScheduler()
         {
-            using Worker worker = new(LogManager.GetLogger("test"), new FakeDispatcher(), new FakeResultStore());
+            using Worker worker = CreateWorker();
             Guid id = Guid.NewGuid();
 
             await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
@@ -52,7 +57,7 @@ namespace SPI.Twamp.Tests
         [Fact(DisplayName = "Задача с Delete=true удаляется из реестра")]
         public async Task Merge_RemovesDeleted()
         {
-            using Worker worker = new(LogManager.GetLogger("test"), new FakeDispatcher(), new FakeResultStore());
+            using Worker worker = CreateWorker();
             Guid id = Guid.NewGuid();
             await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
 
@@ -66,7 +71,7 @@ namespace SPI.Twamp.Tests
         public async Task Merge_RepeaterGoesToDispatcher()
         {
             FakeDispatcher dispatcher = new();
-            using Worker worker = new(LogManager.GetLogger("test"), dispatcher, new FakeResultStore());
+            using Worker worker = CreateWorker(dispatcher);
             TaskInfo repeater = new() { Id = Guid.NewGuid(), Type = TaskType.Repeater };
 
             await worker.MergeJobs([repeater], CancellationToken.None);
@@ -78,7 +83,7 @@ namespace SPI.Twamp.Tests
         [Fact(DisplayName = "Повторное добавление той же задачи не создаёт дубликат")]
         public async Task Merge_UpdateIsIdempotent()
         {
-            using Worker worker = new(LogManager.GetLogger("test"), new FakeDispatcher(), new FakeResultStore());
+            using Worker worker = CreateWorker();
             Guid id = Guid.NewGuid();
 
             await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
