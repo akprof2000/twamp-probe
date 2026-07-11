@@ -149,6 +149,7 @@ namespace SPI.Twamp.Probe.Runners
                 return new ActionData
                 {
                     CallLine = $"{execute} {arguments}",
+                    Outcome = nameof(RunOutcome.StartFailed),
                     ErrorConsole = message,
                     EndNode = node,
                     IPAddress = task.IpAddress,
@@ -223,6 +224,7 @@ namespace SPI.Twamp.Probe.Runners
             {
                 CallLine = $"{execute} {arguments}", // фактическая команда — для идентификации ответа
                 ExitCode = exitCode,
+                Outcome = outcome.ToString(), // исход запуска — для двух статусов в интерфейсе
                 Console = output,
                 ErrorConsole = error,
                 EndNode = node,

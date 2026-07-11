@@ -44,6 +44,13 @@ namespace SPI.Twamp.Probe.Contracts
         /// </summary>
         public int? ExitCode { get; set; }
         /// <summary>
+        /// Исход запуска зонда: Success (процесс завершился сам, код 0),
+        /// ExitCodeError (завершился сам, но с ошибкой приложения),
+        /// TimedOut (убит по таймауту), StartFailed (не удалось запустить).
+        /// Разделяет статус выполнения процесса и статус результата приложения.
+        /// </summary>
+        public string Outcome { get; set; } = "";
+        /// <summary>
         /// Стандартный вывод процесса зонда.
         /// </summary>
         public string Console { get; set; } = "";

@@ -47,6 +47,12 @@ namespace SPI.Twamp.Server.Contracts
         /// </summary>
         public string CallLine { get; set; } = "";
         /// <summary>
+        /// Исход запуска зонда на пробе: Success (процесс завершился сам, код 0),
+        /// ExitCodeError (завершился сам с ошибкой приложения), TimedOut (убит по
+        /// таймауту), StartFailed (не удалось запустить); пусто — старая версия пробы.
+        /// </summary>
+        public string Outcome { get; set; } = "";
+        /// <summary>
         /// Код выхода процесса зонда (0 — корректное завершение;
         /// null — процесс не удалось запустить).
         /// </summary>

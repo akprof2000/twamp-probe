@@ -76,6 +76,68 @@ namespace SPI.Twamp.Server.BackgroundServices
 
             // Единый фоновый цикл сверки задач для всех проб.
             _ = Task.Run(() => ReconcileLoopAsync(_cts.Token), CancellationToken.None);
+
+            // Прогрев «последних результатов» из БД: после перезапуска сервера история
+            // выполнения не должна выглядеть пустой («не выполнялась ни разу»).
+            _ = Task.Run(() => WarmupLastResultsAsync(_cts.Token), CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Заполняет реестр последних результатов из БД: для каждой известной задачи
+        /// берётся её последний сохранённый результат. Свежие записи, успевшие прийти
+        /// от проб, не затираются (TryAdd).
+        /// </summary>
+        private async Task WarmupLastResultsAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                int restored = 0;
+                foreach (Contracts.TaskInfo task in await _taskService.GetAllAsync())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    ActionData? last = await _actions.GetLastByTaskAsync(task.Id);
+                    if (last is not null && _lastResults.TryAdd(task.Id, BuildLastResult(last)))
+                    {
+                        restored++;
+                    }
+                }
+
+                if (restored > 0)
+                {
+                    _logger.Info("Восстановлено последних результатов из БД: {Count}", restored);
+                    _changeNotifier.Notify(); // интерфейс перечитает статусы
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Остановка сервиса во время прогрева — штатно.
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Не удалось восстановить последние результаты из БД");
+            }
+        }
+
+        /// <summary>
+        /// Собирает «последний результат» задачи из записи БД: исход запуска,
+        /// код выхода и краткий текст ошибки для интерфейса.
+        /// </summary>
+        private static TaskLastResult BuildLastResult(ActionData action)
+        {
+            string? outcome = string.IsNullOrEmpty(action.Outcome) ? null : action.Outcome;
+
+            // Для записей новых проб исход определяет Outcome; для старых — эвристика
+            // по тексту ошибки и коду выхода.
+            bool hasError = outcome is not null
+                ? outcome != "Success"
+                : !string.IsNullOrEmpty(action.ErrorConsole) || action.ExitCode is not (null or 0);
+
+            string? error = string.IsNullOrEmpty(action.ErrorConsole)
+                ? null
+                : action.ErrorConsole.Length > 300 ? action.ErrorConsole[..300] : action.ErrorConsole;
+
+            return new TaskLastResult(action.Creation ?? DateTime.Now, hasError, outcome, action.ExitCode, error);
         }
 
         /// <inheritdoc/>
@@ -120,14 +182,10 @@ namespace SPI.Twamp.Server.BackgroundServices
                         IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
 
                         // Обновляем «последний результат» каждой задачи — он показывается
-                        // в списке задач веб-интерфейса. Ошибкой считается и текст ошибки,
-                        // и некорректный код выхода процесса зонда.
+                        // в списке задач веб-интерфейса.
                         foreach (ActionData action in fresh)
                         {
-                            bool hasError = !string.IsNullOrEmpty(action.ErrorConsole) ||
-                                            action.ExitCode is not (null or 0);
-                            _lastResults[action.TaskId] = new TaskLastResult(
-                                action.Creation ?? DateTime.Now, hasError);
+                            _lastResults[action.TaskId] = BuildLastResult(action);
                         }
 
                         // Разбираем статистику сразу при приёме — выгрузка отчёта

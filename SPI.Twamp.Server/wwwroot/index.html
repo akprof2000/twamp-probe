@@ -81,7 +81,7 @@
     <h2>Задачи <button class="act" style="float:right" onclick="withBusy(this, loadTasks)">Обновить</button></h2>
     <div class="row"><input id="taskFilter" type="text" placeholder="фильтр по имени/пробе/узлу" style="width:300px" oninput="renderTasks()"></div>
     <div class="scroll"><table id="tblTasks">
-      <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th>Последний результат</th><th></th></tr></thead>
+      <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th>Выполнение</th><th>Результат</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgTasks"></div>
@@ -256,12 +256,28 @@ async function loadTasks() {
       ' (последние результаты копятся с момента старта сервера)';
   } catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
 }
-function lastResultCell(taskId) {
+// Статус 1: как завершился процесс зонда (сам / убит по таймауту / не запустился).
+function runCell(taskId) {
   const r = lastResults[taskId];
   if (!r) return '<span style="color:var(--mut)">нет данных</span>';
-  const cls = r.hasError ? 'bad' : 'ok';
-  const label = r.hasError ? 'ошибка' : 'успех';
-  return `<span class="${cls}">${label}</span> ${fmt(r.time)}`;
+  let label;
+  switch (r.outcome) {
+    case 'Success':
+    case 'ExitCodeError': label = '<span class="ok">завершилась сама</span>'; break;
+    case 'TimedOut':      label = '<span class="bad">убита по таймауту</span>'; break;
+    case 'StartFailed':   label = '<span class="bad">не запустилась</span>'; break;
+    default:              label = r.hasError ? '<span class="bad">ошибка</span>' : '<span class="ok">выполнена</span>';
+  }
+  return `${label}<br><span style="color:var(--mut)">${fmt(r.time)}</span>`;
+}
+// Статус 2: результат приложения — код выхода и текст ошибки.
+function resultCell(taskId) {
+  const r = lastResults[taskId];
+  if (!r) return '';
+  if (!r.hasError) return `<span class="ok">успех${r.exitCode != null ? ' (код 0)' : ''}</span>`;
+  const code = r.outcome === 'ExitCodeError' && r.exitCode != null ? ` (код ${r.exitCode})` : '';
+  const text = r.error ? `<br><span style="color:var(--mut)">${r.error.length > 120 ? r.error.slice(0,120) + '…' : r.error}</span>` : '';
+  return `<span class="bad" title="${(r.error||'').replace(/"/g,'&quot;')}">ошибка${code}</span>${text}`;
 }
 function renderTasks() {
   const f = $('#taskFilter').value.toLowerCase();
@@ -270,9 +286,10 @@ function renderTasks() {
     <td class="wrap">${t.title}</td><td class="wrap">${t.requestInfo}</td><td>${t.endNode}</td>
     <td>${t.type}</td><td>${t.cronExpression||''}</td><td>${fmt(t.end)}</td><td>${t.timeoutSec||0}</td>
     <td>${t.delete ? '<span class="bad">удалена</span>' : '<span class="ok">активна</span>'}</td>
-    <td>${lastResultCell(t.id)}</td>
+    <td>${runCell(t.id)}</td>
+    <td class="wrap" style="white-space:normal;max-width:340px">${resultCell(t.id)}</td>
     <td>${t.delete ? '' : `<button class="del" onclick="delTask('${t.id}')">удалить</button>`}</td></tr>`).join('')
-    + (rows.length > 500 ? `<tr><td colspan="10">… показаны первые 500 из ${rows.length}</td></tr>` : '');
+    + (rows.length > 500 ? `<tr><td colspan="11">… показаны первые 500 из ${rows.length}</td></tr>` : '');
 }
 async function delTask(id) {
   if (!confirm('Удалить задачу?')) return;

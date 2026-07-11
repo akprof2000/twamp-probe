@@ -174,7 +174,10 @@ namespace SPI.Twamp.Server.Controllers
             {
                 TaskId = kv.Key,
                 kv.Value.Time,
-                kv.Value.HasError
+                kv.Value.HasError,
+                kv.Value.Outcome,
+                kv.Value.ExitCode,
+                kv.Value.Error
             }));
         }
 

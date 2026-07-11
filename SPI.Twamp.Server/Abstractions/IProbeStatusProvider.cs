@@ -18,11 +18,16 @@ namespace SPI.Twamp.Server.Abstractions
         int BackoffSeconds);
 
     /// <summary>
-    /// Последний известный результат выполнения задачи.
+    /// Последний известный результат выполнения задачи — два статуса:
+    /// как завершился процесс зонда (сам / убит по таймауту / не запустился)
+    /// и каков результат приложения (код выхода, текст ошибки).
     /// </summary>
     /// <param name="Time">Момент результата.</param>
-    /// <param name="HasError">Была ли ошибка в этом результате.</param>
-    public record TaskLastResult(DateTime Time, bool HasError);
+    /// <param name="HasError">Была ли ошибка (любого вида) в этом результате.</param>
+    /// <param name="Outcome">Исход запуска: Success / ExitCodeError / TimedOut / StartFailed; null — данные старой версии.</param>
+    /// <param name="ExitCode">Код выхода процесса зонда (null — не запустился или старая версия).</param>
+    /// <param name="Error">Краткий текст ошибки (обрезан для интерфейса).</param>
+    public record TaskLastResult(DateTime Time, bool HasError, string? Outcome, int? ExitCode, string? Error);
 
     /// <summary>
     /// Доступ к состоянию фонового опроса проб — для страницы статуса.
@@ -34,7 +39,9 @@ namespace SPI.Twamp.Server.Abstractions
 
         /// <summary>
         /// Возвращает последние результаты по задачам (ключ — идентификатор задачи).
-        /// Заполняется по мере поступления результатов после старта сервера.
+        /// Свежие данные копятся по мере поступления результатов; при старте сервера
+        /// реестр прогревается последними записями из БД, поэтому после перезапуска
+        /// история выполнения не выглядит пустой.
         /// </summary>
         IReadOnlyDictionary<Guid, TaskLastResult> GetLastResults();
     }

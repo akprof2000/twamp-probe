@@ -19,6 +19,20 @@ namespace SPI.Twamp.Server.Infrastructure
             _ = await _context.Actions.EnsureIndexAsync("Creation", "$.Creation");
             // Индекс для быстрой проверки дубликатов при повторной доставке пачек.
             _ = await _context.Actions.EnsureIndexAsync("ResultId", "$.ResultId");
+            // Индекс для быстрого поиска последнего результата задачи (прогрев статусов).
+            _ = await _context.Actions.EnsureIndexAsync("TaskId", "$.TaskId");
+        }
+
+        /// <inheritdoc/>
+        public async Task<ActionData?> GetLastByTaskAsync(Guid taskId)
+        {
+            IEnumerable<ActionData> found = await _context.Actions
+                .Query()
+                .Where(x => x.TaskId == taskId)
+                .OrderByDescending(x => x.Creation)
+                .Limit(1)
+                .ToListAsync();
+            return found.FirstOrDefault();
         }
 
         /// <inheritdoc/>

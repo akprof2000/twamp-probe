@@ -16,7 +16,7 @@ namespace SPI.Twamp.Tests
             ChangeNotifier notifier = new();
             notifier.Notify(); // версия стала 1
 
-            long version = await notifier.WaitAsync(0, TimeSpan.FromSeconds(30), CancellationToken.None);
+            long version = await notifier.WaitAsync(0, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
             Assert.Equal(1, version);
         }
@@ -25,12 +25,12 @@ namespace SPI.Twamp.Tests
         public async Task Wait_WakesUp_OnNotify()
         {
             ChangeNotifier notifier = new();
-            Task<long> waiting = notifier.WaitAsync(0, TimeSpan.FromSeconds(30), CancellationToken.None);
+            Task<long> waiting = notifier.WaitAsync(0, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
             Assert.False(waiting.IsCompleted);
 
             notifier.Notify();
 
-            long version = await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+            long version = await waiting.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
             Assert.Equal(1, version);
         }
 
@@ -39,7 +39,7 @@ namespace SPI.Twamp.Tests
         {
             ChangeNotifier notifier = new();
 
-            long version = await notifier.WaitAsync(0, TimeSpan.FromMilliseconds(100), CancellationToken.None);
+            long version = await notifier.WaitAsync(0, TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
 
             Assert.Equal(0, version);
         }
@@ -48,12 +48,12 @@ namespace SPI.Twamp.Tests
         public async Task Notify_WakesAllWaiters()
         {
             ChangeNotifier notifier = new();
-            Task<long> first = notifier.WaitAsync(0, TimeSpan.FromSeconds(30), CancellationToken.None);
-            Task<long> second = notifier.WaitAsync(0, TimeSpan.FromSeconds(30), CancellationToken.None);
+            Task<long> first = notifier.WaitAsync(0, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            Task<long> second = notifier.WaitAsync(0, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
             notifier.Notify();
 
-            long[] versions = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+            long[] versions = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
             Assert.All(versions, v => Assert.Equal(1, v));
         }
     }

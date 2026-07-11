@@ -23,6 +23,13 @@
         <member name="M:SPI.Twamp.Server.Abstractions.IActionRepository.GetByPeriodAsync(System.DateTime,System.DateTime)">
             <summary>Возвращает результаты за период (по дате создания).</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IActionRepository.GetLastByTaskAsync(System.Guid)">
+            <summary>
+            Возвращает последний по времени результат задачи (для восстановления
+            «последнего результата» после перезапуска сервера) или <c>null</c>.
+            </summary>
+            <param name="taskId">Идентификатор задачи.</param>
+        </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IActionRepository.DeleteOlderAsync(System.DateTime)">
             <summary>Удаляет результаты старше указанной даты (ретенция).</summary>
             <returns>Число удалённых записей.</returns>
@@ -215,23 +222,42 @@
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.TaskLastResult">
             <summary>
-            Последний известный результат выполнения задачи.
+            Последний известный результат выполнения задачи — два статуса:
+            как завершился процесс зонда (сам / убит по таймауту / не запустился)
+            и каков результат приложения (код выхода, текст ошибки).
             </summary>
             <param name="Time">Момент результата.</param>
-            <param name="HasError">Была ли ошибка в этом результате.</param>
+            <param name="HasError">Была ли ошибка (любого вида) в этом результате.</param>
+            <param name="Outcome">Исход запуска: Success / ExitCodeError / TimedOut / StartFailed; null — данные старой версии.</param>
+            <param name="ExitCode">Код выхода процесса зонда (null — не запустился или старая версия).</param>
+            <param name="Error">Краткий текст ошибки (обрезан для интерфейса).</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.TaskLastResult.#ctor(System.DateTime,System.Boolean)">
+        <member name="M:SPI.Twamp.Server.Abstractions.TaskLastResult.#ctor(System.DateTime,System.Boolean,System.String,System.Nullable{System.Int32},System.String)">
             <summary>
-            Последний известный результат выполнения задачи.
+            Последний известный результат выполнения задачи — два статуса:
+            как завершился процесс зонда (сам / убит по таймауту / не запустился)
+            и каков результат приложения (код выхода, текст ошибки).
             </summary>
             <param name="Time">Момент результата.</param>
-            <param name="HasError">Была ли ошибка в этом результате.</param>
+            <param name="HasError">Была ли ошибка (любого вида) в этом результате.</param>
+            <param name="Outcome">Исход запуска: Success / ExitCodeError / TimedOut / StartFailed; null — данные старой версии.</param>
+            <param name="ExitCode">Код выхода процесса зонда (null — не запустился или старая версия).</param>
+            <param name="Error">Краткий текст ошибки (обрезан для интерфейса).</param>
         </member>
         <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.Time">
             <summary>Момент результата.</summary>
         </member>
         <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.HasError">
-            <summary>Была ли ошибка в этом результате.</summary>
+            <summary>Была ли ошибка (любого вида) в этом результате.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.Outcome">
+            <summary>Исход запуска: Success / ExitCodeError / TimedOut / StartFailed; null — данные старой версии.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.ExitCode">
+            <summary>Код выхода процесса зонда (null — не запустился или старая версия).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.TaskLastResult.Error">
+            <summary>Краткий текст ошибки (обрезан для интерфейса).</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbeStatusProvider">
             <summary>
@@ -244,7 +270,9 @@
         <member name="M:SPI.Twamp.Server.Abstractions.IProbeStatusProvider.GetLastResults">
             <summary>
             Возвращает последние результаты по задачам (ключ — идентификатор задачи).
-            Заполняется по мере поступления результатов после старта сервера.
+            Свежие данные копятся по мере поступления результатов; при старте сервера
+            реестр прогревается последними записями из БД, поэтому после перезапуска
+            история выполнения не выглядит пустой.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ProvisioningResult">
@@ -849,6 +877,19 @@
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartAsync(System.Threading.CancellationToken)">
             <summary>Старт сервиса: индексы, опрос известных проб и цикл сверки задач.</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.WarmupLastResultsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Заполняет реестр последних результатов из БД: для каждой известной задачи
+            берётся её последний сохранённый результат. Свежие записи, успевшие прийти
+            от проб, не затираются (TryAdd).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.BuildLastResult(SPI.Twamp.Server.Contracts.ActionData)">
+            <summary>
+            Собирает «последний результат» задачи из записи БД: исход запуска,
+            код выхода и краткий текст ошибки для интерфейса.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartPolling(SPI.Twamp.Server.Contracts.Client)">
             <inheritdoc/>
         </member>
@@ -916,6 +957,13 @@
             <summary>
             Фактическая строка вызова зонда на пробе (исполняемый файл и аргументы).
             Служит для точной идентификации ответа в отчётах.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ActionData.Outcome">
+            <summary>
+            Исход запуска зонда на пробе: Success (процесс завершился сам, код 0),
+            ExitCodeError (завершился сам с ошибкой приложения), TimedOut (убит по
+            таймауту), StartFailed (не удалось запустить); пусто — старая версия пробы.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.ExitCode">
@@ -1503,6 +1551,9 @@
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ActionRepository.EnsureIndexesAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ActionRepository.GetLastByTaskAsync(System.Guid)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ActionRepository.AddRangeAsync(System.Collections.Generic.IEnumerable{SPI.Twamp.Server.Contracts.ActionData})">

@@ -49,7 +49,7 @@ namespace SPI.Twamp.Tests
             using Worker worker = CreateWorker();
             Guid id = Guid.NewGuid();
 
-            await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
+            await worker.MergeJobs([Scheduler(id)], TestContext.Current.CancellationToken);
 
             Assert.Contains(id, worker.GetKnownTaskIds());
         }
@@ -59,10 +59,10 @@ namespace SPI.Twamp.Tests
         {
             using Worker worker = CreateWorker();
             Guid id = Guid.NewGuid();
-            await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
+            await worker.MergeJobs([Scheduler(id)], TestContext.Current.CancellationToken);
 
             TaskInfo stub = new() { Id = id, Type = TaskType.Scheduler, Delete = true };
-            await worker.MergeJobs([stub], CancellationToken.None);
+            await worker.MergeJobs([stub], TestContext.Current.CancellationToken);
 
             Assert.DoesNotContain(id, worker.GetKnownTaskIds());
         }
@@ -74,7 +74,7 @@ namespace SPI.Twamp.Tests
             using Worker worker = CreateWorker(dispatcher);
             TaskInfo repeater = new() { Id = Guid.NewGuid(), Type = TaskType.Repeater };
 
-            await worker.MergeJobs([repeater], CancellationToken.None);
+            await worker.MergeJobs([repeater], TestContext.Current.CancellationToken);
 
             Assert.Single(dispatcher.Enqueued);
             Assert.Empty(worker.GetKnownTaskIds());
@@ -86,8 +86,8 @@ namespace SPI.Twamp.Tests
             using Worker worker = CreateWorker();
             Guid id = Guid.NewGuid();
 
-            await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
-            await worker.MergeJobs([Scheduler(id)], CancellationToken.None);
+            await worker.MergeJobs([Scheduler(id)], TestContext.Current.CancellationToken);
+            await worker.MergeJobs([Scheduler(id)], TestContext.Current.CancellationToken);
 
             Assert.Single(worker.GetKnownTaskIds(), id);
         }

@@ -237,6 +237,14 @@
             null — процесс не удалось запустить).
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Outcome">
+            <summary>
+            Исход запуска зонда: Success (процесс завершился сам, код 0),
+            ExitCodeError (завершился сам, но с ошибкой приложения),
+            TimedOut (убит по таймауту), StartFailed (не удалось запустить).
+            Разделяет статус выполнения процесса и статус результата приложения.
+            </summary>
+        </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Console">
             <summary>
             Стандартный вывод процесса зонда.
