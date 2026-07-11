@@ -83,11 +83,50 @@ namespace SPI.Twamp.Probe.Controllers
         /// Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
         /// когда был последний запуск/завершение, сколько раз выполнялась,
         /// ближайший запланированный запуск и последняя ошибка.
+        /// Поддерживает фильтры и постраничную выдачу — задач может быть более 10 000.
         /// </summary>
+        /// <param name="skip">Сколько записей пропустить.</param>
+        /// <param name="take">Размер страницы (максимум 500).</param>
+        /// <param name="title">Фильтр по названию задачи (содержит).</param>
+        /// <param name="outcome">Фильтр по исходу: Success / ExitCodeError / TimedOut / StartFailed / Running / NotStarted.</param>
         [HttpGet("[action]")]
-        public ActionResult<IReadOnlyList<TaskRunInfo>> TaskStatus()
+        public ActionResult TaskStatus(
+            [FromQuery] int skip = 0, [FromQuery] int take = 100,
+            [FromQuery] string? title = null, [FromQuery] string? outcome = null)
         {
-            return Ok(runRegistry.GetAll());
+            take = Math.Clamp(take, 1, 500);
+
+            IEnumerable<TaskRunInfo> query = runRegistry.GetAll();
+            if (!string.IsNullOrEmpty(title))
+            {
+                query = query.Where(t => t.Title.Contains(title, StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrEmpty(outcome))
+            {
+                query = query.Where(t =>
+                    (outcome.Equals("Running", StringComparison.OrdinalIgnoreCase) && t.Running > 0) ||
+                    t.LastOutcome.ToString().Equals(outcome, StringComparison.OrdinalIgnoreCase));
+            }
+
+            List<TaskRunInfo> filtered = [.. query];
+            // Сначала выполняющиеся и проблемные, затем по названию.
+            filtered.Sort((a, b) =>
+            {
+                int byRunning = b.Running.CompareTo(a.Running);
+                if (byRunning != 0)
+                {
+                    return byRunning;
+                }
+                static bool Bad(RunOutcome o) => o is RunOutcome.ExitCodeError or RunOutcome.StartFailed or RunOutcome.TimedOut;
+                int byBad = Bad(b.LastOutcome).CompareTo(Bad(a.LastOutcome));
+                return byBad != 0 ? byBad : string.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase);
+            });
+
+            return Ok(new
+            {
+                Total = filtered.Count,
+                Items = filtered.Skip(Math.Max(0, skip)).Take(take)
+            });
         }
 
         /// <summary>

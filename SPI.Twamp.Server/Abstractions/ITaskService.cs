@@ -32,6 +32,26 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>Помечает задачу удалённой и отправляет обновлённый список её пробе.</summary>
         Task DeleteAsync(Guid id, CancellationToken cancellationToken);
 
+        /// <summary>
+        /// Восстанавливает удалённую задачу: снимает пометку удаления и заново
+        /// отправляет задачу её пробе.
+        /// </summary>
+        /// <param name="id">Идентификатор задачи.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <returns><c>true</c>, если задача найдена и восстановлена.</returns>
+        Task<bool> RestoreAsync(Guid id, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Массово помечает задачи удалёнными (<paramref name="deleted"/> = true)
+        /// или восстанавливает их (false) и рассылает изменения пробам пакетами.
+        /// Используется для операций над отфильтрованным списком.
+        /// </summary>
+        /// <param name="tasks">Задачи для изменения.</param>
+        /// <param name="deleted">Новое состояние пометки удаления.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <returns>Число фактически изменённых задач.</returns>
+        Task<int> SetDeletedManyAsync(IReadOnlyList<TaskInfo> tasks, bool deleted, CancellationToken cancellationToken);
+
         /// <summary>Помечает удалёнными все задачи пробы и отправляет ей обновлённый список.</summary>
         Task DeleteByRequestInfoAsync(string requestInfo, CancellationToken cancellationToken);
 

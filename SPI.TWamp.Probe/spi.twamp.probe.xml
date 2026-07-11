@@ -480,12 +480,17 @@
             Используется сервером для сверки состояния и досылки недостающих задач.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.TaskStatus">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.TaskStatus(System.Int32,System.Int32,System.String,System.String)">
             <summary>
             Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
             когда был последний запуск/завершение, сколько раз выполнялась,
             ближайший запланированный запуск и последняя ошибка.
+            Поддерживает фильтры и постраничную выдачу — задач может быть более 10 000.
             </summary>
+            <param name="skip">Сколько записей пропустить.</param>
+            <param name="take">Размер страницы (максимум 500).</param>
+            <param name="title">Фильтр по названию задачи (содержит).</param>
+            <param name="outcome">Фильтр по исходу: Success / ExitCodeError / TimedOut / StartFailed / Running / NotStarted.</param>
         </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
             <summary>

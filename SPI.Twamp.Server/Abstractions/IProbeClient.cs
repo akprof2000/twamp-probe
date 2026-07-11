@@ -52,7 +52,8 @@ namespace SPI.Twamp.Server.Abstractions
         /// Ответ отдаётся как есть (сырой JSON) — сервер лишь проксирует его в UI.
         /// </summary>
         /// <param name="probeUrl">Базовый адрес пробы.</param>
+        /// <param name="query">Строка запроса с фильтрами и пагинацией (без «?»), может быть пустой.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        Task<string> GetTaskStatusRawAsync(string probeUrl, CancellationToken cancellationToken);
+        Task<string> GetTaskStatusRawAsync(string probeUrl, string query, CancellationToken cancellationToken);
     }
 }

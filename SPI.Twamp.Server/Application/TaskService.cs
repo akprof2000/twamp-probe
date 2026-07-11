@@ -50,10 +50,16 @@ namespace SPI.Twamp.Server.Application
             _logger.Info("Массовое сохранение задач: {Count}", tasks.Count);
             await _tasks.UpsertRangeAsync(tasks);
             _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
+            await PushGroupedAsync(tasks, cancellationToken);
+        }
 
-            // Группируем по пробе и отправляем большими пачками: один HTTP-запрос
-            // на пачку вместо запроса на каждую задачу. Отправка best-effort —
-            // недоставленное досошлёт фоновая сверка.
+        /// <summary>
+        /// Рассылает задачи пробам пакетами: группировка по адресу пробы, один SetJobs
+        /// на пачку до <see cref="PushBatchSize"/> задач. Отправка best-effort —
+        /// недоставленное досошлёт фоновая сверка.
+        /// </summary>
+        private async Task PushGroupedAsync(IReadOnlyList<TaskInfo> tasks, CancellationToken cancellationToken)
+        {
             foreach (IGrouping<string, TaskInfo> group in tasks.GroupBy(t => t.RequestInfo))
             {
                 TaskInfo[] all = [.. group];
@@ -63,6 +69,49 @@ namespace SPI.Twamp.Server.Application
                     await TryPushAsync(group.Key, chunk, cancellationToken);
                 }
             }
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> RestoreAsync(Guid id, CancellationToken cancellationToken)
+        {
+            TaskInfo? task = await _tasks.GetByIdAsync(id);
+            if (task is null || !task.Delete)
+            {
+                return false;
+            }
+
+            _logger.Info("Восстановление задачи {Id}", id);
+            task.Delete = false;
+            task.DeletedAt = null;
+            await _tasks.UpsertAsync(task);
+            _changeNotifier.Notify();
+            await TryPushAsync(task.RequestInfo, [task], cancellationToken); // проба добавит задачу заново
+            return true;
+        }
+
+        /// <inheritdoc/>
+        public async Task<int> SetDeletedManyAsync(IReadOnlyList<TaskInfo> tasks, bool deleted, CancellationToken cancellationToken)
+        {
+            // Меняем только те задачи, чьё состояние действительно отличается.
+            List<TaskInfo> changed = [.. tasks.Where(t => t.Delete != deleted)];
+            if (changed.Count == 0)
+            {
+                return 0;
+            }
+
+            DateTime now = DateTime.Now;
+            foreach (TaskInfo task in changed)
+            {
+                task.Delete = deleted;
+                task.DeletedAt = deleted ? now : null;
+            }
+
+            _logger.Info("Массовое {Action} задач: {Count}",
+                deleted ? "удаление" : "восстановление", changed.Count);
+            await _tasks.UpsertRangeAsync(changed);
+            _changeNotifier.Notify();
+            await PushGroupedAsync(changed, cancellationToken);
+            return changed.Count;
         }
 
         /// <inheritdoc/>

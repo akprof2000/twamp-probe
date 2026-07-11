@@ -74,9 +74,14 @@ namespace SPI.Twamp.Server.Infrastructure
                 .ReceiveJson<Guid[]>();
 
         /// <inheritdoc/>
-        public Task<string> GetTaskStatusRawAsync(string probeUrl, CancellationToken cancellationToken) =>
-            Request(probeUrl, "api/ProbeInterface/TaskStatus")
-                .GetAsync(cancellationToken: cancellationToken)
-                .ReceiveString();
+        public Task<string> GetTaskStatusRawAsync(string probeUrl, string query, CancellationToken cancellationToken)
+        {
+            IFlurlRequest request = Request(probeUrl, "api/ProbeInterface/TaskStatus");
+            if (!string.IsNullOrEmpty(query))
+            {
+                request.Url.Query = query; // фильтры и пагинация пробрасываются как есть
+            }
+            return request.GetAsync(cancellationToken: cancellationToken).ReceiveString();
+        }
     }
 }

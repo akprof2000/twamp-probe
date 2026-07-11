@@ -163,13 +163,14 @@
             <param name="probeUrl">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTaskStatusRawAsync(System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTaskStatusRawAsync(System.String,System.String,System.Threading.CancellationToken)">
             <summary>
             Запрашивает у пробы состояние выполнения задач (запущена ли сейчас,
             последний старт/финиш, ближайший запуск, последняя ошибка).
             Ответ отдаётся как есть (сырой JSON) — сервер лишь проксирует его в UI.
             </summary>
             <param name="probeUrl">Базовый адрес пробы.</param>
+            <param name="query">Строка запроса с фильтрами и пагинацией (без «?»), может быть пустой.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbePoller">
@@ -463,6 +464,26 @@
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Помечает задачу удалённой и отправляет обновлённый список её пробе.</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Восстанавливает удалённую задачу: снимает пометку удаления и заново
+            отправляет задачу её пробе.
+            </summary>
+            <param name="id">Идентификатор задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns><c>true</c>, если задача найдена и восстановлена.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.SetDeletedManyAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            Массово помечает задачи удалёнными (<paramref name="deleted"/> = true)
+            или восстанавливает их (false) и рассылает изменения пробам пакетами.
+            Используется для операций над отфильтрованным списком.
+            </summary>
+            <param name="tasks">Задачи для изменения.</param>
+            <param name="deleted">Новое состояние пометки удаления.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns>Число фактически изменённых задач.</returns>
+        </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.DeleteByRequestInfoAsync(System.String,System.Threading.CancellationToken)">
             <summary>Помечает удалёнными все задачи пробы и отправляет ей обновлённый список.</summary>
         </member>
@@ -705,6 +726,19 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.AddRangeAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.PushGroupedAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
+            <summary>
+            Рассылает задачи пробам пакетами: группировка по адресу пробы, один SetJobs
+            на пачку до <see cref="F:SPI.Twamp.Server.Application.TaskService.PushBatchSize"/> задач. Отправка best-effort —
+            недоставленное досошлёт фоновая сверка.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.SetDeletedManyAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Boolean,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
@@ -1423,6 +1457,52 @@
             <param name="id">Идентификатор задачи.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Восстанавливает удалённую задачу (снимает пометку удаления).</summary>
+            <param name="id">Идентификатор задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.MatchesFilter(SPI.Twamp.Server.Contracts.TaskInfo,SPI.Twamp.Server.Abstractions.TaskLastResult,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+            <summary>
+            Проверяет соответствие задачи фильтрам списка (все текстовые фильтры —
+            «содержит», без учёта регистра).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.FilterTasksAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+            <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksPage(System.Int32,System.Int32,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+            <summary>
+            Страница списка задач с фильтрами по всем столбцам и серверной пагинацией —
+            интерфейс не загружает десятки тысяч задач целиком.
+            </summary>
+            <param name="skip">Сколько задач пропустить.</param>
+            <param name="take">Размер страницы (максимум 500).</param>
+            <param name="title">Фильтр по названию (содержит).</param>
+            <param name="probe">Фильтр по адресу пробы (содержит).</param>
+            <param name="node">Фильтр по узлу (содержит).</param>
+            <param name="type">Фильтр по типу: Scheduler или Repeater.</param>
+            <param name="status">Статус: active / deleted / all.</param>
+            <param name="outcome">Исход: Success / ExitCodeError / TimedOut / StartFailed / none.</param>
+            <param name="error">Фильтр по тексту ошибки (содержит).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksBulk(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Массовая операция над отфильтрованным списком задач: удаление всех
+            совпавших с фильтром (action=delete) или восстановление (action=restore).
+            Фильтры те же, что у TasksPage, — «удалить отфильтрованное одним нажатием».
+            </summary>
+            <param name="action">delete — пометить удалёнными; restore — восстановить.</param>
+            <param name="title">Фильтр по названию (содержит).</param>
+            <param name="probe">Фильтр по адресу пробы (содержит).</param>
+            <param name="node">Фильтр по узлу (содержит).</param>
+            <param name="type">Фильтр по типу задач.</param>
+            <param name="status">Статус: active / deleted / all.</param>
+            <param name="outcome">Исход последнего запуска.</param>
+            <param name="error">Фильтр по тексту ошибки.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns>Число изменённых задач.</returns>
+        </member>
         <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DeleteByIPAsync(System.String,System.Threading.CancellationToken)">
             <summary>Удаляет все задачи пробы по её адресу.</summary>
             <param name="IPAddress">Адрес пробы (RequestInfo).</param>
@@ -1473,13 +1553,17 @@
             поступления результатов после старта сервера.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeTaskStatus(System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeTaskStatus(System.String,System.Int32,System.Int32,System.String,System.String,System.Threading.CancellationToken)">
             <summary>
             Проксирует состояние выполнения задач с пробы: запущена ли задача сейчас,
             последний старт/завершение, счётчик выполнений, ближайший запуск, ошибка.
             Отвечает на вопрос «запустились ли задачи», не дожидаясь первых результатов.
             </summary>
             <param name="probe">Адрес пробы (RequestInfo).</param>
+            <param name="skip">Сколько записей пропустить.</param>
+            <param name="take">Размер страницы (максимум 500).</param>
+            <param name="title">Фильтр по названию задачи (содержит).</param>
+            <param name="outcome">Фильтр по исходу запуска.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeStatus">
@@ -1695,7 +1779,7 @@
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
-        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskStatusRawAsync(System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskStatusRawAsync(System.String,System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.StatRepository">

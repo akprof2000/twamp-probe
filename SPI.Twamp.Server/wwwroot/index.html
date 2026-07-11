@@ -26,6 +26,7 @@
   button.act { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:7px 14px; cursor:pointer; font:inherit; }
   button.act:disabled { opacity:.5; cursor:default; }
   button.del { background:none; border:1px solid var(--bad); color:var(--bad); border-radius:6px; padding:2px 8px; cursor:pointer; }
+  select { padding:6px; border:1px solid var(--line); border-radius:6px; background:#fff; font:inherit; }
   input[type=file],input[type=date],input[type=text] { padding:6px; border:1px solid var(--line); border-radius:6px; background:#fff; font:inherit; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
   .msg { margin-top:8px; color:var(--mut); white-space:pre-wrap; }
@@ -56,6 +57,23 @@
   </div>
   <div class="card" id="cardProbeTasks" style="display:none">
     <h2>Выполнение задач на пробе <span id="probeTasksAddr" style="color:var(--mut);font-weight:400"></span></h2>
+    <div class="row">
+      <input id="pfTitle" type="text" placeholder="название" style="width:170px">
+      <select id="pfOutcome">
+        <option value="">исход: все</option>
+        <option value="Running">выполняется</option>
+        <option value="Success">успех</option>
+        <option value="ExitCodeError">ошибка приложения</option>
+        <option value="TimedOut">убито по таймауту</option>
+        <option value="StartFailed">не запустилась</option>
+        <option value="NotStarted">не запускалась</option>
+      </select>
+      <button class="act" onclick="withBusy(this, () => { probeTaskSkip = 0; return loadProbeTasks(null, currentProbe); })">Применить</button>
+      <span style="margin-left:auto"></span>
+      <button class="act" onclick="withBusy(this, () => pageProbeTasks(-1))">←</button>
+      <span id="probePageInfo" style="color:var(--mut)"></span>
+      <button class="act" onclick="withBusy(this, () => pageProbeTasks(1))">→</button>
+    </div>
     <div class="scroll"><table id="tblProbeTasks">
       <thead><tr><th>Задача</th><th>Состояние</th><th>Последний старт</th><th>Завершение</th><th>Успех / ошибки</th><th>Следующий запуск</th><th>Результат</th></tr></thead>
       <tbody></tbody>
@@ -79,7 +97,39 @@
 <section id="tab-tasks">
   <div class="card">
     <h2>Задачи <button class="act" style="float:right" onclick="withBusy(this, loadTasks)">Обновить</button></h2>
-    <div class="row"><input id="taskFilter" type="text" placeholder="фильтр по имени/пробе/узлу" style="width:300px" oninput="renderTasks()"></div>
+    <div class="row">
+      <input id="fTitle"  type="text" placeholder="название" style="width:150px">
+      <input id="fProbe"  type="text" placeholder="проба" style="width:130px">
+      <input id="fNode"   type="text" placeholder="узел" style="width:120px">
+      <select id="fType">
+        <option value="">тип: все</option>
+        <option value="Scheduler">Scheduler</option>
+        <option value="Repeater">Repeater</option>
+      </select>
+      <select id="fStatus">
+        <option value="active">активные</option>
+        <option value="deleted">удалённые</option>
+        <option value="all">все</option>
+      </select>
+      <select id="fOutcome">
+        <option value="">выполнение: все</option>
+        <option value="Success">успех</option>
+        <option value="ExitCodeError">ошибка приложения</option>
+        <option value="TimedOut">убито по таймауту</option>
+        <option value="StartFailed">не запустилась</option>
+        <option value="none">нет данных</option>
+      </select>
+      <input id="fError" type="text" placeholder="текст ошибки" style="width:140px">
+    </div>
+    <div class="row">
+      <button class="act" onclick="withBusy(this, () => { taskSkip = 0; return loadTasks(); })">Применить фильтр</button>
+      <button class="del" id="btnBulkDelete" onclick="withBusy(this, () => bulkTasks('delete'))">Удалить отфильтрованное</button>
+      <button class="act" id="btnBulkRestore" style="background:var(--ok)" onclick="withBusy(this, () => bulkTasks('restore'))">Восстановить отфильтрованное</button>
+      <span style="margin-left:auto"></span>
+      <button class="act" onclick="withBusy(this, () => pageTasks(-1))">←</button>
+      <span id="taskPageInfo" style="color:var(--mut)"></span>
+      <button class="act" onclick="withBusy(this, () => pageTasks(1))">→</button>
+    </div>
     <div class="scroll"><table id="tblTasks">
       <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th>Выполнение</th><th>Результат</th><th></th></tr></thead>
       <tbody></tbody>
@@ -167,15 +217,25 @@ const fmt = d => d ? new Date(d).toLocaleString('ru-RU') : '—';
 // Индикация ожидания: на время запроса кнопка блокируется и показывает «⏳».
 // Так всегда видно, что нажатие принято и операция выполняется.
 async function withBusy(btn, fn) {
-  if (!btn || btn.disabled) { if (btn) return; }
+  if (btn && btn.disabled) return;
   const old = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + old; }
   try { await fn(); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+  finally {
+    if (btn) {
+      btn.disabled = false;
+      // Возвращаем прежнюю подпись только если её не сменили во время операции
+      // (например, loadTasks мог обновить счётчик на кнопке).
+      if (btn.textContent === '⏳ ' + old) btn.textContent = old;
+    }
+  }
 }
 
-// --- Выполнение задач на пробе (статус в реальном времени) ---
-let currentProbe = null; // проба, чья таблица задач сейчас открыта (для автообновления)
+// --- Выполнение задач на пробе (статус в реальном времени, постранично) ---
+let currentProbe = null;      // проба, чья таблица задач сейчас открыта (для автообновления)
+const PROBE_PAGE = 100;
+let probeTaskSkip = 0;
+let probeTaskTotal = 0;
 
 // Составной статус жизненного цикла: запустилась ли задача пробой,
 // корректно ли завершился процесс зонда и каков итог.
@@ -190,26 +250,40 @@ function outcomeCell(t) {
     default:              return '<span style="color:var(--mut)">ещё не запускалась</span>';
   }
 }
+
+async function pageProbeTasks(dir) {
+  const next = probeTaskSkip + dir * PROBE_PAGE;
+  if (next < 0 || next >= probeTaskTotal) return;
+  probeTaskSkip = next;
+  await loadProbeTasks(null, currentProbe);
+}
+
 async function loadProbeTasks(btn, probe) {
+  if (!probe) return;
   await withBusy(btn, async () => {
     try {
-      const list = await jget('probetaskstatus?probe=' + encodeURIComponent(probe));
+      const q = new URLSearchParams({ probe, skip: probeTaskSkip, take: PROBE_PAGE });
+      if ($('#pfTitle').value.trim()) q.set('title', $('#pfTitle').value.trim());
+      if ($('#pfOutcome').value)      q.set('outcome', $('#pfOutcome').value);
+      if (currentProbe !== probe) probeTaskSkip = 0; // смена пробы — с первой страницы
+      const data = await jget('probetaskstatus?' + q.toString());
       currentProbe = probe;
+      probeTaskTotal = data.total;
+      if (probeTaskSkip >= probeTaskTotal && probeTaskTotal > 0) { probeTaskSkip = 0; return loadProbeTasks(null, probe); }
       $('#cardProbeTasks').style.display = '';
       $('#probeTasksAddr').textContent = probe;
-      // Сначала выполняющиеся и проблемные, затем по имени.
-      const bad = o => o === 'ExitCodeError' || o === 'StartFailed' || o === 'TimedOut';
-      list.sort((a, b) => (b.running - a.running) ||
-        (bad(b.lastOutcome) - bad(a.lastOutcome)) || (a.title > b.title ? 1 : -1));
-      $('#tblProbeTasks tbody').innerHTML = list.map(t => `<tr>
+      $('#tblProbeTasks tbody').innerHTML = data.items.map(t => `<tr>
         <td class="wrap">${t.title || t.taskId}</td>
         <td>${outcomeCell(t)}</td>
         <td>${fmt(t.lastStart)}</td><td>${fmt(t.lastFinish)}</td>
         <td><span class="ok">${t.successTotal}</span> / <span class="${t.errorTotal ? 'bad' : ''}">${t.errorTotal}</span></td>
         <td>${fmt(t.nextRun)}</td>
         <td class="wrap">${t.lastResult || t.lastError || ''}</td></tr>`).join('')
-        || '<tr><td colspan="7">задачи ещё не запускались</td></tr>';
-      $('#msgProbeTasks').textContent = 'Всего: ' + list.length + ' | обновлено ' + new Date().toLocaleTimeString('ru-RU');
+        || '<tr><td colspan="7">ничего не найдено</td></tr>';
+      const from = probeTaskTotal ? probeTaskSkip + 1 : 0;
+      const to = Math.min(probeTaskSkip + PROBE_PAGE, probeTaskTotal);
+      $('#probePageInfo').textContent = `${from}–${to} из ${probeTaskTotal}`;
+      $('#msgProbeTasks').textContent = 'Найдено: ' + probeTaskTotal + ' | обновлено ' + new Date().toLocaleTimeString('ru-RU');
     } catch (e) { $('#msgProbeTasks').textContent = 'Ошибка: ' + e.message; $('#cardProbeTasks').style.display = ''; }
   });
 }
@@ -242,23 +316,58 @@ async function approve(requestInfo, hostName, ipAddress) {
   } catch (e) { $('#msgUnident').textContent = 'Ошибка: ' + e.message; }
 }
 
-// --- Задачи ---
-let tasksCache = [];
-let lastResults = {}; // taskId -> {time, hasError}
+// --- Задачи: серверная пагинация и фильтры (задач может быть >10000) ---
+const TASK_PAGE = 100;
+let taskSkip = 0;
+let taskTotal = 0;
+let taskActiveTotal = 0;   // сколько в выборке можно удалить
+let taskDeletedTotal = 0;  // сколько в выборке можно восстановить
+
+// Собирает строку запроса из полей фильтров (общая для страницы и массовых операций).
+function taskFilterQuery() {
+  const q = new URLSearchParams();
+  const set = (k, v) => { if (v) q.set(k, v); };
+  set('title',   $('#fTitle').value.trim());
+  set('probe',   $('#fProbe').value.trim());
+  set('node',    $('#fNode').value.trim());
+  set('type',    $('#fType').value);
+  q.set('status', $('#fStatus').value);
+  set('outcome', $('#fOutcome').value);
+  set('error',   $('#fError').value.trim());
+  return q;
+}
+
 async function loadTasks() {
   try {
-    // Задачи и последние результаты загружаются параллельно и мержатся при отрисовке.
-    const [tasks, results] = await Promise.all([jget('tasks'), jget('lastresults')]);
-    tasksCache = tasks;
-    lastResults = Object.fromEntries(results.map(r => [r.taskId, r]));
-    renderTasks();
-    $('#msgTasks').textContent = 'Всего: ' + tasksCache.length +
-      ' (последние результаты копятся с момента старта сервера)';
+    const q = taskFilterQuery();
+    q.set('skip', taskSkip); q.set('take', TASK_PAGE);
+    const data = await jget('taskspage?' + q.toString());
+    taskTotal = data.total;
+    taskActiveTotal = data.activeTotal;
+    taskDeletedTotal = data.deletedTotal;
+    if (taskSkip >= taskTotal && taskTotal > 0) { taskSkip = 0; return loadTasks(); }
+    renderTasks(data.items);
+    const from = taskTotal ? taskSkip + 1 : 0;
+    const to = Math.min(taskSkip + TASK_PAGE, taskTotal);
+    $('#taskPageInfo').textContent = `${from}–${to} из ${taskTotal}`;
+    $('#msgTasks').textContent = 'Найдено по фильтру: ' + taskTotal;
+    // Кнопки массовых операций показываем только когда есть что удалять/восстанавливать.
+    $('#btnBulkDelete').style.display  = taskActiveTotal  > 0 ? '' : 'none';
+    $('#btnBulkRestore').style.display = taskDeletedTotal > 0 ? '' : 'none';
+    $('#btnBulkDelete').textContent  = `Удалить отфильтрованное (${taskActiveTotal})`;
+    $('#btnBulkRestore').textContent = `Восстановить отфильтрованное (${taskDeletedTotal})`;
   } catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
 }
+
+async function pageTasks(dir) {
+  const next = taskSkip + dir * TASK_PAGE;
+  if (next < 0 || next >= taskTotal) return;
+  taskSkip = next;
+  await loadTasks();
+}
+
 // Статус 1: как завершился процесс зонда (сам / убит по таймауту / не запустился).
-function runCell(taskId) {
-  const r = lastResults[taskId];
+function runCell(r) {
   if (!r) return '<span style="color:var(--mut)">нет данных</span>';
   let label;
   switch (r.outcome) {
@@ -271,30 +380,52 @@ function runCell(taskId) {
   return `${label}<br><span style="color:var(--mut)">${fmt(r.time)}</span>`;
 }
 // Статус 2: результат приложения — код выхода и текст ошибки.
-function resultCell(taskId) {
-  const r = lastResults[taskId];
+function resultCell(r) {
   if (!r) return '';
   if (!r.hasError) return `<span class="ok">успех${r.exitCode != null ? ' (код 0)' : ''}</span>`;
   const code = r.outcome === 'ExitCodeError' && r.exitCode != null ? ` (код ${r.exitCode})` : '';
   const text = r.error ? `<br><span style="color:var(--mut)">${r.error.length > 120 ? r.error.slice(0,120) + '…' : r.error}</span>` : '';
   return `<span class="bad" title="${(r.error||'').replace(/"/g,'&quot;')}">ошибка${code}</span>${text}`;
 }
-function renderTasks() {
-  const f = $('#taskFilter').value.toLowerCase();
-  const rows = tasksCache.filter(t => !f || (t.title+t.requestInfo+t.endNode).toLowerCase().includes(f));
-  $('#tblTasks tbody').innerHTML = rows.slice(0, 500).map(t => `<tr>
+
+function renderTasks(items) {
+  $('#tblTasks tbody').innerHTML = items.map(t => `<tr>
     <td class="wrap">${t.title}</td><td class="wrap">${t.requestInfo}</td><td>${t.endNode}</td>
     <td>${t.type}</td><td>${t.cronExpression||''}</td><td>${fmt(t.end)}</td><td>${t.timeoutSec||0}</td>
     <td>${t.delete ? '<span class="bad">удалена</span>' : '<span class="ok">активна</span>'}</td>
-    <td>${runCell(t.id)}</td>
-    <td class="wrap" style="white-space:normal;max-width:340px">${resultCell(t.id)}</td>
-    <td>${t.delete ? '' : `<button class="del" onclick="delTask('${t.id}')">удалить</button>`}</td></tr>`).join('')
-    + (rows.length > 500 ? `<tr><td colspan="11">… показаны первые 500 из ${rows.length}</td></tr>` : '');
+    <td>${runCell(t.last)}</td>
+    <td class="wrap" style="white-space:normal;max-width:340px">${resultCell(t.last)}</td>
+    <td>${t.delete
+      ? `<button class="act" style="background:var(--ok);padding:2px 8px" onclick="restoreTask('${t.id}')">восстановить</button>`
+      : `<button class="del" onclick="delTask('${t.id}')">удалить</button>`}</td></tr>`).join('')
+    || '<tr><td colspan="11">ничего не найдено</td></tr>';
 }
+
 async function delTask(id) {
   if (!confirm('Удалить задачу?')) return;
   try { await jsend('tasks/' + id, 'DELETE'); loadTasks(); }
   catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
+}
+async function restoreTask(id) {
+  try { await jsend('tasks/' + id + '/restore', 'POST'); loadTasks(); }
+  catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
+}
+
+// Массовая операция над всем отфильтрованным списком (не только видимой страницей).
+async function bulkTasks(action) {
+  const verb = action === 'delete' ? 'Удалить' : 'Восстановить';
+  const count = action === 'delete' ? taskActiveTotal : taskDeletedTotal;
+  if (!count) { $('#msgTasks').textContent = `Нет задач для операции «${verb.toLowerCase()}»`; return; }
+  if (!confirm(`${verb} ВСЕ задачи по текущему фильтру (${count} шт.)?`)) return;
+  try {
+    const q = taskFilterQuery();
+    q.set('action', action);
+    const r = await jsend('tasksbulk?' + q.toString(), 'POST');
+    const data = await r.json();
+    $('#msgTasks').textContent = `${verb === 'Удалить' ? 'Удалено' : 'Восстановлено'}: ${data.affected}`;
+    taskSkip = 0;
+    await loadTasks();
+  } catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
 }
 
 // --- Наборы шаблонов ---

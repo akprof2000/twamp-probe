@@ -73,6 +73,178 @@ namespace SPI.Twamp.Server.Controllers
             return Ok();
         }
 
+        /// <summary>Восстанавливает удалённую задачу (снимает пометку удаления).</summary>
+        /// <param name="id">Идентификатор задачи.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        [HttpPost("tasks/{id}/restore")]
+        public async Task<ActionResult> RestoreAsync(Guid id, CancellationToken cancellationToken)
+        {
+            bool restored = await _taskService.RestoreAsync(id, cancellationToken);
+            return restored ? Ok() : NotFound("Задача не найдена или не была удалена");
+        }
+
+        /// <summary>
+        /// Проверяет соответствие задачи фильтрам списка (все текстовые фильтры —
+        /// «содержит», без учёта регистра).
+        /// </summary>
+        private static bool MatchesFilter(TaskInfo t, TaskLastResult? last,
+            string? title, string? probe, string? node, string? type,
+            string status, string? outcome, string? error)
+        {
+            static bool Has(string source, string? term) =>
+                string.IsNullOrEmpty(term) || source.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+            if (!Has(t.Title, title) || !Has(t.RequestInfo, probe) || !Has(t.EndNode, node))
+            {
+                return false;
+            }
+            if (!string.IsNullOrEmpty(type) && !t.Type.ToString().Equals(type, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            if (status == "active" && t.Delete)
+            {
+                return false;
+            }
+            if (status == "deleted" && !t.Delete)
+            {
+                return false;
+            }
+            if (!string.IsNullOrEmpty(outcome))
+            {
+                // «none» — задачи без данных о выполнении.
+                string actual = last?.Outcome ?? (last is null ? "none" : (last.HasError ? "error" : "Success"));
+                if (!actual.Equals(outcome, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+            if (!string.IsNullOrEmpty(error) &&
+                (last?.Error is null || !last.Error.Contains(error, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
+        private async Task<List<(TaskInfo Task, TaskLastResult? Last)>> FilterTasksAsync(
+            string? title, string? probe, string? node, string? type,
+            string status, string? outcome, string? error)
+        {
+            IReadOnlyList<TaskInfo> all = await _taskService.GetAllAsync();
+            IReadOnlyDictionary<Guid, TaskLastResult> lastResults = _probeStatus.GetLastResults();
+
+            List<(TaskInfo, TaskLastResult?)> filtered = [];
+            foreach (TaskInfo t in all)
+            {
+                TaskLastResult? last = lastResults.TryGetValue(t.Id, out TaskLastResult? lr) ? lr : null;
+                if (MatchesFilter(t, last, title, probe, node, type, status, outcome, error))
+                {
+                    filtered.Add((t, last));
+                }
+            }
+            return filtered;
+        }
+
+        /// <summary>
+        /// Страница списка задач с фильтрами по всем столбцам и серверной пагинацией —
+        /// интерфейс не загружает десятки тысяч задач целиком.
+        /// </summary>
+        /// <param name="skip">Сколько задач пропустить.</param>
+        /// <param name="take">Размер страницы (максимум 500).</param>
+        /// <param name="title">Фильтр по названию (содержит).</param>
+        /// <param name="probe">Фильтр по адресу пробы (содержит).</param>
+        /// <param name="node">Фильтр по узлу (содержит).</param>
+        /// <param name="type">Фильтр по типу: Scheduler или Repeater.</param>
+        /// <param name="status">Статус: active / deleted / all.</param>
+        /// <param name="outcome">Исход: Success / ExitCodeError / TimedOut / StartFailed / none.</param>
+        /// <param name="error">Фильтр по тексту ошибки (содержит).</param>
+        [HttpGet("[action]")]
+        public async Task<ActionResult> TasksPage(
+            [FromQuery] int skip = 0, [FromQuery] int take = 100,
+            [FromQuery] string? title = null, [FromQuery] string? probe = null,
+            [FromQuery] string? node = null, [FromQuery] string? type = null,
+            [FromQuery] string status = "active", [FromQuery] string? outcome = null,
+            [FromQuery] string? error = null)
+        {
+            take = Math.Clamp(take, 1, 500);
+            List<(TaskInfo Task, TaskLastResult? Last)> filtered =
+                await FilterTasksAsync(title, probe, node, type, status, outcome, error);
+
+            var items = filtered
+                .OrderBy(x => x.Task.Title, StringComparer.OrdinalIgnoreCase)
+                .Skip(Math.Max(0, skip)).Take(take)
+                .Select(x => new
+                {
+                    x.Task.Id,
+                    x.Task.Title,
+                    x.Task.RequestInfo,
+                    x.Task.EndNode,
+                    Type = x.Task.Type.ToString(),
+                    x.Task.CronExpression,
+                    x.Task.End,
+                    x.Task.TimeoutSec,
+                    x.Task.Delete,
+                    Last = x.Last is null ? null : new
+                    {
+                        x.Last.Time,
+                        x.Last.HasError,
+                        x.Last.Outcome,
+                        x.Last.ExitCode,
+                        x.Last.Error
+                    }
+                });
+
+            // Счётчики для кнопок массовых операций: сколько в выборке реально можно
+            // удалить (активных) и восстановить (удалённых). По ним интерфейс скрывает
+            // ненужную кнопку, когда действовать не над чем.
+            int activeTotal = filtered.Count(x => !x.Task.Delete);
+            int deletedTotal = filtered.Count(x => x.Task.Delete);
+
+            return Ok(new { Total = filtered.Count, ActiveTotal = activeTotal, DeletedTotal = deletedTotal, Items = items });
+        }
+
+        /// <summary>
+        /// Массовая операция над отфильтрованным списком задач: удаление всех
+        /// совпавших с фильтром (action=delete) или восстановление (action=restore).
+        /// Фильтры те же, что у TasksPage, — «удалить отфильтрованное одним нажатием».
+        /// </summary>
+        /// <param name="action">delete — пометить удалёнными; restore — восстановить.</param>
+        /// <param name="title">Фильтр по названию (содержит).</param>
+        /// <param name="probe">Фильтр по адресу пробы (содержит).</param>
+        /// <param name="node">Фильтр по узлу (содержит).</param>
+        /// <param name="type">Фильтр по типу задач.</param>
+        /// <param name="status">Статус: active / deleted / all.</param>
+        /// <param name="outcome">Исход последнего запуска.</param>
+        /// <param name="error">Фильтр по тексту ошибки.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <returns>Число изменённых задач.</returns>
+        [HttpPost("[action]")]
+        public async Task<ActionResult> TasksBulk(
+            [FromQuery][Required] string action,
+            [FromQuery] string? title = null, [FromQuery] string? probe = null,
+            [FromQuery] string? node = null, [FromQuery] string? type = null,
+            [FromQuery] string status = "active", [FromQuery] string? outcome = null,
+            [FromQuery] string? error = null,
+            CancellationToken cancellationToken = default)
+        {
+            bool delete = action.Equals("delete", StringComparison.OrdinalIgnoreCase);
+            if (!delete && !action.Equals("restore", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("action должен быть delete или restore");
+            }
+
+            List<(TaskInfo Task, TaskLastResult? Last)> filtered =
+                await FilterTasksAsync(title, probe, node, type, status, outcome, error);
+
+            int affected = await _taskService.SetDeletedManyAsync(
+                [.. filtered.Select(x => x.Task)], delete, cancellationToken);
+
+            _logger.Info("Массовая операция {Action}: изменено {Count} задач", action, affected);
+            return Ok(new { Affected = affected });
+        }
+
         /// <summary>Удаляет все задачи пробы по её адресу.</summary>
         /// <param name="IPAddress">Адрес пробы (RequestInfo).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
@@ -187,11 +359,23 @@ namespace SPI.Twamp.Server.Controllers
         /// Отвечает на вопрос «запустились ли задачи», не дожидаясь первых результатов.
         /// </summary>
         /// <param name="probe">Адрес пробы (RequestInfo).</param>
+        /// <param name="skip">Сколько записей пропустить.</param>
+        /// <param name="take">Размер страницы (максимум 500).</param>
+        /// <param name="title">Фильтр по названию задачи (содержит).</param>
+        /// <param name="outcome">Фильтр по исходу запуска.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         [HttpGet("[action]")]
-        public async Task<ActionResult> ProbeTaskStatus([FromQuery][Required] string probe, CancellationToken cancellationToken)
+        public async Task<ActionResult> ProbeTaskStatus(
+            [FromQuery][Required] string probe,
+            [FromQuery] int skip = 0, [FromQuery] int take = 100,
+            [FromQuery] string? title = null, [FromQuery] string? outcome = null,
+            CancellationToken cancellationToken = default)
         {
-            string json = await _probeClient.GetTaskStatusRawAsync(probe, cancellationToken);
+            // Пагинация и фильтры выполняются на пробе — сервер лишь проксирует ответ.
+            string query = $"skip={skip}&take={take}" +
+                (string.IsNullOrEmpty(title) ? "" : $"&title={Uri.EscapeDataString(title)}") +
+                (string.IsNullOrEmpty(outcome) ? "" : $"&outcome={Uri.EscapeDataString(outcome)}");
+            string json = await _probeClient.GetTaskStatusRawAsync(probe, query, cancellationToken);
             return Content(json, "application/json");
         }
 
