@@ -143,6 +143,15 @@ namespace SPI.Twamp.Probe.Runners
                 }
             };
 
+            // Каталог приложения — в PYTHONPATH, чтобы «python -m twampy» находил вендоренный
+            // пакет twampy независимо от рабочего каталога службы (важно для systemd). Влияет
+            // только на дочерний python-процесс; для ping/twping безвредно.
+            string baseDir = AppContext.BaseDirectory;
+            string? existingPythonPath = System.Environment.GetEnvironmentVariable("PYTHONPATH");
+            process.StartInfo.Environment["PYTHONPATH"] = string.IsNullOrEmpty(existingPythonPath)
+                ? baseDir
+                : $"{baseDir}{Path.PathSeparator}{existingPythonPath}";
+
             try
             {
                 _ = process.Start();
