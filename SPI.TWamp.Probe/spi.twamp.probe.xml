@@ -463,25 +463,27 @@
             Задача по расписанию (cron).
             </summary>
         </member>
-        <member name="T:SPI.Twamp.Probe.Controllers.ProbeInterface">
+        <member name="T:SPI.Twamp.Probe.Controllers.ProbeJobsController">
             <summary>
-            Веб-интерфейс зонда: приём задач и выдача результатов их выполнения.
+            Приём задач и статус их выполнения: регистрация пробы, инкрементальное слияние
+            задач, сверка идентификаторов и состояние выполнения. Часть API пробы
+            (<c>api/probeinterface</c>).
             </summary>
-            <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.#ctor(NLog.Logger,SPI.Twamp.Probe.Server.Worker,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>
-            Веб-интерфейс зонда: приём задач и выдача результатов их выполнения.
+            Приём задач и статус их выполнения: регистрация пробы, инкрементальное слияние
+            задач, сверка идентификаторов и состояние выполнения. Часть API пробы
+            (<c>api/probeinterface</c>).
             </summary>
-            <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckIn(System.String)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.CheckIn(System.String)">
             <summary>
             Регистрирует пробу и возвращает её идентификационные данные.
             </summary>
             <param name="requestInfo">Идентификатор запроса (адрес сервера).</param>
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.SetJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.SetJobs(SPI.Twamp.Probe.Contracts.TaskInfo[],System.Threading.CancellationToken)">
             <summary>
             Принимает от сервера изменившиеся задачи и сливает их в реестр пробы
             (инкрементально: добавление, обновление, удаление).
@@ -489,13 +491,13 @@
             <param name="jobs">Изменившиеся задачи (не обязательно полный список).</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.TaskIds">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.TaskIds">
             <summary>
             Возвращает идентификаторы задач по расписанию, известных пробе.
             Используется сервером для сверки состояния и досылки недостающих задач.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.TaskStatus(System.Int32,System.Int32,System.String,System.String)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.TaskStatus(System.Int32,System.Int32,System.String,System.String)">
             <summary>
             Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
             когда был последний запуск/завершение, сколько раз выполнялась,
@@ -507,7 +509,19 @@
             <param name="title">Фильтр по названию задачи (содержит).</param>
             <param name="outcome">Фильтр по исходу: Success / ExitCodeError / TimedOut / StartFailed / Running / NotStarted.</param>
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.CheckData(System.Threading.CancellationToken)">
+        <member name="T:SPI.Twamp.Probe.Controllers.ProbeResultsController">
+            <summary>
+            Выдача результатов зондирования с гарантированной доставкой: «длинный опрос»
+            пачки и её подтверждение. Часть API пробы (<c>api/probeinterface</c>).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeResultsController.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IResultStore)">
+            <summary>
+            Выдача результатов зондирования с гарантированной доставкой: «длинный опрос»
+            пачки и её подтверждение. Часть API пробы (<c>api/probeinterface</c>).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeResultsController.CheckData(System.Threading.CancellationToken)">
             <summary>
             Возвращает накопленные результаты пачкой с идентификатором для подтверждения.
             Реализует «длинный опрос»: ждёт до 30 секунд появления новых данных, не блокируя
@@ -517,7 +531,7 @@
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
             <returns>Пачка результатов (пустая при таймауте).</returns>
         </member>
-        <member name="M:SPI.Twamp.Probe.Controllers.ProbeInterface.ConfirmData(System.Guid)">
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeResultsController.ConfirmData(System.Guid)">
             <summary>
             Подтверждает доставку пачки результатов: сервер записал её в БД,
             и проба может удалить данные.

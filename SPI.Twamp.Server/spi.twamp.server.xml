@@ -1328,6 +1328,38 @@
             Разобранная статистика сеанса.
             </summary>
         </member>
+        <member name="T:SPI.Twamp.Server.Contracts.TaskFilter">
+            <summary>
+            Набор фильтров списка задач (по всем столбцам). Связывается из строки запроса
+            (<c>[FromQuery]</c>), поэтому имена свойств совпадают с прежними query-параметрами:
+            один объект вместо восьми аргументов у методов страницы/массовых операций.
+            Все текстовые фильтры — «содержит», без учёта регистра.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Title">
+            <summary>Фильтр по названию задачи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Probe">
+            <summary>Фильтр по адресу пробы (RequestInfo).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Node">
+            <summary>Фильтр по конечному узлу.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Type">
+            <summary>Фильтр по типу задачи: Scheduler / Repeater.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Mode">
+            <summary>Фильтр по режиму: WinPing / TWamp / TWampy.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Status">
+            <summary>Статус: active / deleted / all.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Outcome">
+            <summary>Исход последнего запуска: Success / ExitCodeError / TimedOut / StartFailed / none.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TaskFilter.Error">
+            <summary>Фильтр по тексту ошибки.</summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskInfo">
             <summary>
             Описание задачи зондирования, хранимое сервером и передаваемое пробе.
@@ -1467,124 +1499,35 @@
             Задача по расписанию (cron).
             </summary>
         </member>
-        <member name="T:SPI.Twamp.Server.Controllers.UserInterface">
+        <member name="T:SPI.Twamp.Server.Controllers.ProbesController">
             <summary>
-            Веб-интерфейс оператора: управление задачами, пробами и отчётами.
-            Контроллер тонкий — вся логика вынесена в прикладные сервисы.
-            </summary>
-            <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
-            <summary>
-            Веб-интерфейс оператора: управление задачами, пробами и отчётами.
-            Контроллер тонкий — вся логика вынесена в прикладные сервисы.
-            </summary>
-            <seealso cref="T:Microsoft.AspNetCore.Mvc.ControllerBase" />
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.Get">
-            <summary>Возвращает полный список задач.</summary>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.Get(System.String)">
-            <summary>Возвращает задачи указанной пробы.</summary>
-            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.PostAsync(SPI.Twamp.Server.Contracts.TaskInfo,System.Threading.CancellationToken)">
-            <summary>Создаёт или обновляет задачу.</summary>
-            <param name="task">Описание задачи.</param>
-            <param name="cancellationToken">Токен отмены.</param>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Удаляет задачу по идентификатору.</summary>
-            <param name="id">Идентификатор задачи.</param>
-            <param name="cancellationToken">Токен отмены.</param>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Восстанавливает удалённую задачу (снимает пометку удаления).</summary>
-            <param name="id">Идентификатор задачи.</param>
-            <param name="cancellationToken">Токен отмены.</param>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.MatchesFilter(SPI.Twamp.Server.Contracts.TaskInfo,SPI.Twamp.Server.Abstractions.TaskLastResult,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
-            <summary>
-            Проверяет соответствие задачи фильтрам списка (все текстовые фильтры —
-            «содержит», без учёта регистра).
+            Пробы и мониторинг: регистрация/подтверждение проб, состояние связи, статус
+            выполнения задач, «длинный опрос» изменений. Часть API оператора (<c>api/userinterface</c>).
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.MatchesResult(SPI.Twamp.Server.Abstractions.TaskLastResult,System.String,System.String)">
-            <summary>Проверяет фильтры по исходу последнего запуска и тексту ошибки.</summary>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ResolveOutcome(SPI.Twamp.Server.Abstractions.TaskLastResult)">
-            <summary>Исход последнего запуска для фильтра: «none» — данных нет, иначе Outcome/error/Success.</summary>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.FilterTasksAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
-            <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksPage(System.Int32,System.Int32,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IClientService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
-            Страница списка задач с фильтрами по всем столбцам и серверной пагинацией —
-            интерфейс не загружает десятки тысяч задач целиком.
+            Пробы и мониторинг: регистрация/подтверждение проб, состояние связи, статус
+            выполнения задач, «длинный опрос» изменений. Часть API оператора (<c>api/userinterface</c>).
             </summary>
-            <param name="skip">Сколько задач пропустить.</param>
-            <param name="take">Размер страницы (максимум 500).</param>
-            <param name="title">Фильтр по названию (содержит).</param>
-            <param name="probe">Фильтр по адресу пробы (содержит).</param>
-            <param name="node">Фильтр по узлу (содержит).</param>
-            <param name="type">Фильтр по типу: Scheduler или Repeater.</param>
-            <param name="mode">Фильтр по режиму: WinPing / TWamp / TWampy.</param>
-            <param name="status">Статус: active / deleted / all.</param>
-            <param name="outcome">Исход: Success / ExitCodeError / TimedOut / StartFailed / none.</param>
-            <param name="error">Фильтр по тексту ошибки (содержит).</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksBulk(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Threading.CancellationToken)">
-            <summary>
-            Массовая операция над отфильтрованным списком задач: удаление всех
-            совпавших с фильтром (action=delete) или восстановление (action=restore).
-            Фильтры те же, что у TasksPage, — «удалить отфильтрованное одним нажатием».
-            </summary>
-            <param name="action">delete — пометить удалёнными; restore — восстановить.</param>
-            <param name="title">Фильтр по названию (содержит).</param>
-            <param name="probe">Фильтр по адресу пробы (содержит).</param>
-            <param name="node">Фильтр по узлу (содержит).</param>
-            <param name="type">Фильтр по типу задач.</param>
-            <param name="mode">Фильтр по режиму: WinPing / TWamp / TWampy.</param>
-            <param name="status">Статус: active / deleted / all.</param>
-            <param name="outcome">Исход последнего запуска.</param>
-            <param name="error">Фильтр по тексту ошибки.</param>
-            <param name="cancellationToken">Токен отмены.</param>
-            <returns>Число изменённых задач.</returns>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DeleteByIPAsync(System.String,System.Threading.CancellationToken)">
-            <summary>Удаляет все задачи пробы по её адресу.</summary>
-            <param name="IPAddress">Адрес пробы (RequestInfo).</param>
-            <param name="cancellationToken">Токен отмены.</param>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ListNotIdentifyClients">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ListNotIdentifyClients">
             <summary>Возвращает список неопознанных проб (ожидающих подтверждения).</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ListClients">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ListClients">
             <summary>Возвращает список подтверждённых проб.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.SetInfoClient(SPI.Twamp.Server.Contracts.Client,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.SetInfoClient(SPI.Twamp.Server.Contracts.Client,System.Threading.CancellationToken)">
             <summary>Подтверждает пробу и запускает её опрос.</summary>
             <param name="client">Данные пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.CheckIn(System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.CheckIn(System.String,System.Threading.CancellationToken)">
             <summary>Регистрирует пробу (CheckIn) по её адресу.</summary>
             <param name="client">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DownloadFile(System.Nullable{System.DateOnly},System.Nullable{System.DateOnly},System.Char,System.Char,System.Threading.CancellationToken)">
-            <summary>
-            Выгружает результаты зондирования за период в CSV-файл потоково:
-            данные пишутся в ответ постранично, большой период не загружается в память.
-            </summary>
-            <param name="from">Начало периода (по умолчанию — 14 дней назад).</param>
-            <param name="to">Конец периода (по умолчанию — сейчас).</param>
-            <param name="separator">Разделитель полей.</param>
-            <param name="decimalSeparator">Десятичный разделитель.</param>
-            <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
-        </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.WaitChanges(System.Int64,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.WaitChanges(System.Int64,System.Threading.CancellationToken)">
             <summary>
             «Длинный опрос» изменений для веб-интерфейса: висит до 25 секунд и отвечает
             сразу, как только на сервере изменились задачи, результаты или состояние проб.
@@ -1595,14 +1538,14 @@
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
             <returns>Актуальная версия состояния.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.LastResults">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.LastResults">
             <summary>
             Возвращает последние результаты по задачам (момент и признак ошибки) —
             колонка «последний результат» в списке задач. Заполняется по мере
             поступления результатов после старта сервера.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeTaskStatus(System.String,System.Int32,System.Int32,System.String,System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ProbeTaskStatus(System.String,System.Int32,System.Int32,System.String,System.String,System.Threading.CancellationToken)">
             <summary>
             Проксирует состояние выполнения задач с пробы: запущена ли задача сейчас,
             последний старт/завершение, счётчик выполнений, ближайший запуск, ошибка.
@@ -1615,13 +1558,36 @@
             <param name="outcome">Фильтр по исходу запуска.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.ProbeStatus">
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ProbeStatus">
             <summary>
             Возвращает состояние всех проб: связь (последний успешный опрос, ошибки,
             backoff), версию пробы и число её задач — для страницы мониторинга.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadCsv(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken,System.String,System.String)">
+        <member name="T:SPI.Twamp.Server.Controllers.ProvisioningController">
+            <summary>
+            Отчёты и массовая заливка: выгрузка CSV, импорт задач, наборы шаблонов и
+            генерация задач по файлу маршрутизаторов. Часть API оператора (<c>api/userinterface</c>).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IReportService,SPI.Twamp.Server.Abstractions.IProvisioningService)">
+            <summary>
+            Отчёты и массовая заливка: выгрузка CSV, импорт задач, наборы шаблонов и
+            генерация задач по файлу маршрутизаторов. Часть API оператора (<c>api/userinterface</c>).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.DownloadFile(System.Nullable{System.DateOnly},System.Nullable{System.DateOnly},System.Char,System.Char,System.Threading.CancellationToken)">
+            <summary>
+            Выгружает результаты зондирования за период в CSV-файл потоково:
+            данные пишутся в ответ постранично, большой период не загружается в память.
+            </summary>
+            <param name="from">Начало периода (по умолчанию — 14 дней назад).</param>
+            <param name="to">Конец периода (по умолчанию — сейчас).</param>
+            <param name="separator">Разделитель полей.</param>
+            <param name="decimalSeparator">Десятичный разделитель.</param>
+            <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.UploadCsv(Microsoft.AspNetCore.Http.IFormFile,System.Threading.CancellationToken,System.String,System.String)">
             <summary>Загружает задачи из CSV-файла.</summary>
             <param name="file">CSV-файл.</param>
             <param name="cancellationToken">Токен отмены.</param>
@@ -1629,7 +1595,7 @@
             <param name="formatDateTime">Формат дат в файле.</param>
             <returns>Названия задач с некорректной датой окончания.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadTemplates(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.UploadTemplates(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
             <summary>
             Загружает файл шаблонов задач (CSV с заголовками, разделитель «;») в набор.
             Поддерживаемые колонки: Name, Probe, Request, Type, Repeats, Circles, Pause,
@@ -1641,17 +1607,17 @@
             <param name="cancellationToken">Токен отмены.</param>
             <returns>Имя набора и число загруженных шаблонов.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.Templates">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.Templates">
             <summary>Возвращает все шаблоны всех наборов.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TemplateSets">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.TemplateSets">
             <summary>Возвращает список наборов шаблонов (имя и число шаблонов).</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.DeleteTemplates(System.String)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.DeleteTemplates(System.String)">
             <summary>Удаляет набор шаблонов целиком.</summary>
             <param name="set">Имя набора.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.UploadRouters(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.UploadRouters(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
             <summary>
             Загружает файл со списком маршрутизаторов, накладывает на него набор шаблонов
             и сразу создаёт задачи (маршрутизаторы × шаблоны). Имя задачи —
@@ -1662,7 +1628,7 @@
             <param name="cancellationToken">Токен отмены.</param>
             <returns>Отчёт: маршрутизаторов, шаблонов, создано задач, ошибки разбора.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.PreviewRouters(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.PreviewRouters(Microsoft.AspNetCore.Http.IFormFile,System.String,System.Threading.CancellationToken)">
             <summary>
             Загружает файл со списком маршрутизаторов и возвращает сгенерированный CSV
             формата «Base test.csv» БЕЗ создания задач — для предварительной проверки.
@@ -1672,6 +1638,82 @@
             <param name="set">Имя применяемого набора шаблонов; пусто — все наборы.</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>CSV-файл с задачами.</returns>
+        </member>
+        <member name="T:SPI.Twamp.Server.Controllers.TasksController">
+            <summary>
+            Управление задачами: CRUD, страница с фильтрами и серверной пагинацией,
+            массовые операции. Часть API оператора (<c>api/userinterface</c>).
+            Контроллер тонкий — вся логика в прикладных сервисах.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IProbeStatusProvider)">
+            <summary>
+            Управление задачами: CRUD, страница с фильтрами и серверной пагинацией,
+            массовые операции. Часть API оператора (<c>api/userinterface</c>).
+            Контроллер тонкий — вся логика в прикладных сервисах.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.Get">
+            <summary>Возвращает полный список задач.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.Get(System.String)">
+            <summary>Возвращает задачи указанной пробы.</summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.PostAsync(SPI.Twamp.Server.Contracts.TaskInfo,System.Threading.CancellationToken)">
+            <summary>Создаёт или обновляет задачу.</summary>
+            <param name="task">Описание задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Удаляет задачу по идентификатору.</summary>
+            <param name="id">Идентификатор задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Восстанавливает удалённую задачу (снимает пометку удаления).</summary>
+            <param name="id">Идентификатор задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.DeleteByIPAsync(System.String,System.Threading.CancellationToken)">
+            <summary>Удаляет все задачи пробы по её адресу.</summary>
+            <param name="IPAddress">Адрес пробы (RequestInfo).</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.TasksPage(System.Int32,System.Int32,SPI.Twamp.Server.Contracts.TaskFilter)">
+            <summary>
+            Страница списка задач с фильтрами по всем столбцам и серверной пагинацией —
+            интерфейс не загружает десятки тысяч задач целиком.
+            </summary>
+            <param name="skip">Сколько задач пропустить.</param>
+            <param name="take">Размер страницы (максимум 500).</param>
+            <param name="filter">Фильтры по столбцам (см. <see cref="T:SPI.Twamp.Server.Contracts.TaskFilter"/>).</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.TasksBulk(System.String,SPI.Twamp.Server.Contracts.TaskFilter,System.Threading.CancellationToken)">
+            <summary>
+            Массовая операция над отфильтрованным списком задач: удаление всех
+            совпавших с фильтром (action=delete) или восстановление (action=restore).
+            Фильтры те же, что у <see cref="M:SPI.Twamp.Server.Controllers.TasksController.TasksPage(System.Int32,System.Int32,SPI.Twamp.Server.Contracts.TaskFilter)"/>, — «удалить отфильтрованное одним нажатием».
+            </summary>
+            <param name="action">delete — пометить удалёнными; restore — восстановить.</param>
+            <param name="filter">Фильтры по столбцам (см. <see cref="T:SPI.Twamp.Server.Contracts.TaskFilter"/>).</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns>Число изменённых задач.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.FilterTasksAsync(SPI.Twamp.Server.Contracts.TaskFilter)">
+            <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.MatchesFilter(SPI.Twamp.Server.Contracts.TaskInfo,SPI.Twamp.Server.Abstractions.TaskLastResult,SPI.Twamp.Server.Contracts.TaskFilter)">
+            <summary>
+            Проверяет соответствие задачи фильтрам списка (все текстовые фильтры —
+            «содержит», без учёта регистра).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.MatchesResult(SPI.Twamp.Server.Abstractions.TaskLastResult,System.String,System.String)">
+            <summary>Проверяет фильтры по исходу последнего запуска и тексту ошибки.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.ResolveOutcome(SPI.Twamp.Server.Abstractions.TaskLastResult)">
+            <summary>Исход последнего запуска для фильтра: «none» — данных нет, иначе Outcome/error/Success.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.ActionRepository">
             <summary>
