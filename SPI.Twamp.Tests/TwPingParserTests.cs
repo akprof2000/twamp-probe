@@ -88,14 +88,23 @@ namespace SPI.Twamp.Tests
             Assert.Equal("", TwPingParser.FormatNumber(null, ','));
         }
 
-        [Fact(DisplayName = "Строка CSV содержит CallLine третьей колонкой")]
-        public void ToCsvLine_ContainsCallLine()
+        [Fact(DisplayName = "Строка CSV содержит колонки Mode и CallLine в правильном порядке")]
+        public void ToCsvLine_ContainsModeAndCallLine()
         {
-            TwPingStats stats = new() { Title = "t", Id = Guid.Empty, CallLine = "ping 10.0.0.1 -n 1" };
+            TwPingStats stats = new()
+            {
+                Title = "t",
+                Id = Guid.Empty,
+                Mode = "TWampy",
+                CallLine = "./twampy -c 1 10.0.0.1"
+            };
             string line = TwPingParser.ToCsvLine(stats, ';', ',');
-
+            string[] header = TwPingParser.CsvHeader(';').Split(';');
             string[] cells = line.Split(';');
-            Assert.Equal("ping 10.0.0.1 -n 1", cells[2]);
+
+            // Порядок ячеек строго соответствует заголовку.
+            Assert.Equal("TWampy", cells[Array.IndexOf(header, "Mode")]);
+            Assert.Equal("./twampy -c 1 10.0.0.1", cells[Array.IndexOf(header, "CallLine")]);
         }
     }
 }

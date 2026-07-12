@@ -3,7 +3,7 @@
 namespace SPI.Twamp.Probe.Contracts
 {
     /// <summary>
-    /// Режим зондирования: системный ping или утилита TWamp.
+    /// Режим зондирования: системный ping, утилита TWamp или TWampy.
     /// </summary>
     public enum TaskMode
     {
@@ -14,6 +14,11 @@ namespace SPI.Twamp.Probe.Contracts
         /// <summary>
         /// Зонд TWamp.
         /// </summary>
-        TWamp
+        TWamp,
+        /// <summary>
+        /// Зонд TWampy — запускается как TWamp (свой исполняемый файл),
+        /// вывод разбирается тем же парсером и даёт те же поля.
+        /// </summary>
+        TWampy
     }
 }

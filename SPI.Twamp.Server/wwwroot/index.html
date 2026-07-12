@@ -75,7 +75,7 @@
       <button class="act" onclick="withBusy(this, () => pageProbeTasks(1))">→</button>
     </div>
     <div class="scroll"><table id="tblProbeTasks">
-      <thead><tr><th>Задача</th><th>Состояние</th><th>Последний старт</th><th>Завершение</th><th>Успех / ошибки</th><th>Следующий запуск</th><th>Результат</th></tr></thead>
+      <thead><tr><th>Задача</th><th>Режим</th><th>Состояние</th><th>Последний старт</th><th>Завершение</th><th>Успех / ошибки</th><th>Следующий запуск</th><th>Результат</th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgProbeTasks"></div>
@@ -106,6 +106,12 @@
         <option value="Scheduler">Scheduler</option>
         <option value="Repeater">Repeater</option>
       </select>
+      <select id="fMode">
+        <option value="">режим: все</option>
+        <option value="WinPing">WinPing</option>
+        <option value="TWamp">TWamp</option>
+        <option value="TWampy">TWampy</option>
+      </select>
       <select id="fStatus">
         <option value="active">активные</option>
         <option value="deleted">удалённые</option>
@@ -131,7 +137,7 @@
       <button class="act" onclick="withBusy(this, () => pageTasks(1))">→</button>
     </div>
     <div class="scroll"><table id="tblTasks">
-      <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th>Выполнение</th><th>Результат</th><th></th></tr></thead>
+      <thead><tr><th>Название</th><th>Проба</th><th>Узел</th><th>Тип</th><th>Режим</th><th>Cron</th><th>Окончание</th><th>Таймаут</th><th>Статус</th><th>Выполнение</th><th>Результат</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgTasks"></div>
@@ -274,12 +280,13 @@ async function loadProbeTasks(btn, probe) {
       $('#probeTasksAddr').textContent = probe;
       $('#tblProbeTasks tbody').innerHTML = data.items.map(t => `<tr>
         <td class="wrap">${t.title || t.taskId}</td>
+        <td>${t.mode || ''}</td>
         <td>${outcomeCell(t)}</td>
         <td>${fmt(t.lastStart)}</td><td>${fmt(t.lastFinish)}</td>
         <td><span class="ok">${t.successTotal}</span> / <span class="${t.errorTotal ? 'bad' : ''}">${t.errorTotal}</span></td>
         <td>${fmt(t.nextRun)}</td>
         <td class="wrap">${t.lastResult || t.lastError || ''}</td></tr>`).join('')
-        || '<tr><td colspan="7">ничего не найдено</td></tr>';
+        || '<tr><td colspan="8">ничего не найдено</td></tr>';
       const from = probeTaskTotal ? probeTaskSkip + 1 : 0;
       const to = Math.min(probeTaskSkip + PROBE_PAGE, probeTaskTotal);
       $('#probePageInfo').textContent = `${from}–${to} из ${probeTaskTotal}`;
@@ -331,6 +338,7 @@ function taskFilterQuery() {
   set('probe',   $('#fProbe').value.trim());
   set('node',    $('#fNode').value.trim());
   set('type',    $('#fType').value);
+  set('mode',    $('#fMode').value);
   q.set('status', $('#fStatus').value);
   set('outcome', $('#fOutcome').value);
   set('error',   $('#fError').value.trim());
@@ -391,14 +399,14 @@ function resultCell(r) {
 function renderTasks(items) {
   $('#tblTasks tbody').innerHTML = items.map(t => `<tr>
     <td class="wrap">${t.title}</td><td class="wrap">${t.requestInfo}</td><td>${t.endNode}</td>
-    <td>${t.type}</td><td>${t.cronExpression||''}</td><td>${fmt(t.end)}</td><td>${t.timeoutSec||0}</td>
+    <td>${t.type}</td><td>${t.mode||''}</td><td>${t.cronExpression||''}</td><td>${fmt(t.end)}</td><td>${t.timeoutSec||0}</td>
     <td>${t.delete ? '<span class="bad">удалена</span>' : '<span class="ok">активна</span>'}</td>
     <td>${runCell(t.last)}</td>
     <td class="wrap" style="white-space:normal;max-width:340px">${resultCell(t.last)}</td>
     <td>${t.delete
       ? `<button class="act" style="background:var(--ok);padding:2px 8px" onclick="restoreTask('${t.id}')">восстановить</button>`
       : `<button class="del" onclick="delTask('${t.id}')">удалить</button>`}</td></tr>`).join('')
-    || '<tr><td colspan="11">ничего не найдено</td></tr>';
+    || '<tr><td colspan="12">ничего не найдено</td></tr>';
 }
 
 async function delTask(id) {

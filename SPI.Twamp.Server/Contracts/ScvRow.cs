@@ -64,7 +64,7 @@ namespace SPI.Twamp.Server.Contracts
         /// </summary>
         public DateTime End { get; set; }
         /// <summary>
-        /// Режим зондирования (ping или TWamp).
+        /// Режим зондирования (WinPing / TWamp / TWampy).
         /// </summary>
         public TaskMode Mode { get; set; } = TaskMode.TWamp;
         /// <summary>

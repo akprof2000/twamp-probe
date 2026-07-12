@@ -34,7 +34,7 @@ namespace SPI.Twamp.Probe.Runners
             if (_task.Delete)
             {
                 _logger.Info("Задача {Guid} помечена на удаление — расписание остановлено", _task.Id);
-                _runRegistry.SetNextRun(_task.Id, _task.Title, null);
+                _runRegistry.SetNextRun(_task.Id, _task.Title, _task.Mode.ToString(), null);
                 return;
             }
 
@@ -46,12 +46,12 @@ namespace SPI.Twamp.Probe.Runners
             if (next >= _task.End)
             {
                 _logger.Info("Задача {Guid} завершена по дате окончания {Date}", _task.Id, _task.End);
-                _runRegistry.SetNextRun(_task.Id, _task.Title, null);
+                _runRegistry.SetNextRun(_task.Id, _task.Title, _task.Mode.ToString(), null);
                 return;
             }
 
             // Фиксируем план в реестре — оператор видит, когда следующий запуск.
-            _runRegistry.SetNextRun(_task.Id, _task.Title, next);
+            _runRegistry.SetNextRun(_task.Id, _task.Title, _task.Mode.ToString(), next);
             ScheduleAt(next);
         }
 

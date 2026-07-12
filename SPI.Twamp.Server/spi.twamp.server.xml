@@ -987,6 +987,11 @@
             Идентификатор запроса (адрес пробы-источника).
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ActionData.Mode">
+            <summary>
+            Тип запроса, которым выполнена задача (WinPing / TWamp / TWampy).
+            </summary>
+        </member>
         <member name="P:SPI.Twamp.Server.Contracts.ActionData.CallLine">
             <summary>
             Фактическая строка вызова зонда на пробе (исполняемый файл и аргументы).
@@ -1169,7 +1174,7 @@
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ProbeTemplate.Mode">
             <summary>
-            Режим зондирования (TWamp или WinPing). По умолчанию — TWamp.
+            Режим зондирования (TWamp / WinPing / TWampy). По умолчанию — TWamp.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.ProbeTemplate.Timeout">
@@ -1251,7 +1256,7 @@
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Mode">
             <summary>
-            Режим зондирования (ping или TWamp).
+            Режим зондирования (WinPing / TWamp / TWampy).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Contracts.CsvRow.Request">
@@ -1398,7 +1403,7 @@
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskMode">
             <summary>
-            Режим зондирования: системный ping или утилита TWamp.
+            Режим зондирования: системный ping, утилита TWamp или TWampy.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Server.Contracts.TaskMode.WinPing">
@@ -1409,6 +1414,12 @@
         <member name="F:SPI.Twamp.Server.Contracts.TaskMode.TWamp">
             <summary>
             Зонд TWamp.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Contracts.TaskMode.TWampy">
+            <summary>
+            Зонд TWampy — выполняется и обрабатывается так же, как TWamp,
+            но своим исполняемым файлом; в системе это третий тип задач.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.TaskType">
@@ -1462,16 +1473,16 @@
             <param name="id">Идентификатор задачи.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.MatchesFilter(SPI.Twamp.Server.Contracts.TaskInfo,SPI.Twamp.Server.Abstractions.TaskLastResult,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.MatchesFilter(SPI.Twamp.Server.Contracts.TaskInfo,SPI.Twamp.Server.Abstractions.TaskLastResult,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
             <summary>
             Проверяет соответствие задачи фильтрам списка (все текстовые фильтры —
             «содержит», без учёта регистра).
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.FilterTasksAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.FilterTasksAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
             <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksPage(System.Int32,System.Int32,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksPage(System.Int32,System.Int32,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
             <summary>
             Страница списка задач с фильтрами по всем столбцам и серверной пагинацией —
             интерфейс не загружает десятки тысяч задач целиком.
@@ -1482,11 +1493,12 @@
             <param name="probe">Фильтр по адресу пробы (содержит).</param>
             <param name="node">Фильтр по узлу (содержит).</param>
             <param name="type">Фильтр по типу: Scheduler или Repeater.</param>
+            <param name="mode">Фильтр по режиму: WinPing / TWamp / TWampy.</param>
             <param name="status">Статус: active / deleted / all.</param>
             <param name="outcome">Исход: Success / ExitCodeError / TimedOut / StartFailed / none.</param>
             <param name="error">Фильтр по тексту ошибки (содержит).</param>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksBulk(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.UserInterface.TasksBulk(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Threading.CancellationToken)">
             <summary>
             Массовая операция над отфильтрованным списком задач: удаление всех
             совпавших с фильтром (action=delete) или восстановление (action=restore).
@@ -1497,6 +1509,7 @@
             <param name="probe">Фильтр по адресу пробы (содержит).</param>
             <param name="node">Фильтр по узлу (содержит).</param>
             <param name="type">Фильтр по типу задач.</param>
+            <param name="mode">Фильтр по режиму: WinPing / TWamp / TWampy.</param>
             <param name="status">Статус: active / deleted / all.</param>
             <param name="outcome">Исход последнего запуска.</param>
             <param name="error">Фильтр по тексту ошибки.</param>
@@ -2067,6 +2080,11 @@
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Title">
             <summary>
             Название задачи.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Mode">
+            <summary>
+            Тип запроса, которым выполнена задача (WinPing / TWamp / TWampy).
             </summary>
         </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.CallLine">

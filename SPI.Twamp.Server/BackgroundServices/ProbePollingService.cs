@@ -257,6 +257,7 @@ namespace SPI.Twamp.Server.BackgroundServices
                 foreach (Parser.TwPingStats parsed in
                          Parser.TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId))
                 {
+                    parsed.Mode = action.Mode; // тип запроса сохраняем вместе со статистикой
                     records.Add(new StatRecord
                     {
                         Creation = action.Creation ?? DateTime.Now,

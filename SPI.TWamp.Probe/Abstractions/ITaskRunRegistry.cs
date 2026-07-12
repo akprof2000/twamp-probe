@@ -33,6 +33,8 @@ namespace SPI.Twamp.Probe.Abstractions
         public Guid TaskId { get; set; }
         /// <summary>Название задачи.</summary>
         public string Title { get; set; } = "";
+        /// <summary>Тип запроса (WinPing / TWamp / TWampy).</summary>
+        public string Mode { get; set; } = "";
         /// <summary>Сколько экземпляров задачи выполняется прямо сейчас.</summary>
         public int Running { get; set; }
         /// <summary>Момент последнего старта выполнения.</summary>
@@ -88,7 +90,7 @@ namespace SPI.Twamp.Probe.Abstractions
         void ReportError(Guid taskId, string error);
 
         /// <summary>Обновляет время следующего запланированного запуска.</summary>
-        void SetNextRun(Guid taskId, string title, DateTime? nextRun);
+        void SetNextRun(Guid taskId, string title, string mode, DateTime? nextRun);
 
         /// <summary>Удаляет задачу из реестра (задача удалена с пробы).</summary>
         void Remove(Guid taskId);

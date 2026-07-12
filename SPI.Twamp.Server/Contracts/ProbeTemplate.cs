@@ -95,7 +95,7 @@ namespace SPI.Twamp.Server.Contracts
         public string? End { get; set; }
 
         /// <summary>
-        /// Режим зондирования (TWamp или WinPing). По умолчанию — TWamp.
+        /// Режим зондирования (TWamp / WinPing / TWampy). По умолчанию — TWamp.
         /// </summary>
         [Optional]
         public TaskMode Mode { get; set; } = TaskMode.TWamp;

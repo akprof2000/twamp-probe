@@ -93,6 +93,14 @@ namespace SPI.Twamp.Probe.Runners
                     AppendParameters(arguments, task, _configuration["twamp:default"]);
                     _ = arguments.Append(' ').Append(node);
                     break;
+
+                case TaskMode.TWampy:
+                    // TWampy запускается так же, как TWamp, но своим исполняемым файлом;
+                    // вывод совместим и разбирается тем же парсером.
+                    execute = _configuration["twampy:name"];
+                    AppendParameters(arguments, task, _configuration["twampy:default"]);
+                    _ = arguments.Append(' ').Append(node);
+                    break;
             }
 
             return (execute, arguments.ToString());
@@ -149,6 +157,7 @@ namespace SPI.Twamp.Probe.Runners
                 return new ActionData
                 {
                     CallLine = $"{execute} {arguments}",
+                    Mode = task.Mode.ToString(),
                     Outcome = nameof(RunOutcome.StartFailed),
                     ErrorConsole = message,
                     EndNode = node,
@@ -223,6 +232,7 @@ namespace SPI.Twamp.Probe.Runners
             return new ActionData
             {
                 CallLine = $"{execute} {arguments}", // фактическая команда — для идентификации ответа
+                Mode = task.Mode.ToString(),        // тип запроса — фиксируем в результате
                 ExitCode = exitCode,
                 Outcome = outcome.ToString(), // исход запуска — для двух статусов в интерфейсе
                 Console = output,

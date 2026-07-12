@@ -88,7 +88,7 @@ namespace SPI.Twamp.Server.Controllers
         /// «содержит», без учёта регистра).
         /// </summary>
         private static bool MatchesFilter(TaskInfo t, TaskLastResult? last,
-            string? title, string? probe, string? node, string? type,
+            string? title, string? probe, string? node, string? type, string? mode,
             string status, string? outcome, string? error)
         {
             static bool Has(string source, string? term) =>
@@ -99,6 +99,10 @@ namespace SPI.Twamp.Server.Controllers
                 return false;
             }
             if (!string.IsNullOrEmpty(type) && !t.Type.ToString().Equals(type, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            if (!string.IsNullOrEmpty(mode) && !t.Mode.ToString().Equals(mode, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -129,7 +133,7 @@ namespace SPI.Twamp.Server.Controllers
 
         /// <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
         private async Task<List<(TaskInfo Task, TaskLastResult? Last)>> FilterTasksAsync(
-            string? title, string? probe, string? node, string? type,
+            string? title, string? probe, string? node, string? type, string? mode,
             string status, string? outcome, string? error)
         {
             IReadOnlyList<TaskInfo> all = await _taskService.GetAllAsync();
@@ -139,7 +143,7 @@ namespace SPI.Twamp.Server.Controllers
             foreach (TaskInfo t in all)
             {
                 TaskLastResult? last = lastResults.TryGetValue(t.Id, out TaskLastResult? lr) ? lr : null;
-                if (MatchesFilter(t, last, title, probe, node, type, status, outcome, error))
+                if (MatchesFilter(t, last, title, probe, node, type, mode, status, outcome, error))
                 {
                     filtered.Add((t, last));
                 }
@@ -157,6 +161,7 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="probe">Фильтр по адресу пробы (содержит).</param>
         /// <param name="node">Фильтр по узлу (содержит).</param>
         /// <param name="type">Фильтр по типу: Scheduler или Repeater.</param>
+        /// <param name="mode">Фильтр по режиму: WinPing / TWamp / TWampy.</param>
         /// <param name="status">Статус: active / deleted / all.</param>
         /// <param name="outcome">Исход: Success / ExitCodeError / TimedOut / StartFailed / none.</param>
         /// <param name="error">Фильтр по тексту ошибки (содержит).</param>
@@ -165,12 +170,13 @@ namespace SPI.Twamp.Server.Controllers
             [FromQuery] int skip = 0, [FromQuery] int take = 100,
             [FromQuery] string? title = null, [FromQuery] string? probe = null,
             [FromQuery] string? node = null, [FromQuery] string? type = null,
+            [FromQuery] string? mode = null,
             [FromQuery] string status = "active", [FromQuery] string? outcome = null,
             [FromQuery] string? error = null)
         {
             take = Math.Clamp(take, 1, 500);
             List<(TaskInfo Task, TaskLastResult? Last)> filtered =
-                await FilterTasksAsync(title, probe, node, type, status, outcome, error);
+                await FilterTasksAsync(title, probe, node, type, mode, status, outcome, error);
 
             var items = filtered
                 .OrderBy(x => x.Task.Title, StringComparer.OrdinalIgnoreCase)
@@ -182,6 +188,7 @@ namespace SPI.Twamp.Server.Controllers
                     x.Task.RequestInfo,
                     x.Task.EndNode,
                     Type = x.Task.Type.ToString(),
+                    Mode = x.Task.Mode.ToString(),
                     x.Task.CronExpression,
                     x.Task.End,
                     x.Task.TimeoutSec,
@@ -215,6 +222,7 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="probe">Фильтр по адресу пробы (содержит).</param>
         /// <param name="node">Фильтр по узлу (содержит).</param>
         /// <param name="type">Фильтр по типу задач.</param>
+        /// <param name="mode">Фильтр по режиму: WinPing / TWamp / TWampy.</param>
         /// <param name="status">Статус: active / deleted / all.</param>
         /// <param name="outcome">Исход последнего запуска.</param>
         /// <param name="error">Фильтр по тексту ошибки.</param>
@@ -225,6 +233,7 @@ namespace SPI.Twamp.Server.Controllers
             [FromQuery][Required] string action,
             [FromQuery] string? title = null, [FromQuery] string? probe = null,
             [FromQuery] string? node = null, [FromQuery] string? type = null,
+            [FromQuery] string? mode = null,
             [FromQuery] string status = "active", [FromQuery] string? outcome = null,
             [FromQuery] string? error = null,
             CancellationToken cancellationToken = default)
@@ -236,7 +245,7 @@ namespace SPI.Twamp.Server.Controllers
             }
 
             List<(TaskInfo Task, TaskLastResult? Last)> filtered =
-                await FilterTasksAsync(title, probe, node, type, status, outcome, error);
+                await FilterTasksAsync(title, probe, node, type, mode, status, outcome, error);
 
             int affected = await _taskService.SetDeletedManyAsync(
                 [.. filtered.Select(x => x.Task)], delete, cancellationToken);

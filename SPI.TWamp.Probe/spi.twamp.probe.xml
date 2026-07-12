@@ -117,6 +117,9 @@
         <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.Title">
             <summary>Название задачи.</summary>
         </member>
+        <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.Mode">
+            <summary>Тип запроса (WinPing / TWamp / TWampy).</summary>
+        </member>
         <member name="P:SPI.Twamp.Probe.Abstractions.TaskRunInfo.Running">
             <summary>Сколько экземпляров задачи выполняется прямо сейчас.</summary>
         </member>
@@ -179,7 +182,7 @@
         <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.ReportError(System.Guid,System.String)">
             <summary>Фиксирует ошибку выполнения (не сбрасывается до следующей ошибки или успеха).</summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.SetNextRun(System.Guid,System.String,System.Nullable{System.DateTime})">
+        <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.SetNextRun(System.Guid,System.String,System.String,System.Nullable{System.DateTime})">
             <summary>Обновляет время следующего запланированного запуска.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Abstractions.ITaskRunRegistry.Remove(System.Guid)">
@@ -223,6 +226,12 @@
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.RequestInfo">
             <summary>
             Идентификатор запроса (адрес сервера-источника задачи).
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Mode">
+            <summary>
+            Тип запроса, которым выполнена задача (WinPing / TWamp / TWampy).
+            Фиксируется в результате и сохраняется во всех таблицах.
             </summary>
         </member>
         <member name="P:SPI.Twamp.Probe.Contracts.ActionData.CallLine">
@@ -420,7 +429,7 @@
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.TaskMode">
             <summary>
-            Режим зондирования: системный ping или утилита TWamp.
+            Режим зондирования: системный ping, утилита TWamp или TWampy.
             </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.WinPing">
@@ -431,6 +440,12 @@
         <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.TWamp">
             <summary>
             Зонд TWamp.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Contracts.TaskMode.TWampy">
+            <summary>
+            Зонд TWampy — запускается как TWamp (свой исполняемый файл),
+            вывод разбирается тем же парсером и даёт те же поля.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Contracts.TaskType">
@@ -735,7 +750,7 @@
             Хранит всё в памяти — после перезапуска пробы статистика начинается заново.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.Get(System.Guid,System.String)">
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.Get(System.Guid,System.String,System.String)">
             <summary>Возвращает (или создаёт) запись состояния задачи.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.MarkStarted(SPI.Twamp.Probe.Contracts.TaskInfo)">
@@ -750,7 +765,7 @@
         <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.ReportError(System.Guid,System.String)">
             <inheritdoc/>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.SetNextRun(System.Guid,System.String,System.Nullable{System.DateTime})">
+        <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.SetNextRun(System.Guid,System.String,System.String,System.Nullable{System.DateTime})">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.TaskRunRegistry.Remove(System.Guid)">

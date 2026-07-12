@@ -291,7 +291,7 @@ namespace SPI.Twamp.Server.Parser
         /// </summary>
         /// <param name="columnSeparator">Разделитель колонок.</param>
         public static string CsvHeader(char columnSeparator) =>
-            string.Join(columnSeparator, ["Title", "Id", "CallLine",
+            string.Join(columnSeparator, ["Title", "Id", "Mode", "CallLine",
             "FromHost","FromPort","ToHost","ToPort","SID","First","Last","Sent","Lost","LossPercent",
             "RttMin","RttMedian","RttMax","SendMin","SendMedian","SendMax",
             "ReflectMin","ReflectMedian","ReflectMax","ReflectProcMin","ReflectProcMax",
@@ -308,6 +308,7 @@ namespace SPI.Twamp.Server.Parser
             {
             CsvEscape(s.Title),
             CsvEscape(s.Id?.ToString()),
+            CsvEscape(s.Mode),
             CsvEscape(s.CallLine),
             CsvEscape(s.FromHost),
             CsvEscape(s.FromPort?.ToString()),

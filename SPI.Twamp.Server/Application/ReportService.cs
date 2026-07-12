@@ -75,6 +75,7 @@ namespace SPI.Twamp.Server.Application
                 cancellationToken.ThrowIfCancellationRequested();
                 foreach (TwPingStats row in TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId))
                 {
+                    row.Mode = action.Mode;
                     row.CallLine = action.CallLine;
                     row.Title = await GetTitleAsync(row.Id ?? Guid.Empty);
                     await writer.WriteLineAsync(TwPingParser.ToCsvLine(row, separator, decimalSeparator));

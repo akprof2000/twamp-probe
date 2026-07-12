@@ -15,12 +15,16 @@ namespace SPI.Twamp.Probe.Server
         private readonly ConcurrentDictionary<Guid, TaskRunInfo> _states = new();
 
         /// <summary>Возвращает (или создаёт) запись состояния задачи.</summary>
-        private TaskRunInfo Get(Guid taskId, string title = "")
+        private TaskRunInfo Get(Guid taskId, string title = "", string mode = "")
         {
             TaskRunInfo info = _states.GetOrAdd(taskId, id => new TaskRunInfo { TaskId = id });
             if (!string.IsNullOrEmpty(title))
             {
                 info.Title = title;
+            }
+            if (!string.IsNullOrEmpty(mode))
+            {
+                info.Mode = mode;
             }
             return info;
         }
@@ -28,7 +32,7 @@ namespace SPI.Twamp.Probe.Server
         /// <inheritdoc/>
         public void MarkStarted(TaskInfo task)
         {
-            TaskRunInfo info = Get(task.Id, task.Title);
+            TaskRunInfo info = Get(task.Id, task.Title, task.Mode.ToString());
             lock (info)
             {
                 info.Running++;
@@ -83,9 +87,9 @@ namespace SPI.Twamp.Probe.Server
         }
 
         /// <inheritdoc/>
-        public void SetNextRun(Guid taskId, string title, DateTime? nextRun)
+        public void SetNextRun(Guid taskId, string title, string mode, DateTime? nextRun)
         {
-            TaskRunInfo info = Get(taskId, title);
+            TaskRunInfo info = Get(taskId, title, mode);
             lock (info)
             {
                 info.NextRun = nextRun;

@@ -34,6 +34,11 @@ namespace SPI.Twamp.Probe.Contracts
         /// </summary>
         public string RequestInfo { get; set; } = "0.0.0.0";
         /// <summary>
+        /// Тип запроса, которым выполнена задача (WinPing / TWamp / TWampy).
+        /// Фиксируется в результате и сохраняется во всех таблицах.
+        /// </summary>
+        public string Mode { get; set; } = "";
+        /// <summary>
         /// Фактическая строка вызова зонда (исполняемый файл и аргументы).
         /// Служит для точной идентификации ответа в отчётах.
         /// </summary>
