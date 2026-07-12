@@ -67,73 +67,91 @@ namespace SPI.Twamp.Server.Application
         public static (IReadOnlyList<(string Name, string Ip)> Routers, IReadOnlyList<string> Rejected)
             ParseRouterFile(IEnumerable<string> lines)
         {
-            List<(string Name, string Ip)> routers = [];
-            List<string> rejected = [];
-            HashSet<string> seen = [];      // защита от дублей в файле
-
-            char? separator = null;         // ';' или '\t' — определяется по первой строке
-            int snodeIndex = 0;             // колонка SNODE (по умолчанию — первая)
-            int ipIndex = -1;               // колонка IP (если найдена в заголовке)
-            bool contentSeen = false;
+            RouterParse state = new();
             int lineNo = 0;
 
             foreach (string line in lines)
             {
                 lineNo++;
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                // Строка заголовка: определяем разделитель и позиции колонок SNODE/IP.
-                if (!contentSeen && line.Contains("SNODE", StringComparison.OrdinalIgnoreCase))
-                {
-                    ReadHeader(line, ref separator, ref snodeIndex, ref ipIndex);
-                    continue;
-                }
-
-                // Разделитель для файлов без заголовка — по первой строке данных.
-                separator ??= line.Contains(';') ? ';' : '\t';
-
-                string[] fields = line.Split(separator.Value);
-                string snode = snodeIndex < fields.Length ? fields[snodeIndex].Trim() : "";
-
-                if (!TryResolveRouter(snode, fields, ipIndex, out string name, out string ip))
-                {
-                    // Первую непохожую на данные строку молча считаем заголовком.
-                    if (!contentSeen && !line.Contains("|IP:"))
-                    {
-                        continue;
-                    }
-                    rejected.Add($"Строка {lineNo}: не удалось определить имя и IP маршрутизатора");
-                    continue;
-                }
-
-                contentSeen = true;
-                if (seen.Add($"{name}|{ip}"))
-                {
-                    routers.Add((name, ip));
-                }
+                ProcessLine(state, line, lineNo);
             }
 
-            return (routers, rejected);
+            return (state.Routers, state.Rejected);
+        }
+
+        /// <summary>Изменяемое состояние разбора файла маршрутизаторов и накопленные результаты.</summary>
+        private sealed class RouterParse
+        {
+            /// <summary>Разделитель полей: ';' или '\t' — определяется по первой строке.</summary>
+            public char? Separator;
+            /// <summary>Колонка SNODE (по умолчанию — первая).</summary>
+            public int SnodeIndex;
+            /// <summary>Колонка IP (если найдена в заголовке; -1 — нет).</summary>
+            public int IpIndex = -1;
+            /// <summary>Встречена ли хотя бы одна строка данных.</summary>
+            public bool ContentSeen;
+            /// <summary>Распознанные маршрутизаторы.</summary>
+            public readonly List<(string Name, string Ip)> Routers = [];
+            /// <summary>Нераспознанные строки.</summary>
+            public readonly List<string> Rejected = [];
+            /// <summary>Защита от дублей в файле (имя+IP).</summary>
+            public readonly HashSet<string> Seen = [];
+        }
+
+        /// <summary>Обрабатывает одну строку файла: заголовок, строку данных или пропуск.</summary>
+        private static void ProcessLine(RouterParse st, string line, int lineNo)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+
+            // Строка заголовка: определяем разделитель и позиции колонок SNODE/IP.
+            if (!st.ContentSeen && line.Contains("SNODE", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadHeader(st, line);
+                return;
+            }
+
+            // Разделитель для файлов без заголовка — по первой строке данных.
+            st.Separator ??= line.Contains(';') ? ';' : '\t';
+
+            string[] fields = line.Split(st.Separator.Value);
+            string snode = st.SnodeIndex < fields.Length ? fields[st.SnodeIndex].Trim() : "";
+
+            if (!TryResolveRouter(snode, fields, st.IpIndex, out string name, out string ip))
+            {
+                // Первую непохожую на данные строку молча считаем заголовком,
+                // остальные нераспознанные — фиксируем.
+                if (st.ContentSeen || line.Contains("|IP:"))
+                {
+                    st.Rejected.Add($"Строка {lineNo}: не удалось определить имя и IP маршрутизатора");
+                }
+                return;
+            }
+
+            st.ContentSeen = true;
+            if (st.Seen.Add($"{name}|{ip}"))
+            {
+                st.Routers.Add((name, ip));
+            }
         }
 
         /// <summary>Разбирает строку заголовка: определяет разделитель и позиции колонок SNODE/IP.</summary>
-        private static void ReadHeader(string line, ref char? separator, ref int snodeIndex, ref int ipIndex)
+        private static void ReadHeader(RouterParse st, string line)
         {
-            separator = line.Contains(';') ? ';' : '\t';
-            string[] header = line.Split(separator.Value);
+            st.Separator = line.Contains(';') ? ';' : '\t';
+            string[] header = line.Split(st.Separator.Value);
             for (int i = 0; i < header.Length; i++)
             {
                 string column = header[i].Trim().ToUpperInvariant();
                 if (column == "SNODE")
                 {
-                    snodeIndex = i;
+                    st.SnodeIndex = i;
                 }
                 else if (column == "IP")
                 {
-                    ipIndex = i;
+                    st.IpIndex = i;
                 }
             }
         }

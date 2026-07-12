@@ -69,15 +69,15 @@ namespace SPI.Twamp.Server.Parser
                     stats.LossPercent = 100;
                 }
 
-                foreach (Match m in DirectionRegex().Matches(text))
+                foreach (GroupCollection g in DirectionRegex().Matches(text).Select(m => m.Groups))
                 {
-                    double? min = ToMs(m.Groups[2].Value);
-                    double? max = ToMs(m.Groups[3].Value);
-                    double? avg = ToMs(m.Groups[4].Value);
-                    double? jitter = ToMs(m.Groups[5].Value);
-                    double loss = double.Parse(m.Groups[6].Value, CultureInfo.InvariantCulture);
+                    double? min = ToMs(g[2].Value);
+                    double? max = ToMs(g[3].Value);
+                    double? avg = ToMs(g[4].Value);
+                    double? jitter = ToMs(g[5].Value);
+                    double loss = double.Parse(g[6].Value, CultureInfo.InvariantCulture);
 
-                    switch (m.Groups[1].Value.ToLowerInvariant())
+                    switch (g[1].Value.ToLowerInvariant())
                     {
                         case "outbound": // прямое направление ≈ send time в twping
                             stats.SendMin = min;

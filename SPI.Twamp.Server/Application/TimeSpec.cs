@@ -57,10 +57,10 @@ namespace SPI.Twamp.Server.Application
             }
 
             TimeSpan offset = TimeSpan.Zero;
-            foreach (Match part in parts)
+            foreach (GroupCollection groups in parts.Select(m => m.Groups))
             {
-                int amount = int.Parse(part.Groups[1].Value);
-                offset += part.Groups[2].Value.ToLowerInvariant() switch
+                int amount = int.Parse(groups[1].Value);
+                offset += groups[2].Value.ToLowerInvariant() switch
                 {
                     "week" or "weak" => TimeSpan.FromDays(7 * amount),
                     "day" => TimeSpan.FromDays(amount),

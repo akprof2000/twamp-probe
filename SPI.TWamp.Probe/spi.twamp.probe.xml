@@ -638,6 +638,9 @@
             обрезанную до разумной длины — как краткий результат для статуса задачи.
             </summary>
         </member>
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.DetermineOutcome(System.Boolean,System.Int32)">
+            <summary>Определяет исход запуска: прерван по таймауту, ненулевой код выхода или успех.</summary>
+        </member>
         <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.GetTimeout(SPI.Twamp.Probe.Contracts.TaskInfo)">
             <summary>Возвращает индивидуальный таймаут задачи или бесконечность, если он не задан.</summary>
         </member>

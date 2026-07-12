@@ -20,7 +20,7 @@ namespace SPI.Twamp.Server.BackgroundServices
     /// </para>
     /// </summary>
     public sealed class ProbePollingService(
-        Logger logger, IConfiguration configuration, IClientRepository clients,
+        IConfiguration configuration, IClientRepository clients,
         IProbeClient probe, IActionRepository actions, IStatRepository stats,
         ITaskService taskService, IChangeNotifier changeNotifier)
         : IHostedService, IProbePoller, IProbeStatusProvider, IDisposable
@@ -28,7 +28,8 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Максимальная задержка между попытками при ошибках связи, секунд.</summary>
         private const int MaxBackoffSeconds = 900;
 
-        private readonly Logger _logger = logger;
+        // Логгер берём статически (а не через DI): иначе у конструктора 8 зависимостей.
+        private static readonly Logger _logger = LogManager.GetCurrentClassLogger();
         private readonly IClientRepository _clients = clients;
         private readonly IProbeClient _probe = probe;
         private readonly IActionRepository _actions = actions;
@@ -92,12 +93,13 @@ namespace SPI.Twamp.Server.BackgroundServices
             try
             {
                 int restored = 0;
-                foreach (Contracts.TaskInfo task in await _taskService.GetAllAsync())
+                IEnumerable<Guid> taskIds = (await _taskService.GetAllAsync()).Select(task => task.Id);
+                foreach (Guid taskId in taskIds)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    ActionData? last = await _actions.GetLastByTaskAsync(task.Id);
-                    if (last is not null && _lastResults.TryAdd(task.Id, BuildLastResult(last)))
+                    ActionData? last = await _actions.GetLastByTaskAsync(taskId);
+                    if (last is not null && _lastResults.TryAdd(taskId, BuildLastResult(last)))
                     {
                         restored++;
                     }

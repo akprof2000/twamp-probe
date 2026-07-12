@@ -162,7 +162,7 @@ namespace SPI.Twamp.Probe.Runners
                 // Ошибка обязана дойти до сервера как результат — иначе задача выглядит
                 // «молча пропавшей» и оператору непонятно, что происходит.
                 string message = $"Не удалось запустить зонд «{execute}»: {ex.Message}";
-                _logger.Error("Задача {Guid}: {Message}", task.Id, message);
+                _logger.Error(ex, "Задача {Guid}: {Message}", task.Id, message);
                 _runRegistry.ReportOutcome(task.Id, RunOutcome.StartFailed, null, message);
 
                 return new ActionData
@@ -228,9 +228,7 @@ namespace SPI.Twamp.Probe.Runners
 
             // Составной исход для статуса задачи: запустилась ли, как завершился процесс
             // и краткий результат (итоговая строка вывода либо текст ошибки).
-            RunOutcome outcome = timedOut ? RunOutcome.TimedOut
-                : exitCode != 0 ? RunOutcome.ExitCodeError
-                : RunOutcome.Success;
+            RunOutcome outcome = DetermineOutcome(timedOut, exitCode);
             string? summary = outcome == RunOutcome.Success ? LastLine(output) : error;
             _runRegistry.ReportOutcome(task.Id, outcome, exitCode, summary);
 
@@ -270,6 +268,16 @@ namespace SPI.Twamp.Probe.Runners
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .LastOrDefault(l => l.Length > 0);
             return line is { Length: > 200 } ? line[..200] : line;
+        }
+
+        /// <summary>Определяет исход запуска: прерван по таймауту, ненулевой код выхода или успех.</summary>
+        private static RunOutcome DetermineOutcome(bool timedOut, int exitCode)
+        {
+            if (timedOut)
+            {
+                return RunOutcome.TimedOut;
+            }
+            return exitCode != 0 ? RunOutcome.ExitCodeError : RunOutcome.Success;
         }
 
         /// <summary>Возвращает индивидуальный таймаут задачи или бесконечность, если он не задан.</summary>

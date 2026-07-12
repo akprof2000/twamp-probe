@@ -644,7 +644,34 @@
             <param name="lines">Строки файла.</param>
             <returns>Список маршрутизаторов и список нераспознанных строк.</returns>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.ReadHeader(System.String,System.Nullable{System.Char}@,System.Int32@,System.Int32@)">
+        <member name="T:SPI.Twamp.Server.Application.ProvisioningService.RouterParse">
+            <summary>Изменяемое состояние разбора файла маршрутизаторов и накопленные результаты.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.Separator">
+            <summary>Разделитель полей: ';' или '\t' — определяется по первой строке.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.SnodeIndex">
+            <summary>Колонка SNODE (по умолчанию — первая).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.IpIndex">
+            <summary>Колонка IP (если найдена в заголовке; -1 — нет).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.ContentSeen">
+            <summary>Встречена ли хотя бы одна строка данных.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.Routers">
+            <summary>Распознанные маршрутизаторы.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.Rejected">
+            <summary>Нераспознанные строки.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ProvisioningService.RouterParse.Seen">
+            <summary>Защита от дублей в файле (имя+IP).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.ProcessLine(SPI.Twamp.Server.Application.ProvisioningService.RouterParse,System.String,System.Int32)">
+            <summary>Обрабатывает одну строку файла: заголовок, строку данных или пропуск.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.ReadHeader(SPI.Twamp.Server.Application.ProvisioningService.RouterParse,System.String)">
             <summary>Разбирает строку заголовка: определяет разделитель и позиции колонок SNODE/IP.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.TryResolveRouter(System.String,System.String[],System.Int32,System.String@,System.String@)">
@@ -886,7 +913,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
             цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД, а также
