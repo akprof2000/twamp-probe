@@ -5,6 +5,7 @@ using spi.twamp.server.Environment;
 using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.Contracts;
 using SPI.Twamp.Server.Infrastructure;
+using System.Diagnostics;
 
 namespace SPI.Twamp.Server.BackgroundServices
 {
@@ -49,17 +50,20 @@ namespace SPI.Twamp.Server.BackgroundServices
                 "Обслуживание БД: checkpoint каждые {Chk} мин.; ретенция raw {Raw} дн., stats {Stats} дн., удалённые задачи {Del} дн., каждые {Int} мин.",
                 _checkpointMinutes, _rawDays, _statsDays, _deletedTaskDays, _intervalMinutes);
 
-            DateTime lastCleanup = DateTime.MinValue;
+            // Монотонный таймер: не зависит от перевода системных часов и DST.
+            Stopwatch sinceCleanup = Stopwatch.StartNew();
+            bool firstPass = true;
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    // Редкая полная очистка по своему интервалу.
-                    if ((DateTime.Now - lastCleanup).TotalMinutes >= _intervalMinutes)
+                    // Редкая полная очистка по своему интервалу (первый проход — сразу).
+                    if (firstPass || sinceCleanup.Elapsed.TotalMinutes >= _intervalMinutes)
                     {
                         await RunOnceAsync();
-                        lastCleanup = DateTime.Now;
+                        sinceCleanup.Restart();
+                        firstPass = false;
                     }
 
                     // Частый checkpoint: WAL-журнал переносится в основную базу и очищается.

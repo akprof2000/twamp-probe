@@ -57,7 +57,7 @@ namespace SPI.Twamp.Server.Application
             }
 
             TimeSpan offset = TimeSpan.Zero;
-            foreach (Match part in parts.Cast<Match>())
+            foreach (Match part in parts)
             {
                 int amount = int.Parse(part.Groups[1].Value);
                 offset += part.Groups[2].Value.ToLowerInvariant() switch

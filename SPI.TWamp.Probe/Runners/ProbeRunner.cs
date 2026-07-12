@@ -95,11 +95,13 @@ namespace SPI.Twamp.Probe.Runners
                     break;
 
                 case TaskMode.TWampy:
-                    // TWampy запускается так же, как TWamp, но своим исполняемым файлом;
-                    // вывод совместим и разбирается тем же парсером.
+                    // nokia/twampy — Python-пакет рядом с пробой, запускаем как «python -m twampy».
+                    // Режим «sender <far-end> <near-end> [опции]»: узел (рефлектор) — far-end,
+                    // локальный порт эфемерный («:0»), чтобы тысячи параллельных отправителей
+                    // не конфликтовали за один UDP-порт.
                     execute = _configuration["twampy:name"];
+                    _ = arguments.Append("-m twampy sender ").Append(node).Append(" :0");
                     AppendParameters(arguments, task, _configuration["twampy:default"]);
-                    _ = arguments.Append(' ').Append(node);
                     break;
             }
 

@@ -26,174 +26,15 @@ namespace SPI.Twamp.Server.Parser
         /// <returns>Заполненная статистика сеанса.</returns>
         public static TwPingStats Parse(string? text, string? error, Guid? id)
         {
-
             TwPingStats stats = new() { Id = id };
-            CultureInfo culture = CultureInfo.InvariantCulture;
 
             if (!string.IsNullOrEmpty(text))
             {
-                // источник/получатель
-                Match ft = RegExHeader().Match(text);
-
-                if (ft.Success)
-                {
-                    stats.FromHost = ft.Groups[1].Value;
-
-                    if (int.TryParse(ft.Groups[2].Value, out int fromPort))
-                    {
-                        stats.FromPort = fromPort;
-                    }
-
-                    stats.ToHost = ft.Groups[3].Value;
-
-                    if (int.TryParse(ft.Groups[4].Value, out int toPort))
-                    {
-                        stats.ToPort = toPort;
-                    }
-                }
-
-                // идентификатор сеанса (SID)
-                stats.Sid = Extract(text, @"SID:\s*([a-fA-F0-9]+)");
-
-                // время первого/последнего пакета
-                string? firstStr = Extract(text, @"first:\s*([0-9T:\.\-]+)");
-                if (DateTime.TryParse(firstStr, culture, DateTimeStyles.None, out DateTime first))
-                {
-                    stats.First = first;
-                }
-
-                string? lastStr = Extract(text, @"last:\s*([0-9T:\.\-]+)");
-                if (DateTime.TryParse(lastStr, culture, DateTimeStyles.None, out DateTime last))
-                {
-                    stats.Last = last;
-                }
-
-                // отправлено / потеряно / процент потерь
-                Match sentLost = RegExSendLoss().Match(text);
-                if (sentLost.Success)
-                {
-                    if (int.TryParse(sentLost.Groups[1].Value, out int sent))
-                    {
-                        stats.Sent = sent;
-                    }
-
-                    if (int.TryParse(sentLost.Groups[2].Value, out int lost))
-                    {
-                        stats.Lost = lost;
-                    }
-
-                    if (double.TryParse(sentLost.Groups[3].Value, NumberStyles.Any, culture, out double loss))
-                    {
-                        stats.LossPercent = loss;
-                    }
-                }
-
-                // круговая задержка (RTT)
-                Match rtt = RegExRtt().Match(text);
-                if (rtt.Success)
-                {
-                    if (double.TryParse(rtt.Groups[1].Value, NumberStyles.Any, culture, out double v1))
-                    {
-                        stats.RttMin = v1;
-                    }
-
-                    if (double.TryParse(rtt.Groups[2].Value, NumberStyles.Any, culture, out double v2))
-                    {
-                        stats.RttMedian = v2;
-                    }
-
-                    if (double.TryParse(rtt.Groups[3].Value, NumberStyles.Any, culture, out double v3))
-                    {
-                        stats.RttMax = v3;
-                    }
-                }
-
-                // задержка в прямом направлении
-                Match send = RegExSendTime().Match(text);
-                if (send.Success)
-                {
-                    if (double.TryParse(send.Groups[1].Value, NumberStyles.Any, culture, out double s1))
-                    {
-                        stats.SendMin = s1;
-                    }
-
-                    if (double.TryParse(send.Groups[2].Value, NumberStyles.Any, culture, out double s2))
-                    {
-                        stats.SendMedian = s2;
-                    }
-
-                    if (double.TryParse(send.Groups[3].Value, NumberStyles.Any, culture, out double s3))
-                    {
-                        stats.SendMax = s3;
-                    }
-                }
-
-                // задержка в обратном направлении
-                Match reflect = RegExDateTime().Match(text);
-                if (reflect.Success)
-                {
-                    if (double.TryParse(reflect.Groups[1].Value, NumberStyles.Any, culture, out double r1))
-                    {
-                        stats.ReflectMin = r1;
-                    }
-
-                    if (double.TryParse(reflect.Groups[2].Value, NumberStyles.Any, culture, out double r2))
-                    {
-                        stats.ReflectMedian = r2;
-                    }
-
-                    if (double.TryParse(reflect.Groups[3].Value, NumberStyles.Any, culture, out double r3))
-                    {
-                        stats.ReflectMax = r3;
-                    }
-                }
-
-                // время обработки на отражателе
-                Match proc = RegExReflector().Match(text);
-                if (proc.Success)
-                {
-                    if (double.TryParse(proc.Groups[1].Value, NumberStyles.Any, culture, out double p1))
-                    {
-                        stats.ReflectProcMin = p1;
-                    }
-
-                    if (double.TryParse(proc.Groups[2].Value, NumberStyles.Any, culture, out double p2))
-                    {
-                        stats.ReflectProcMax = p2;
-                    }
-                }
-
-                // джиттер
-                string? twoWay = Extract(text, @"two-way jitter = ([\d\.]+)");
-                if (double.TryParse(twoWay, NumberStyles.Any, culture, out double jw))
-                {
-                    stats.TwoWayJitter = jw;
-                }
-
-                string? sendJ = Extract(text, @"send jitter = ([\d\.]+)");
-                if (double.TryParse(sendJ, NumberStyles.Any, culture, out double js))
-                {
-                    stats.SendJitter = js;
-                }
-
-                string? reflJ = Extract(text, @"reflect jitter = ([\d\.]+)");
-                if (double.TryParse(reflJ, NumberStyles.Any, culture, out double jr))
-                {
-                    stats.ReflectJitter = jr;
-                }
-
-                // количество переходов (hops)
-                string? sendHops = Extract(text, @"send hops = (\d+)");
-                if (int.TryParse(sendHops, out int sh))
-                {
-                    stats.SendHops = sh;
-                }
-
-                string? reflHops = Extract(text, @"reflect hops = (\d+)");
-                if (int.TryParse(reflHops, out int rh))
-                {
-                    stats.ReflectHops = rh;
-                }
+                CultureInfo culture = CultureInfo.InvariantCulture;
+                ParseEndpoints(text, stats);
+                ParseSession(text, stats, culture);
+                ParseDelays(text, stats, culture);
+                ParseJitterAndHops(text, stats, culture);
             }
 
             if (!string.IsNullOrEmpty(error))
@@ -201,6 +42,95 @@ namespace SPI.Twamp.Server.Parser
                 stats.Errors = error.Replace("twping: ", "");
             }
             return stats;
+        }
+
+        /// <summary>Разбирает вещественное число или возвращает <c>null</c>, если значение не распознано.</summary>
+        private static double? Num(string value, CultureInfo culture) =>
+            double.TryParse(value, NumberStyles.Any, culture, out double v) ? v : null;
+
+        /// <summary>Разбирает целое число или возвращает <c>null</c>.</summary>
+        private static int? Int(string value) => int.TryParse(value, out int v) ? v : null;
+
+        /// <summary>Источник/получатель и идентификатор сеанса (SID).</summary>
+        private static void ParseEndpoints(string text, TwPingStats stats)
+        {
+            Match ft = RegExHeader().Match(text);
+            if (ft.Success)
+            {
+                stats.FromHost = ft.Groups[1].Value;
+                stats.FromPort = Int(ft.Groups[2].Value);
+                stats.ToHost = ft.Groups[3].Value;
+                stats.ToPort = Int(ft.Groups[4].Value);
+            }
+
+            stats.Sid = Extract(text, @"SID:\s*([a-fA-F0-9]+)");
+        }
+
+        /// <summary>Время первого/последнего пакета и счётчики отправлено/потеряно/процент потерь.</summary>
+        private static void ParseSession(string text, TwPingStats stats, CultureInfo culture)
+        {
+            if (DateTime.TryParse(Extract(text, @"first:\s*([0-9T:\.\-]+)"), culture, DateTimeStyles.None, out DateTime first))
+            {
+                stats.First = first;
+            }
+
+            if (DateTime.TryParse(Extract(text, @"last:\s*([0-9T:\.\-]+)"), culture, DateTimeStyles.None, out DateTime last))
+            {
+                stats.Last = last;
+            }
+
+            Match sentLost = RegExSendLoss().Match(text);
+            if (sentLost.Success)
+            {
+                stats.Sent = Int(sentLost.Groups[1].Value);
+                stats.Lost = Int(sentLost.Groups[2].Value);
+                stats.LossPercent = Num(sentLost.Groups[3].Value, culture);
+            }
+        }
+
+        /// <summary>Задержки: круговая (RTT), прямая, обратная и время обработки на отражателе.</summary>
+        private static void ParseDelays(string text, TwPingStats stats, CultureInfo culture)
+        {
+            Match rtt = RegExRtt().Match(text);
+            if (rtt.Success)
+            {
+                stats.RttMin = Num(rtt.Groups[1].Value, culture);
+                stats.RttMedian = Num(rtt.Groups[2].Value, culture);
+                stats.RttMax = Num(rtt.Groups[3].Value, culture);
+            }
+
+            Match send = RegExSendTime().Match(text);
+            if (send.Success)
+            {
+                stats.SendMin = Num(send.Groups[1].Value, culture);
+                stats.SendMedian = Num(send.Groups[2].Value, culture);
+                stats.SendMax = Num(send.Groups[3].Value, culture);
+            }
+
+            Match reflect = RegExDateTime().Match(text);
+            if (reflect.Success)
+            {
+                stats.ReflectMin = Num(reflect.Groups[1].Value, culture);
+                stats.ReflectMedian = Num(reflect.Groups[2].Value, culture);
+                stats.ReflectMax = Num(reflect.Groups[3].Value, culture);
+            }
+
+            Match proc = RegExReflector().Match(text);
+            if (proc.Success)
+            {
+                stats.ReflectProcMin = Num(proc.Groups[1].Value, culture);
+                stats.ReflectProcMax = Num(proc.Groups[2].Value, culture);
+            }
+        }
+
+        /// <summary>Джиттеры (двусторонний/прямой/обратный) и количество переходов (hops).</summary>
+        private static void ParseJitterAndHops(string text, TwPingStats stats, CultureInfo culture)
+        {
+            stats.TwoWayJitter = Num(Extract(text, @"two-way jitter = ([\d\.]+)") ?? "", culture);
+            stats.SendJitter = Num(Extract(text, @"send jitter = ([\d\.]+)") ?? "", culture);
+            stats.ReflectJitter = Num(Extract(text, @"reflect jitter = ([\d\.]+)") ?? "", culture);
+            stats.SendHops = Int(Extract(text, @"send hops = (\d+)") ?? "");
+            stats.ReflectHops = Int(Extract(text, @"reflect hops = (\d+)") ?? "");
         }
 
 
@@ -221,8 +151,14 @@ namespace SPI.Twamp.Server.Parser
 
                 foreach (string block in blocks)
                 {
-                    try { list.Add(Parse(block, error, id)); }
-                    catch { }
+                    try
+                    {
+                        list.Add(Parse(block, error, id));
+                    }
+                    catch (Exception)
+                    {
+                        // Битый блок пропускаем, чтобы не потерять остальные корректные сеансы.
+                    }
                 }
             }
 
@@ -291,11 +227,11 @@ namespace SPI.Twamp.Server.Parser
         /// </summary>
         /// <param name="columnSeparator">Разделитель колонок.</param>
         public static string CsvHeader(char columnSeparator) =>
-            string.Join(columnSeparator, ["Title", "Id", "Mode", "CallLine",
-            "FromHost","FromPort","ToHost","ToPort","SID","First","Last","Sent","Lost","LossPercent",
-            "RttMin","RttMedian","RttMax","SendMin","SendMedian","SendMax",
-            "ReflectMin","ReflectMedian","ReflectMax","ReflectProcMin","ReflectProcMax",
-            "TwoWayJitter","SendJitter","ReflectJitter","SendHops","ReflectHops","Errors"]);
+            string.Join(columnSeparator, "Title", "Id", "Mode", "CallLine",
+            "FromHost", "FromPort", "ToHost", "ToPort", "SID", "First", "Last", "Sent", "Lost", "LossPercent",
+            "RttMin", "RttMedian", "RttMax", "SendMin", "SendMedian", "SendMax",
+            "ReflectMin", "ReflectMedian", "ReflectMax", "ReflectProcMin", "ReflectProcMax",
+            "TwoWayJitter", "SendJitter", "ReflectJitter", "SendHops", "ReflectHops", "Errors");
 
         /// <summary>
         /// Формирует одну строку CSV-отчёта из статистики (для потоковой выгрузки).
@@ -304,8 +240,7 @@ namespace SPI.Twamp.Server.Parser
         /// <param name="columnSeparator">Разделитель колонок.</param>
         /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
         public static string ToCsvLine(TwPingStats s, char columnSeparator, char decimalSeparator) =>
-            string.Join(columnSeparator, new[]
-            {
+            string.Join(columnSeparator,
             CsvEscape(s.Title),
             CsvEscape(s.Id?.ToString()),
             CsvEscape(s.Mode),
@@ -336,8 +271,7 @@ namespace SPI.Twamp.Server.Parser
             CsvEscape(FormatNumber(s.ReflectJitter, decimalSeparator)),
             CsvEscape(s.SendHops?.ToString()),
             CsvEscape(s.ReflectHops?.ToString()),
-            CsvEscape(s.Errors)
-            });
+            CsvEscape(s.Errors));
 
         /// <summary>
         /// Формирует CSV-таблицу из набора статистик (с заголовком).

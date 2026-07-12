@@ -73,9 +73,8 @@ namespace SPI.Twamp.Server.Application
             foreach (ActionData action in raw)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                foreach (TwPingStats row in TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId))
+                foreach (TwPingStats row in ProbeOutputParser.Parse(action.Mode, action.Console, action.ErrorConsole, action.TaskId))
                 {
-                    row.Mode = action.Mode;
                     row.CallLine = action.CallLine;
                     row.Title = await GetTitleAsync(row.Id ?? Guid.Empty);
                     await writer.WriteLineAsync(TwPingParser.ToCsvLine(row, separator, decimalSeparator));
@@ -93,7 +92,7 @@ namespace SPI.Twamp.Server.Application
 
             DateTime now = DateTime.Now;
             List<string> rejected = [];
-            List<TaskInfo> tasks = [];
+            List<TaskInfo> parsedTasks = [];
 
             foreach (CsvRow row in rows)
             {
@@ -107,11 +106,11 @@ namespace SPI.Twamp.Server.Application
                     rejected.Add(task.Title);
                 }
 
-                tasks.Add(task);
+                parsedTasks.Add(task);
             }
 
             // Пакетная заливка: одна запись в БД и один SetJobs на пачку для каждой пробы.
-            await _taskService.AddRangeAsync(tasks, cancellationToken);
+            await _taskService.AddRangeAsync(parsedTasks, cancellationToken);
 
             return rejected;
         }

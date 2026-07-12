@@ -114,21 +114,35 @@ namespace SPI.Twamp.Server.Controllers
             {
                 return false;
             }
-            if (!string.IsNullOrEmpty(outcome))
+            return MatchesResult(last, outcome, error);
+        }
+
+        /// <summary>Проверяет фильтры по исходу последнего запуска и тексту ошибки.</summary>
+        private static bool MatchesResult(TaskLastResult? last, string? outcome, string? error)
+        {
+            if (!string.IsNullOrEmpty(outcome) &&
+                !ResolveOutcome(last).Equals(outcome, StringComparison.OrdinalIgnoreCase))
             {
-                // «none» — задачи без данных о выполнении.
-                string actual = last?.Outcome ?? (last is null ? "none" : (last.HasError ? "error" : "Success"));
-                if (!actual.Equals(outcome, StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
+                return false;
             }
+
             if (!string.IsNullOrEmpty(error) &&
                 (last?.Error is null || !last.Error.Contains(error, StringComparison.OrdinalIgnoreCase)))
             {
                 return false;
             }
+
             return true;
+        }
+
+        /// <summary>Исход последнего запуска для фильтра: «none» — данных нет, иначе Outcome/error/Success.</summary>
+        private static string ResolveOutcome(TaskLastResult? last)
+        {
+            if (last is null)
+            {
+                return "none";
+            }
+            return last.Outcome ?? (last.HasError ? "error" : "Success");
         }
 
         /// <summary>Возвращает отфильтрованные задачи вместе с их последними результатами.</summary>
@@ -336,6 +350,7 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
         /// <returns>Актуальная версия состояния.</returns>
         [HttpGet("[action]")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<ActionResult> WaitChanges([FromQuery] long version = 0, CancellationToken cancellationToken = default)
         {
             long current = await _changeNotifier.WaitAsync(version, TimeSpan.FromSeconds(25), cancellationToken);

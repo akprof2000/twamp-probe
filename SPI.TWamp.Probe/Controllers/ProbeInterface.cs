@@ -90,6 +90,7 @@ namespace SPI.Twamp.Probe.Controllers
         /// <param name="title">Фильтр по названию задачи (содержит).</param>
         /// <param name="outcome">Фильтр по исходу: Success / ExitCodeError / TimedOut / StartFailed / Running / NotStarted.</param>
         [HttpGet("[action]")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public ActionResult TaskStatus(
             [FromQuery] int skip = 0, [FromQuery] int take = 100,
             [FromQuery] string? title = null, [FromQuery] string? outcome = null)

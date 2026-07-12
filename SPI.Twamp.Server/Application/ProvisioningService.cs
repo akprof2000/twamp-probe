@@ -88,20 +88,7 @@ namespace SPI.Twamp.Server.Application
                 // Строка заголовка: определяем разделитель и позиции колонок SNODE/IP.
                 if (!contentSeen && line.Contains("SNODE", StringComparison.OrdinalIgnoreCase))
                 {
-                    separator = line.Contains(';') ? ';' : '\t';
-                    string[] header = line.Split(separator.Value);
-                    for (int i = 0; i < header.Length; i++)
-                    {
-                        string column = header[i].Trim().ToUpperInvariant();
-                        if (column == "SNODE")
-                        {
-                            snodeIndex = i;
-                        }
-                        else if (column == "IP")
-                        {
-                            ipIndex = i;
-                        }
-                    }
+                    ReadHeader(line, ref separator, ref snodeIndex, ref ipIndex);
                     continue;
                 }
 
@@ -111,20 +98,7 @@ namespace SPI.Twamp.Server.Application
                 string[] fields = line.Split(separator.Value);
                 string snode = snodeIndex < fields.Length ? fields[snodeIndex].Trim() : "";
 
-                string name;
-                string ip;
-                if (TryParseRouterLine(snode, out name, out ip))
-                {
-                    // Классический вид «ИМЯ|IP:адрес» — всё в одном поле.
-                }
-                else if (snode.Length > 0 && ipIndex >= 0 && ipIndex < fields.Length &&
-                         IpRegex().IsMatch(fields[ipIndex].Trim()))
-                {
-                    // SNODE без «|IP:» — имя из SNODE, адрес из колонки IP.
-                    name = snode;
-                    ip = fields[ipIndex].Trim();
-                }
-                else
+                if (!TryResolveRouter(snode, fields, ipIndex, out string name, out string ip))
                 {
                     // Первую непохожую на данные строку молча считаем заголовком.
                     if (!contentSeen && !line.Contains("|IP:"))
@@ -143,6 +117,49 @@ namespace SPI.Twamp.Server.Application
             }
 
             return (routers, rejected);
+        }
+
+        /// <summary>Разбирает строку заголовка: определяет разделитель и позиции колонок SNODE/IP.</summary>
+        private static void ReadHeader(string line, ref char? separator, ref int snodeIndex, ref int ipIndex)
+        {
+            separator = line.Contains(';') ? ';' : '\t';
+            string[] header = line.Split(separator.Value);
+            for (int i = 0; i < header.Length; i++)
+            {
+                string column = header[i].Trim().ToUpperInvariant();
+                if (column == "SNODE")
+                {
+                    snodeIndex = i;
+                }
+                else if (column == "IP")
+                {
+                    ipIndex = i;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Определяет имя и IP маршрутизатора: из поля SNODE вида «ИМЯ|IP:адрес» либо
+        /// из имени SNODE и отдельной колонки IP. Возвращает <c>false</c>, если не удалось.
+        /// </summary>
+        private static bool TryResolveRouter(string snode, string[] fields, int ipIndex, out string name, out string ip)
+        {
+            // Классический вид «ИМЯ|IP:адрес» — всё в одном поле.
+            if (TryParseRouterLine(snode, out name, out ip))
+            {
+                return true;
+            }
+
+            // SNODE без «|IP:» — имя из SNODE, адрес из колонки IP.
+            if (snode.Length > 0 && ipIndex >= 0 && ipIndex < fields.Length &&
+                IpRegex().IsMatch(fields[ipIndex].Trim()))
+            {
+                name = snode;
+                ip = fields[ipIndex].Trim();
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -202,12 +219,12 @@ namespace SPI.Twamp.Server.Application
         public async Task<ProvisioningResult> GenerateAsync(Stream routersFile, string? setName, CancellationToken cancellationToken)
         {
             // Применяем конкретный набор шаблонов, либо все наборы, если имя не задано.
-            IReadOnlyList<ProbeTemplate> templates = string.IsNullOrWhiteSpace(setName)
+            IReadOnlyList<ProbeTemplate> activeTemplates = string.IsNullOrWhiteSpace(setName)
                 ? await _templates.GetAllAsync()
                 : await _templates.GetBySetAsync(setName);
             List<string> rejected = [];
 
-            if (templates.Count == 0)
+            if (activeTemplates.Count == 0)
             {
                 rejected.Add(string.IsNullOrWhiteSpace(setName)
                     ? "Шаблоны не загружены — сначала вызовите UploadTemplates"
@@ -234,7 +251,7 @@ namespace SPI.Twamp.Server.Application
             DateTime createdAt = DateTime.Now;
             List<TaskInfo> tasks = [];
 
-            foreach (ProbeTemplate template in templates)
+            foreach (ProbeTemplate template in activeTemplates)
             {
                 // Start/End шаблона: дата или длительность от момента создания.
                 DateTime start = TimeSpec.Resolve(template.Start, createdAt, createdAt, out string? startError);
@@ -280,9 +297,9 @@ namespace SPI.Twamp.Server.Application
             }
 
             _logger.Info("Сгенерировано задач: {Tasks} (маршрутизаторов {Routers} × шаблонов {Templates})",
-                tasks.Count, routers.Count, templates.Count);
+                tasks.Count, routers.Count, activeTemplates.Count);
 
-            return new ProvisioningResult(tasks, routers.Count, templates.Count, rejected);
+            return new ProvisioningResult(tasks, routers.Count, activeTemplates.Count, rejected);
         }
 
         /// <inheritdoc/>
@@ -293,14 +310,13 @@ namespace SPI.Twamp.Server.Application
 
             // Заголовок совместим с форматом «Base test.csv» (его понимает UploadCsv).
             _ = sb.AppendLine(string.Join(sep,
-                ["Name", "HostName", "Ip", "Probe", "Request", "Type", "Repeats", "Circles",
-                 "Pause", "Cron", "Start", "End", "Mode", "Timeout"]));
+                "Name", "HostName", "Ip", "Probe", "Request", "Type", "Repeats", "Circles",
+                "Pause", "Cron", "Start", "End", "Mode", "Timeout"));
 
             foreach (TaskInfo t in tasks)
             {
                 string request = t.Parameters.TryGetValue("all", out string? args) ? args : "";
-                _ = sb.AppendLine(string.Join(sep, new[]
-                {
+                _ = sb.AppendLine(string.Join(sep,
                     TwPingParser.CsvEscape(t.Title),
                     "", // HostName не используется
                     TwPingParser.CsvEscape(t.EndNode),
@@ -314,8 +330,7 @@ namespace SPI.Twamp.Server.Application
                     t.Start.ToString("dd.MM.yyyy HH:mm"),
                     t.End.ToString("dd.MM.yyyy HH:mm"),
                     t.Mode.ToString(),
-                    t.TimeoutSec.ToString()
-                }));
+                    t.TimeoutSec.ToString()));
             }
 
             return Encoding.UTF8.GetBytes(sb.ToString());

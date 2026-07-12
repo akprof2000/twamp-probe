@@ -133,9 +133,12 @@ namespace SPI.Twamp.Server.BackgroundServices
                 ? outcome != "Success"
                 : !string.IsNullOrEmpty(action.ErrorConsole) || action.ExitCode is not (null or 0);
 
-            string? error = string.IsNullOrEmpty(action.ErrorConsole)
-                ? null
-                : action.ErrorConsole.Length > 300 ? action.ErrorConsole[..300] : action.ErrorConsole;
+            // Текст ошибки для интерфейса обрезаем до 300 символов.
+            string? error = null;
+            if (!string.IsNullOrEmpty(action.ErrorConsole))
+            {
+                error = action.ErrorConsole.Length > 300 ? action.ErrorConsole[..300] : action.ErrorConsole;
+            }
 
             return new TaskLastResult(action.Creation ?? DateTime.Now, hasError, outcome, action.ExitCode, error);
         }
@@ -173,44 +176,9 @@ namespace SPI.Twamp.Server.BackgroundServices
             {
                 try
                 {
-                    ProbeResultBatch batch = await _probe.GetResultsAsync(probeUrl, cancellationToken);
-                    if (batch.Items.Length > 0)
-                    {
-                        _logger.Info("Получено {Count} результатов от пробы {ProbeUrl}", batch.Items.Length, probeUrl);
-
-                        // Сохраняем с отбрасыванием дубликатов (повторная доставка после сбоя).
-                        IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
-
-                        // Обновляем «последний результат» каждой задачи — он показывается
-                        // в списке задач веб-интерфейса.
-                        foreach (ActionData action in fresh)
-                        {
-                            _lastResults[action.TaskId] = BuildLastResult(action);
-                        }
-
-                        // Разбираем статистику сразу при приёме — выгрузка отчёта
-                        // потом читает готовые записи без повторного парсинга.
-                        await StoreStatsAsync(fresh);
-
-                        // Подтверждаем доставку — только теперь проба удалит пачку у себя.
-                        await _probe.ConfirmResultsAsync(probeUrl, batch.BatchId, cancellationToken);
-                        totalResults += fresh.Count;
-
-                        if (fresh.Count > 0)
-                        {
-                            _changeNotifier.Notify(); // новые результаты — будим веб-интерфейс
-                        }
-                    }
-
-                    // Восстановление связи после ошибки — тоже событие для интерфейса.
-                    bool wasFailing = _states.TryGetValue(probeUrl, out ProbePollState? prevState) &&
-                                      prevState.BackoffSeconds > 0;
+                    totalResults += await PollOnceAsync(probeUrl, cancellationToken);
                     backoffSeconds = 1; // связь есть — возвращаем минимальную задержку
-                    _states[probeUrl] = new ProbePollState(DateTime.Now, null, null, totalResults, 0);
-                    if (wasFailing)
-                    {
-                        _changeNotifier.Notify();
-                    }
+                    MarkPollSuccess(probeUrl, totalResults);
                 }
                 catch (OperationCanceledException)
                 {
@@ -218,21 +186,10 @@ namespace SPI.Twamp.Server.BackgroundServices
                 }
                 catch (Exception ex)
                 {
-                    _logger.Warn(ex, "Ошибка опроса пробы {ProbeUrl}, повтор через {Delay} c", probeUrl, backoffSeconds);
-                    ProbePollState? prev = _states.TryGetValue(probeUrl, out ProbePollState? p) ? p : null;
-                    bool becameFailing = prev is null || prev.BackoffSeconds == 0;
-                    _states[probeUrl] = new ProbePollState(prev?.LastSuccess, DateTime.Now, ex.Message, totalResults, backoffSeconds);
-                    if (becameFailing)
+                    MarkPollFailure(probeUrl, ex, totalResults, backoffSeconds);
+                    if (!await DelayBackoffAsync(backoffSeconds, cancellationToken))
                     {
-                        _changeNotifier.Notify(); // проба перестала отвечать — событие для интерфейса
-                    }
-                    try
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSeconds), cancellationToken);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
+                        break; // сервис остановлен во время ожидания
                     }
 
                     // Удваиваем задержку до разумного предела — чтобы не «долбить» недоступную пробу.
@@ -241,6 +198,83 @@ namespace SPI.Twamp.Server.BackgroundServices
             }
 
             _logger.Info("Опрос пробы {ProbeUrl} остановлен", probeUrl);
+        }
+
+        /// <summary>
+        /// Один цикл опроса пробы: получает пачку результатов, сохраняет их (с отбрасыванием
+        /// дубликатов), разбирает статистику и подтверждает доставку. Возвращает число новых записей.
+        /// </summary>
+        private async Task<int> PollOnceAsync(string probeUrl, CancellationToken cancellationToken)
+        {
+            ProbeResultBatch batch = await _probe.GetResultsAsync(probeUrl, cancellationToken);
+            if (batch.Items.Length == 0)
+            {
+                return 0;
+            }
+
+            _logger.Info("Получено {Count} результатов от пробы {ProbeUrl}", batch.Items.Length, probeUrl);
+
+            // Сохраняем с отбрасыванием дубликатов (повторная доставка после сбоя).
+            IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
+
+            // Обновляем «последний результат» каждой задачи — он показывается
+            // в списке задач веб-интерфейса.
+            foreach (ActionData action in fresh)
+            {
+                _lastResults[action.TaskId] = BuildLastResult(action);
+            }
+
+            // Разбираем статистику сразу при приёме — выгрузка отчёта
+            // потом читает готовые записи без повторного парсинга.
+            await StoreStatsAsync(fresh);
+
+            // Подтверждаем доставку — только теперь проба удалит пачку у себя.
+            await _probe.ConfirmResultsAsync(probeUrl, batch.BatchId, cancellationToken);
+
+            if (fresh.Count > 0)
+            {
+                _changeNotifier.Notify(); // новые результаты — будим веб-интерфейс
+            }
+            return fresh.Count;
+        }
+
+        /// <summary>Фиксирует успешный опрос: сбрасывает состояние и будит интерфейс при восстановлении связи.</summary>
+        private void MarkPollSuccess(string probeUrl, long totalResults)
+        {
+            bool wasFailing = _states.TryGetValue(probeUrl, out ProbePollState? prevState) &&
+                              prevState.BackoffSeconds > 0;
+            _states[probeUrl] = new ProbePollState(DateTime.Now, null, null, totalResults, 0);
+            if (wasFailing)
+            {
+                _changeNotifier.Notify();
+            }
+        }
+
+        /// <summary>Фиксирует ошибку опроса пробы и обновляет её состояние для страницы статуса.</summary>
+        private void MarkPollFailure(string probeUrl, Exception ex, long totalResults, int backoffSeconds)
+        {
+            _logger.Warn(ex, "Ошибка опроса пробы {ProbeUrl}, повтор через {Delay} c", probeUrl, backoffSeconds);
+            ProbePollState? prev = _states.TryGetValue(probeUrl, out ProbePollState? p) ? p : null;
+            bool becameFailing = prev is null || prev.BackoffSeconds == 0;
+            _states[probeUrl] = new ProbePollState(prev?.LastSuccess, DateTime.Now, ex.Message, totalResults, backoffSeconds);
+            if (becameFailing)
+            {
+                _changeNotifier.Notify(); // проба перестала отвечать — событие для интерфейса
+            }
+        }
+
+        /// <summary>Ждёт backoff-паузу; возвращает <c>false</c>, если сервис остановлен во время ожидания.</summary>
+        private static async Task<bool> DelayBackoffAsync(int backoffSeconds, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(backoffSeconds), cancellationToken);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
         }
 
         /// <summary>Разбирает принятые результаты в статистику и сохраняет её.</summary>
@@ -254,10 +288,11 @@ namespace SPI.Twamp.Server.BackgroundServices
             List<StatRecord> records = [];
             foreach (ActionData action in fresh)
             {
+                // Парсер выбирается по режиму задачи (twampy — свой формат вывода),
+                // Mode проставляется внутри диспетчера.
                 foreach (Parser.TwPingStats parsed in
-                         Parser.TwPingParser.ParseMany(action.Console, action.ErrorConsole, action.TaskId))
+                         Parser.ProbeOutputParser.Parse(action.Mode, action.Console, action.ErrorConsole, action.TaskId))
                 {
-                    parsed.Mode = action.Mode; // тип запроса сохраняем вместе со статистикой
                     records.Add(new StatRecord
                     {
                         Creation = action.Creation ?? DateTime.Now,
@@ -290,8 +325,8 @@ namespace SPI.Twamp.Server.BackgroundServices
 
                 try
                 {
-                    IReadOnlyList<Client> clients = await _clients.GetAllAsync();
-                    foreach (Client client in clients)
+                    IReadOnlyList<Client> allClients = await _clients.GetAllAsync();
+                    foreach (Client client in allClients)
                     {
                         await ReconcileSafeAsync(client.RequestInfo, cancellationToken);
                     }

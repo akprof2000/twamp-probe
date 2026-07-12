@@ -25,4 +25,10 @@
 
   </ItemGroup>
 
+  <!-- Вендоренный форк nokia/twampy (эфемерный порт для параллельного запуска)
+       поставляется вместе с пробой: копируется в вывод сборки и публикации. -->
+  <ItemGroup>
+    <Content Include="twampy\**\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

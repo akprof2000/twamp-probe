@@ -50,8 +50,8 @@ try
     sd = sd.PadLeft(sd.Length + ((mesln - sd.Length) / 2)).PadRight(mesln);
 
     logger.Info($"{sd}");
-    logger.Info($"{Version}");
-    logger.Info($"{OperSystem}");
+    // Версию и ОС пишем одной записью — иначе баннер старта раздувает число Info-вызовов.
+    logger.Info($"{Version}{System.Environment.NewLine}{OperSystem}");
 
 
     // Выполнение зондов и выдача результатов теперь полностью асинхронны и не
@@ -196,8 +196,7 @@ finally
     string se = $"Program end at {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
     se = se.PadLeft(se.Length + ((mesln - se.Length) / 2)).PadRight(mesln);
     logger?.Info($"{se}");
-    logger?.Info($"{Version}");
-    logger?.Info($"{OperSystem}");
+    logger?.Info($"{Version}{System.Environment.NewLine}{OperSystem}");
     LogManager.Shutdown();
 }
 

@@ -166,31 +166,7 @@ namespace SPI.Twamp.Server.Application
 
                 _ = knownSchedulers.Add(task.Id);
 
-                // Уже помеченные на удаление — убрать с пробы, если она их ещё держит.
-                if (task.Delete)
-                {
-                    if (onProbe.Contains(task.Id))
-                    {
-                        toPush.Add(task);
-                    }
-                    continue;
-                }
-
-                // Устаревшие (истекла дата окончания) — помечаем удалёнными и убираем с пробы.
-                if (task.End <= now)
-                {
-                    task.Delete = true;
-                    task.DeletedAt = now;
-                    await _tasks.UpsertAsync(task);
-                    if (onProbe.Contains(task.Id))
-                    {
-                        toPush.Add(task);
-                    }
-                    continue;
-                }
-
-                // Активная задача, которой у пробы нет, — досылаем (так чистая проба получает всё).
-                if (!onProbe.Contains(task.Id))
+                if (await NeedsPushAsync(task, onProbe, now))
                 {
                     toPush.Add(task);
                 }
@@ -216,6 +192,31 @@ namespace SPI.Twamp.Server.Application
                 await _probe.PushTasksAsync(requestInfo, toPush, cancellationToken);
                 _changeNotifier.Notify(); // сверка изменила состояние задач
             }
+        }
+
+        /// <summary>
+        /// Решает, нужно ли досылать пробе задачу по расписанию, и при необходимости
+        /// помечает истёкшую задачу удалённой. Возвращает <c>true</c>, если задачу надо отправить.
+        /// </summary>
+        private async Task<bool> NeedsPushAsync(TaskInfo task, HashSet<Guid> onProbe, DateTime now)
+        {
+            // Уже помеченные на удаление — убрать с пробы, если она их ещё держит.
+            if (task.Delete)
+            {
+                return onProbe.Contains(task.Id);
+            }
+
+            // Устаревшие (истекла дата окончания) — помечаем удалёнными и убираем с пробы.
+            if (task.End <= now)
+            {
+                task.Delete = true;
+                task.DeletedAt = now;
+                await _tasks.UpsertAsync(task);
+                return onProbe.Contains(task.Id);
+            }
+
+            // Активная задача, которой у пробы нет, — досылаем (так чистая проба получает всё).
+            return !onProbe.Contains(task.Id);
         }
 
         /// <summary>Пытается передать пробе изменения; при недоступности пробы только логирует.</summary>
