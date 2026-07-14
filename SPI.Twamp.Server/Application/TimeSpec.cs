@@ -7,14 +7,51 @@ namespace SPI.Twamp.Server.Application
 {
     /// <summary>
     /// Разбор моментов времени из шаблонов задач: абсолютная дата либо относительная
-    /// длительность от опорного момента («2 week 3 day 2 hour», поддерживаются
-    /// week/day/hour/min/sec и опечатка «weak»).
+    /// длительность от опорного момента.
+    /// <para>
+    /// Длительность — компоненты «[число] единица» в любом порядке; число можно опускать
+    /// (подразумевается 1): «2 week 3 day», «year month weak», «1 год 2 месяца 2 недели 15 дней»,
+    /// «2 года 1 неделя день». Единицы — английские (year/month/week/day/hour/min/sec,
+    /// в т.ч. опечатка «weak») и русские во всех склонениях (год/года/лет, месяц/месяца/месяцев,
+    /// неделя/недели/недель, день/дня/дней, час/часа/часов, минута/минут, секунда/секунд).
+    /// Годы и месяцы применяются календарно (AddYears/AddMonths), а не как фиксированное число дней.
+    /// </para>
     /// </summary>
     public static partial class TimeSpec
     {
-        /// <summary>Компонент длительности: число + единица.</summary>
-        [GeneratedRegex(@"(\d+)\s*(week|weak|day|hour|min|sec)", RegexOptions.IgnoreCase)]
-        private static partial Regex DurationRegex();
+        /// <summary>Единица длительности.</summary>
+        private enum Unit
+        {
+            Year,
+            Month,
+            Week,
+            Day,
+            Hour,
+            Minute,
+            Second
+        }
+
+        /// <summary>
+        /// Сопоставление начала слова с единицей. Префиксы покрывают склонения:
+        /// «год|года|году…», «месяц|месяца|месяцев», «неделя|недели|недель|неделю»,
+        /// «день» («ден»), «дня|дней» («дн»), «час|часа|часов», «минута|минут|мин»,
+        /// «секунда|секунд|сек»; английские — единственное и множественное число.
+        /// Порядок важен: более специфичные префиксы идут раньше.
+        /// </summary>
+        private static readonly (string Prefix, Unit Unit)[] UnitPrefixes =
+        [
+            ("год", Unit.Year), ("year", Unit.Year),
+            ("мес", Unit.Month), ("month", Unit.Month),
+            ("недел", Unit.Week), ("week", Unit.Week), ("weak", Unit.Week),
+            ("ден", Unit.Day), ("дн", Unit.Day), ("day", Unit.Day),
+            ("час", Unit.Hour), ("hour", Unit.Hour),
+            ("мин", Unit.Minute), ("min", Unit.Minute),
+            ("сек", Unit.Second), ("sec", Unit.Second)
+        ];
+
+        /// <summary>Лексема длительности: число либо слово (латиница/кириллица).</summary>
+        [GeneratedRegex(@"\d+|\p{L}+")]
+        private static partial Regex TokenRegex();
 
         /// <summary>
         /// Разбирает значение времени: пустое — <paramref name="fallback"/>, дата — как есть,
@@ -48,30 +85,100 @@ namespace SPI.Twamp.Server.Application
                 return DateTime.SpecifyKind(parsed, DateTimeKind.Local);
             }
 
-            // Относительная длительность: «2 week 3 day 2 hour 30 min».
-            MatchCollection parts = DurationRegex().Matches(text);
-            if (parts.Count == 0)
+            // Относительная длительность: «2 week 3 day», «1 год 2 месяца 2 недели 15 дней».
+            if (!TryParseDuration(text, origin, out DateTime result))
             {
-                error = $"не удалось разобрать время «{text}» (ожидалась дата или «N week N day N hour»)";
+                error = $"не удалось разобрать время «{text}» " +
+                        "(ожидалась дата или длительность вида «2 недели 3 дня» / «1 year 2 month»)";
                 return DateTime.SpecifyKind(fallback, DateTimeKind.Local);
             }
 
+            return DateTime.SpecifyKind(result, DateTimeKind.Local);
+        }
+
+        /// <summary>
+        /// Разбирает длительность: пары «[число] единица» в любом порядке; пропущенное
+        /// число означает 1 («year month weak» = 1 год 1 месяц 1 неделя). Неизвестные
+        /// слова пропускаются; нужна хотя бы одна распознанная единица.
+        /// </summary>
+        private static bool TryParseDuration(string text, DateTime origin, out DateTime result)
+        {
+            int years = 0;
+            int months = 0;
             TimeSpan offset = TimeSpan.Zero;
-            foreach (GroupCollection groups in parts.Select(m => m.Groups))
+            bool recognized = false;
+            int? amount = null; // число, ожидающее свою единицу
+
+            foreach (Match token in TokenRegex().Matches(text))
             {
-                int amount = int.Parse(groups[1].Value);
-                offset += groups[2].Value.ToLowerInvariant() switch
+                if (char.IsDigit(token.Value[0]))
                 {
-                    "week" or "weak" => TimeSpan.FromDays(7 * amount),
-                    "day" => TimeSpan.FromDays(amount),
-                    "hour" => TimeSpan.FromHours(amount),
-                    "min" => TimeSpan.FromMinutes(amount),
-                    "sec" => TimeSpan.FromSeconds(amount),
-                    _ => TimeSpan.Zero
-                };
+                    amount = int.Parse(token.Value);
+                    continue;
+                }
+
+                Unit? unit = MapUnit(token.Value.ToLowerInvariant());
+                if (unit is null)
+                {
+                    continue; // связки вроде «и» просто пропускаем
+                }
+
+                Apply(unit.Value, amount ?? 1, ref years, ref months, ref offset);
+                recognized = true;
+                amount = null;
             }
 
-            return DateTime.SpecifyKind(origin + offset, DateTimeKind.Local);
+            // Годы и месяцы — календарно от опорного момента, остальное — точным смещением.
+            result = origin.AddYears(years).AddMonths(months) + offset;
+            return recognized;
+        }
+
+        /// <summary>Определяет единицу по началу слова (склонения покрываются префиксом).</summary>
+        private static Unit? MapUnit(string word)
+        {
+            // «лет» (2 года 5 лет) не начинается с «год» — отдельный случай.
+            if (word == "лет")
+            {
+                return Unit.Year;
+            }
+
+            foreach ((string prefix, Unit unit) in UnitPrefixes)
+            {
+                if (word.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return unit;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>Добавляет компонент длительности к накопителям.</summary>
+        private static void Apply(Unit unit, int amount, ref int years, ref int months, ref TimeSpan offset)
+        {
+            switch (unit)
+            {
+                case Unit.Year:
+                    years += amount;
+                    break;
+                case Unit.Month:
+                    months += amount;
+                    break;
+                case Unit.Week:
+                    offset += TimeSpan.FromDays(7 * amount);
+                    break;
+                case Unit.Day:
+                    offset += TimeSpan.FromDays(amount);
+                    break;
+                case Unit.Hour:
+                    offset += TimeSpan.FromHours(amount);
+                    break;
+                case Unit.Minute:
+                    offset += TimeSpan.FromMinutes(amount);
+                    break;
+                case Unit.Second:
+                    offset += TimeSpan.FromSeconds(amount);
+                    break;
+            }
         }
     }
 }

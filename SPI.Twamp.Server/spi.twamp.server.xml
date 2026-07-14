@@ -798,50 +798,38 @@
         <member name="T:SPI.Twamp.Server.Application.TimeSpec">
             <summary>
             Разбор моментов времени из шаблонов задач: абсолютная дата либо относительная
-            длительность от опорного момента («2 week 3 day 2 hour», поддерживаются
-            week/day/hour/min/sec и опечатка «weak»).
+            длительность от опорного момента.
+            <para>
+            Длительность — компоненты «[число] единица» в любом порядке; число можно опускать
+            (подразумевается 1): «2 week 3 day», «year month weak», «1 год 2 месяца 2 недели 15 дней»,
+            «2 года 1 неделя день». Единицы — английские (year/month/week/day/hour/min/sec,
+            в т.ч. опечатка «weak») и русские во всех склонениях (год/года/лет, месяц/месяца/месяцев,
+            неделя/недели/недель, день/дня/дней, час/часа/часов, минута/минут, секунда/секунд).
+            Годы и месяцы применяются календарно (AddYears/AddMonths), а не как фиксированное число дней.
+            </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.TimeSpec.DurationRegex">
+        <member name="T:SPI.Twamp.Server.Application.TimeSpec.Unit">
+            <summary>Единица длительности.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.TimeSpec.UnitPrefixes">
+            <summary>
+            Сопоставление начала слова с единицей. Префиксы покрывают склонения:
+            «год|года|году…», «месяц|месяца|месяцев», «неделя|недели|недель|неделю»,
+            «день» («ден»), «дня|дней» («дн»), «час|часа|часов», «минута|минут|мин»,
+            «секунда|секунд|сек»; английские — единственное и множественное число.
+            Порядок важен: более специфичные префиксы идут раньше.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.TokenRegex">
             <remarks>
             Pattern:<br/>
-            <code>(\\d+)\\s*(week|weak|day|hour|min|sec)</code><br/>
-            Options:<br/>
-            <code>RegexOptions.IgnoreCase</code><br/>
+            <code>\\d+|\\p{L}+</code><br/>
             Explanation:<br/>
             <code>
-            ○ 1st capture group.<br/>
+            ○ Match with 2 alternative expressions, atomically.<br/>
                 ○ Match a Unicode digit atomically at least once.<br/>
-            ○ Match a whitespace character atomically any number of times.<br/>
-            ○ 2nd capture group.<br/>
-                ○ Match with 5 alternative expressions, atomically.<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Ww].<br/>
-                        ○ Match with 2 alternative expressions, atomically.<br/>
-                            ○ Match a sequence of expressions.<br/>
-                                ○ Match a character in the set [Ee] exactly 2 times.<br/>
-                                ○ Match a character in the set [Kk\u212A].<br/>
-                            ○ Match a sequence of expressions.<br/>
-                                ○ Match a character in the set [Ee].<br/>
-                                ○ Match a character in the set [Aa].<br/>
-                                ○ Match a character in the set [Kk\u212A].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Dd].<br/>
-                        ○ Match a character in the set [Aa].<br/>
-                        ○ Match a character in the set [Yy].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Hh].<br/>
-                        ○ Match a character in the set [Oo].<br/>
-                        ○ Match a character in the set [Uu].<br/>
-                        ○ Match a character in the set [Rr].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Mm].<br/>
-                        ○ Match a character in the set [Ii].<br/>
-                        ○ Match a character in the set [Nn].<br/>
-                    ○ Match a sequence of expressions.<br/>
-                        ○ Match a character in the set [Ss].<br/>
-                        ○ Match a character in the set [Ee].<br/>
-                        ○ Match a character in the set [Cc].<br/>
+                ○ Match a Unicode letter atomically at least once.<br/>
             </code>
             </remarks>
         </member>
@@ -856,6 +844,19 @@
             <param name="origin">Опорный момент для относительной длительности.</param>
             <param name="fallback">Значение по умолчанию для пустой строки.</param>
             <param name="error">Текст ошибки разбора или <c>null</c>.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.TryParseDuration(System.String,System.DateTime,System.DateTime@)">
+            <summary>
+            Разбирает длительность: пары «[число] единица» в любом порядке; пропущенное
+            число означает 1 («year month weak» = 1 год 1 месяц 1 неделя). Неизвестные
+            слова пропускаются; нужна хотя бы одна распознанная единица.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.MapUnit(System.String)">
+            <summary>Определяет единицу по началу слова (склонения покрываются префиксом).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.Apply(SPI.Twamp.Server.Application.TimeSpec.Unit,System.Int32,System.Int32@,System.Int32@,System.TimeSpan@)">
+            <summary>Добавляет компонент длительности к накопителям.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.BackgroundServices.MaintenanceService">
             <summary>
@@ -2586,34 +2587,34 @@
             <param name="inputSpan">The text being scanned by the regular expression.</param>
             <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
         </member>
-        <member name="T:System.Text.RegularExpressions.Generated.DurationRegex_2">
-            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the DurationRegex method.</summary>
+        <member name="T:System.Text.RegularExpressions.Generated.TokenRegex_2">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the TokenRegex method.</summary>
         </member>
-        <member name="F:System.Text.RegularExpressions.Generated.DurationRegex_2.Instance">
+        <member name="F:System.Text.RegularExpressions.Generated.TokenRegex_2.Instance">
             <summary>Cached, thread-safe singleton instance.</summary>
         </member>
-        <member name="M:System.Text.RegularExpressions.Generated.DurationRegex_2.#ctor">
+        <member name="M:System.Text.RegularExpressions.Generated.TokenRegex_2.#ctor">
             <summary>Initializes the instance.</summary>
         </member>
-        <member name="T:System.Text.RegularExpressions.Generated.DurationRegex_2.RunnerFactory">
+        <member name="T:System.Text.RegularExpressions.Generated.TokenRegex_2.RunnerFactory">
             <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
         </member>
-        <member name="M:System.Text.RegularExpressions.Generated.DurationRegex_2.RunnerFactory.CreateInstance">
+        <member name="M:System.Text.RegularExpressions.Generated.TokenRegex_2.RunnerFactory.CreateInstance">
             <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
         </member>
-        <member name="T:System.Text.RegularExpressions.Generated.DurationRegex_2.RunnerFactory.Runner">
+        <member name="T:System.Text.RegularExpressions.Generated.TokenRegex_2.RunnerFactory.Runner">
             <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
         </member>
-        <member name="M:System.Text.RegularExpressions.Generated.DurationRegex_2.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+        <member name="M:System.Text.RegularExpressions.Generated.TokenRegex_2.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
             <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
             <param name="inputSpan">The text being scanned by the regular expression.</param>
         </member>
-        <member name="M:System.Text.RegularExpressions.Generated.DurationRegex_2.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+        <member name="M:System.Text.RegularExpressions.Generated.TokenRegex_2.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
             <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
             <param name="inputSpan">The text being scanned by the regular expression.</param>
             <returns>true if a possible match was found; false if no more matches are possible.</returns>
         </member>
-        <member name="M:System.Text.RegularExpressions.Generated.DurationRegex_2.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+        <member name="M:System.Text.RegularExpressions.Generated.TokenRegex_2.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
             <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
             <param name="inputSpan">The text being scanned by the regular expression.</param>
             <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
@@ -2918,6 +2919,9 @@
         <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfAnyDigit(System.ReadOnlySpan{System.Char})">
             <summary>Finds the next index of any character that matches a Unicode digit.</summary>
         </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfNonAsciiOrAny_41799F39AE16B3E92547BD6B358D2338224C43CFA2794046FDDF3D47BBB7B4C5(System.ReadOnlySpan{System.Char})">
+            <summary>Finds the next index of any character that matches a character in the set [\d\p{L}].</summary>
+        </member>
         <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfNonAsciiOrAny_827A6FFEB792B88B7D0333A27915E34D7CF5233262CB29EF9249DC54FCFBFAD6(System.ReadOnlySpan{System.Char})">
             <summary>Finds the next index of any character that matches a character in the set [\-.\d].</summary>
         </member>
@@ -2926,6 +2930,9 @@
         </member>
         <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_asciiExceptDigits">
             <summary>Supports searching for characters in or not in "\0\u0001\u0002\u0003\u0004\u0005\u0006\a\b\t\n\v\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&amp;'()*+,-./:;&lt;=&gt;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f".</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_asciiExceptLettersAndDigits">
+            <summary>Supports searching for characters in or not in "\0\u0001\u0002\u0003\u0004\u0005\u0006\a\b\t\n\v\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&amp;'()*+,-./:;&lt;=&gt;?@[\\]^_`{|}~\u007f".</summary>
         </member>
         <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_ascii_FFC1FFFFFEFFFFFFFF7DFBFFFF7DFBFF">
             <summary>Supports searching for characters in or not in "\0\u0001\u0002\u0003\u0004\u0005\u0006\a\b\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f!\"#$%&amp;'()*+,-./0123456789:;&lt;=&gt;?@ABCDEFGHJKLMNPQSTUVWXYZ[\\]^_`abcdefghjklmnpqstuvwxyz{|}~\u007f".</summary>
