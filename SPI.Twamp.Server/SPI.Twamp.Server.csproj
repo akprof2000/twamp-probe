@@ -31,9 +31,12 @@
 
   </ItemGroup>
 
+  <!-- Отладочная заглушка UploadCsv: нужна в выводе сборки для DEBUG-запуска,
+       но в дистрибутив (publish) не попадает. -->
   <ItemGroup>
     <None Update="Base test.csv">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 

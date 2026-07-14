@@ -31,4 +31,11 @@
     <Content Include="twampy\**\*.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Runtime-файлы состояния (реестр задач и очередь недоставленных результатов)
+       не должны попадать в дистрибутив: свежая установка обязана стартовать чистой. -->
+  <ItemGroup>
+    <Content Remove="TaskInfo.json;JobResult.json" />
+    <None Include="TaskInfo.json;JobResult.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>

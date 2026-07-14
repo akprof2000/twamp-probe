@@ -1,0 +1,85 @@
+# Сборка релизов по тегу v* (или вручную): четыре архива для Linux x64 —
+# сервер и проба, каждый в двух вариантах:
+#   * framework — маленький дистрибутив, требует установленного .NET Runtime на хосте;
+#   * selfcontained — самодостаточный (один исполняемый файл со всеми библиотеками
+#     плюс конфиги/twampy/wwwroot рядом): скопировал папку — и запустил, ничего
+#     дополнительно ставить не нужно.
+# Каждый архив — это упакованная папка публикации целиком.
+name: release
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # создание релиза и загрузка архивов
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Установка .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Юнит-тесты
+        run: dotnet test SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release
+
+      - name: Публикация 4 вариантов (linux-x64)
+        run: |
+          set -e
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" = "tag" ] || VERSION="manual-${GITHUB_SHA::8}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+          publish_one () {
+            local proj="$1" name="$2" variant="$3"; shift 3
+            local out="publish/${name}-${variant}"
+            dotnet publish "$proj" -c Release -r linux-x64 -o "$out" "$@"
+            # Папка публикации целиком уходит в архив с сохранением прав на запуск.
+            tar -C "$out" -czf "publish/${name}-${VERSION}-linux-x64-${variant}.tar.gz" .
+          }
+
+          # Маленькие сборки: без библиотек .NET, на хосте нужен установленный .NET 10 Runtime (ASP.NET Core).
+          publish_one SPI.Twamp.Server/SPI.Twamp.Server.csproj twamp-server framework --self-contained false
+          publish_one SPI.TWamp.Probe/SPI.TWamp.Probe.csproj  twamp-probe  framework --self-contained false
+
+          # Самодостаточные сборки: один исполняемый файл, .NET не требуется.
+          publish_one SPI.Twamp.Server/SPI.Twamp.Server.csproj twamp-server selfcontained \
+            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          publish_one SPI.TWamp.Probe/SPI.TWamp.Probe.csproj  twamp-probe  selfcontained \
+            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+
+          ls -lh publish/*.tar.gz
+
+      # Ручной запуск без тега: архивы доступны как артефакты workflow.
+      - name: Артефакты (ручной запуск)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: twamp-${{ env.VERSION }}-linux-x64
+          path: publish/*.tar.gz
+          retention-days: 14
+
+      # Запуск по тегу: создаётся GitHub Release с четырьмя архивами.
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/*.tar.gz
+          generate_release_notes: true
+          body: |
+            Четыре сборки для Linux x64 (в каждом архиве — папка приложения целиком):
+
+            | Архив | Что это | Требования на хосте |
+            |---|---|---|
+            | `twamp-server-*-framework.tar.gz` | сервер, маленький | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный | нет — распаковал и запустил |
+            | `twamp-probe-*-framework.tar.gz` | проба, маленькая | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-probe-*-selfcontained.tar.gz` | проба, самодостаточная | нет; для режима TWampy — Python 3.8+ |
