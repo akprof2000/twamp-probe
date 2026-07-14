@@ -227,9 +227,8 @@ sequenceDiagram
 
 ```mermaid
 flowchart TB
-    cron["⏰ Сработал cron задачи"] --> disp{"Диспетчер:<br/>есть свободный воркер?"}
-    disp -- "нет — ждём в очереди" --> disp
-    disp -- "да" --> start{"Процесс зонда<br/>запустился?"}
+    cron["⏰ Сработал cron задачи"] --> queue0["Очередь диспетчера —<br/>ожидание свободного воркера"]
+    queue0 --> start{"Процесс зонда<br/>запустился?"}
     start -- "нет" --> failed["❌ StartFailed<br/>утилита не найдена"]
     start -- "да" --> wait{"Дождались завершения<br/>за TimeoutSec?"}
     wait -- "нет" --> killed["⏱ TimedOut<br/>процесс убит (Kill)"]
