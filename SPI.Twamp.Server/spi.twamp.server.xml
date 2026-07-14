@@ -805,6 +805,9 @@
             «2 года 1 неделя день». Единицы — английские (year/month/week/day/hour/min/sec,
             в т.ч. опечатка «weak») и русские во всех склонениях (год/года/лет, месяц/месяца/месяцев,
             неделя/недели/недель, день/дня/дней, час/часа/часов, минута/минут, секунда/секунд).
+            Поддерживается компактная запись одиночными буквами, в том числе слитная:
+            «1y2mD», «2Г3М1Д», «ГмД», «2д», «м д» (y/г — год, m/м — месяц, w/н — неделя,
+            d/д — день, h/ч — час, s/с — секунда; регистр не важен).
             Годы и месяцы применяются календарно (AddYears/AddMonths), а не как фиксированное число дней.
             </para>
             </summary>
@@ -819,6 +822,14 @@
             «день» («ден»), «дня|дней» («дн»), «час|часа|часов», «минута|минут|мин»,
             «секунда|секунд|сек»; английские — единственное и множественное число.
             Порядок важен: более специфичные префиксы идут раньше.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.TimeSpec.SingleLetters">
+            <summary>
+            Одиночные буквы компактного формата («1y2mD», «2Г3М1Д», «м д»):
+            y/г — год, m/м — месяц, w/н — неделя, d/д — день, h/ч — час, s/с — секунда.
+            Минуты в компактной записи не участвуют (буква «m/м» занята месяцем) — для них
+            есть «min»/«мин».
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TimeSpec.TokenRegex">
@@ -854,6 +865,13 @@
         </member>
         <member name="M:SPI.Twamp.Server.Application.TimeSpec.MapUnit(System.String)">
             <summary>Определяет единицу по началу слова (склонения покрываются префиксом).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TimeSpec.TryApplyCompact(System.String,System.Int32,System.Int32@,System.Int32@,System.TimeSpan@)">
+            <summary>
+            Разбирает слитную компактную запись, где каждая буква — единица («mD», «ГмД»):
+            число перед словом относится к первой букве, остальные единицы считаются по 1.
+            Применяет компоненты только если распознано слово целиком, иначе не трогает накопители.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TimeSpec.Apply(SPI.Twamp.Server.Application.TimeSpec.Unit,System.Int32,System.Int32@,System.Int32@,System.TimeSpan@)">
             <summary>Добавляет компонент длительности к накопителям.</summary>

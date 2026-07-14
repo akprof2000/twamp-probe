@@ -14,6 +14,9 @@ namespace SPI.Twamp.Server.Application
     /// «2 года 1 неделя день». Единицы — английские (year/month/week/day/hour/min/sec,
     /// в т.ч. опечатка «weak») и русские во всех склонениях (год/года/лет, месяц/месяца/месяцев,
     /// неделя/недели/недель, день/дня/дней, час/часа/часов, минута/минут, секунда/секунд).
+    /// Поддерживается компактная запись одиночными буквами, в том числе слитная:
+    /// «1y2mD», «2Г3М1Д», «ГмД», «2д», «м д» (y/г — год, m/м — месяц, w/н — неделя,
+    /// d/д — день, h/ч — час, s/с — секунда; регистр не важен).
     /// Годы и месяцы применяются календарно (AddYears/AddMonths), а не как фиксированное число дней.
     /// </para>
     /// </summary>
@@ -48,6 +51,28 @@ namespace SPI.Twamp.Server.Application
             ("мин", Unit.Minute), ("min", Unit.Minute),
             ("сек", Unit.Second), ("sec", Unit.Second)
         ];
+
+        /// <summary>
+        /// Одиночные буквы компактного формата («1y2mD», «2Г3М1Д», «м д»):
+        /// y/г — год, m/м — месяц, w/н — неделя, d/д — день, h/ч — час, s/с — секунда.
+        /// Минуты в компактной записи не участвуют (буква «m/м» занята месяцем) — для них
+        /// есть «min»/«мин».
+        /// </summary>
+        private static readonly Dictionary<char, Unit> SingleLetters = new()
+        {
+            ['y'] = Unit.Year,
+            ['г'] = Unit.Year,
+            ['m'] = Unit.Month,
+            ['м'] = Unit.Month,
+            ['w'] = Unit.Week,
+            ['н'] = Unit.Week,
+            ['d'] = Unit.Day,
+            ['д'] = Unit.Day,
+            ['h'] = Unit.Hour,
+            ['ч'] = Unit.Hour,
+            ['s'] = Unit.Second,
+            ['с'] = Unit.Second
+        };
 
         /// <summary>Лексема длительности: число либо слово (латиница/кириллица).</summary>
         [GeneratedRegex(@"\d+|\p{L}+")]
@@ -117,15 +142,24 @@ namespace SPI.Twamp.Server.Application
                     continue;
                 }
 
-                Unit? unit = MapUnit(token.Value.ToLowerInvariant());
-                if (unit is null)
+                string word = token.Value.ToLowerInvariant();
+                Unit? unit = MapUnit(word);
+                if (unit is not null)
                 {
-                    continue; // связки вроде «и» просто пропускаем
+                    Apply(unit.Value, amount ?? 1, ref years, ref months, ref offset);
+                    recognized = true;
+                    amount = null;
+                    continue;
                 }
 
-                Apply(unit.Value, amount ?? 1, ref years, ref months, ref offset);
-                recognized = true;
-                amount = null;
+                // Слитная компактная запись «mD»/«ГмД»: каждая буква — единица;
+                // ожидающее число относится к первой букве, остальные считаются по 1.
+                if (TryApplyCompact(word, amount ?? 1, ref years, ref months, ref offset))
+                {
+                    recognized = true;
+                    amount = null;
+                }
+                // иначе — связка вроде «и», просто пропускаем
             }
 
             // Годы и месяцы — календарно от опорного момента, остальное — точным смещением.
@@ -136,6 +170,12 @@ namespace SPI.Twamp.Server.Application
         /// <summary>Определяет единицу по началу слова (склонения покрываются префиксом).</summary>
         private static Unit? MapUnit(string word)
         {
+            // Одиночная буква — компактный формат («2д», «м», «1y»).
+            if (word.Length == 1)
+            {
+                return SingleLetters.TryGetValue(word[0], out Unit single) ? single : null;
+            }
+
             // «лет» (2 года 5 лет) не начинается с «год» — отдельный случай.
             if (word == "лет")
             {
@@ -150,6 +190,29 @@ namespace SPI.Twamp.Server.Application
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// Разбирает слитную компактную запись, где каждая буква — единица («mD», «ГмД»):
+        /// число перед словом относится к первой букве, остальные единицы считаются по 1.
+        /// Применяет компоненты только если распознано слово целиком, иначе не трогает накопители.
+        /// </summary>
+        private static bool TryApplyCompact(string word, int firstAmount, ref int years, ref int months, ref TimeSpan offset)
+        {
+            // Сначала валидация целиком: «недождь» не должен частично засчитаться.
+            foreach (char letter in word)
+            {
+                if (!SingleLetters.ContainsKey(letter))
+                {
+                    return false;
+                }
+            }
+
+            for (int i = 0; i < word.Length; i++)
+            {
+                Apply(SingleLetters[word[i]], i == 0 ? firstAmount : 1, ref years, ref months, ref offset);
+            }
+            return true;
         }
 
         /// <summary>Добавляет компонент длительности к накопителям.</summary>

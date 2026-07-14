@@ -139,5 +139,47 @@ namespace SPI.Twamp.Tests
             Assert.Null(error);
             Assert.Equal(Origin.AddDays(17), result);
         }
+
+        [Theory(DisplayName = "Компактная запись: одиночные буквы, в том числе слитно")]
+        [InlineData("1y2mD", 1, 2, 1)]  // 1 год 2 месяца 1 день
+        [InlineData("2Г3М1Д", 2, 3, 1)] // русские буквы с числами слитно
+        [InlineData("ГмД", 1, 1, 1)]    // без чисел — по единице, регистр не важен
+        [InlineData("м д", 0, 1, 1)]    // месяц и день по отдельности
+        public void Duration_Compact(string text, int years, int months, int days)
+        {
+            DateTime result = TimeSpec.Resolve(text, Origin, Origin, out string? error);
+
+            Assert.Null(error);
+            Assert.Equal(Origin.AddYears(years).AddMonths(months).AddDays(days), result);
+        }
+
+        [Fact(DisplayName = "Компактная запись: «2д» — два дня")]
+        public void Duration_Compact_TwoDays()
+        {
+            DateTime result = TimeSpec.Resolve("2д", Origin, Origin, out string? error);
+
+            Assert.Null(error);
+            Assert.Equal(Origin.AddDays(2), result);
+        }
+
+        [Fact(DisplayName = "Компактная запись: недели и часы «1н2ч»")]
+        public void Duration_Compact_WeekHour()
+        {
+            DateTime result = TimeSpec.Resolve("1н2ч", Origin, Origin, out string? error);
+
+            Assert.Null(error);
+            Assert.Equal(Origin.AddDays(7).AddHours(2), result);
+        }
+
+        [Fact(DisplayName = "Слово из неизвестных букв не засчитывается частично")]
+        public void Duration_UnknownWord_NotPartiallyApplied()
+        {
+            // «недождь» начинается с «д»-подобных букв, но целиком единицей не является.
+            DateTime fallback = Origin.AddDays(1);
+            DateTime result = TimeSpec.Resolve("дождь", Origin, fallback, out string? error);
+
+            Assert.NotNull(error);
+            Assert.Equal(fallback, result);
+        }
     }
 }
