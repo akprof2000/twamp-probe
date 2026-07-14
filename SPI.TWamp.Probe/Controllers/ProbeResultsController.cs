@@ -30,7 +30,9 @@ namespace SPI.Twamp.Probe.Controllers
         [HttpGet("[action]")]
         public async Task<ActionResult<ResultBatch>> CheckData(CancellationToken cancellationToken)
         {
-            logger.Info("Запрос результатов зондирования");
+            // Debug, а не Info: длинный опрос идёт непрерывно, и на каждый цикл
+            // не должно приходиться записи в файловый лог.
+            logger.Debug("Запрос результатов зондирования");
             ResultBatch batch = await resultStore.TakeBatchAsync(TimeSpan.FromSeconds(30), cancellationToken);
             return Ok(batch);
         }

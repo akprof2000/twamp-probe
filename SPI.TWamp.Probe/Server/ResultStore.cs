@@ -30,8 +30,13 @@ namespace SPI.Twamp.Probe.Server
         /// <summary>Файл для сохранения ещё не доставленных результатов между перезапусками.</summary>
         private const string PersistenceFileName = "JobResult.json";
 
-        /// <summary>Интервал фонового сохранения снимка очереди на диск.</summary>
-        private static readonly TimeSpan PersistInterval = TimeSpan.FromSeconds(1);
+        /// <summary>
+        /// Интервал фонового сохранения снимка очереди на диск (настройка
+        /// «Probe:PersistIntervalSec»). Диск — единственная точка записи пробы,
+        /// и каждый флаш переписывает файл целиком, поэтому интервал напрямую
+        /// определяет дисковую нагрузку. Потеря при аварии — максимум за интервал.
+        /// </summary>
+        private readonly TimeSpan _persistInterval;
 
         private readonly Logger _logger;
 
@@ -71,12 +76,15 @@ namespace SPI.Twamp.Probe.Server
         private volatile bool _dirty;
         private volatile bool _disposed;
 
-        /// <summary>Создаёт хранилище и читает лимит очереди из конфигурации.</summary>
+        /// <summary>Создаёт хранилище и читает лимит очереди и интервал сохранения из конфигурации.</summary>
         public ResultStore(Logger logger, IConfiguration configuration)
         {
             _logger = logger;
             int limit = configuration["Probe:MaxPendingResults"].ConvertTo(100_000);
             _maxPending = limit > 0 ? limit : 100_000;
+
+            int persistSec = configuration["Probe:PersistIntervalSec"].ConvertTo(5);
+            _persistInterval = TimeSpan.FromSeconds(persistSec > 0 ? persistSec : 5);
         }
 
         /// <inheritdoc/>
@@ -154,8 +162,8 @@ namespace SPI.Twamp.Probe.Server
                     _inFlight = batch;
                 }
 
-                _dirty = true;
-                await FlushToDiskAsync();
+                // Флаш на диск здесь не нужен: состав сохраняемых данных не изменился —
+                // элементы лишь перешли из очереди в «в полёте», а снимок объединяет и то и другое.
                 return new ResultBatch { BatchId = batchId, Items = [.. batch] };
             }
             finally
@@ -165,21 +173,23 @@ namespace SPI.Twamp.Probe.Server
         }
 
         /// <inheritdoc/>
-        public async Task<bool> ConfirmAsync(Guid batchId)
+        public Task<bool> ConfirmAsync(Guid batchId)
         {
             lock (_batchLock)
             {
                 if (_inFlight is null || _inFlightId != batchId)
                 {
-                    return false; // пачка неизвестна или уже подтверждена
+                    return Task.FromResult(false); // пачка неизвестна или уже подтверждена
                 }
                 _inFlight = null;
                 _inFlightId = Guid.Empty;
             }
 
+            // Немедленный флаш не нужен: изменение подхватит фоновый таймер. Худший случай
+            // при аварии в этом окне — повторная выдача уже записанной пачки, которую
+            // сервер отбросит по ResultId (доставка и так «минимум один раз»).
             _dirty = true;
-            await FlushToDiskAsync();
-            return true;
+            return Task.FromResult(true);
         }
 
         /// <inheritdoc/>
@@ -232,22 +242,56 @@ namespace SPI.Twamp.Probe.Server
                 return;
             }
 
-            Timer timer = new(async _ => await FlushToDiskAsync(), null, PersistInterval, PersistInterval);
+            // Одноразовый запуск с перевзводом после каждого флаша: пауза до следующей
+            // записи зависит от размера снимка (см. NextFlushDelay) — большая очередь
+            // не должна переписываться на диск слишком часто.
+            Timer timer = new(async _ => await PersistTickAsync(), null, _persistInterval, Timeout.InfiniteTimeSpan);
             if (Interlocked.CompareExchange(ref _persistTimer, timer, null) != null)
             {
                 timer.Dispose();
             }
         }
 
+        /// <summary>Тик таймера: сохраняет снимок и перевзводит таймер с адаптивной паузой.</summary>
+        private async Task PersistTickAsync()
+        {
+            long bytesWritten = await FlushToDiskAsync();
+            try
+            {
+                if (!_disposed)
+                {
+                    _persistTimer?.Change(NextFlushDelay(bytesWritten), Timeout.InfiniteTimeSpan);
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Гонка с Dispose при остановке службы — таймер уже освобождён, перевзвод не нужен.
+            }
+        }
+
+        /// <summary>
+        /// Пауза до следующего сохранения. Обычно — настроенный интервал, но когда очередь
+        /// разрослась (сервер недоступен) и снимок большой, пауза растягивается так, чтобы
+        /// средняя скорость записи снимков не превышала ~10 МБ/с: гигантский файл не
+        /// переписывается каждые несколько секунд впустую.
+        /// </summary>
+        private TimeSpan NextFlushDelay(long bytesWritten)
+        {
+            const double MaxAverageWriteBytesPerSecond = 10 * 1024 * 1024;
+            TimeSpan bySize = TimeSpan.FromSeconds(bytesWritten / MaxAverageWriteBytesPerSecond);
+            return bySize > _persistInterval ? bySize : _persistInterval;
+        }
+
         /// <summary>
         /// Сохраняет на диск снимок недоставленных результатов: неподтверждённую пачку
         /// и очередь. После перезапуска всё возвращается в очередь на выдачу.
         /// </summary>
-        private async Task FlushToDiskAsync()
+        /// <returns>Размер записанного снимка в байтах (0 — запись не потребовалась).</returns>
+        private async Task<long> FlushToDiskAsync()
         {
             if (!_dirty || _disposed)
             {
-                return;
+                return 0;
             }
 
             await _fileLock.WaitAsync();
@@ -268,15 +312,23 @@ namespace SPI.Twamp.Probe.Server
                     {
                         File.Delete(PersistenceFileName);
                     }
-                    return;
+                    return 0;
                 }
 
-                await File.WriteAllTextAsync(PersistenceFileName, JsonConvert.SerializeObject(snapshot));
+                // Атомарная замена через временный файл: при аварии посреди записи
+                // предыдущий снимок остаётся целым (интервал сохранения теперь больше,
+                // и битый JSON стоил бы всех недоставленных результатов).
+                string tempFileName = PersistenceFileName + ".tmp";
+                string json = JsonConvert.SerializeObject(snapshot);
+                await File.WriteAllTextAsync(tempFileName, json);
+                File.Move(tempFileName, PersistenceFileName, overwrite: true);
+                return json.Length;
             }
             catch (Exception ex)
             {
                 _dirty = true; // повторим попытку на следующем тике таймера
                 _logger.Error(ex, "Ошибка сохранения результатов в {File}", PersistenceFileName);
+                return 0;
             }
             finally
             {
@@ -284,15 +336,29 @@ namespace SPI.Twamp.Probe.Server
             }
         }
 
-        /// <summary>Освобождает таймер и примитивы синхронизации.</summary>
+        /// <summary>
+        /// Останавливает таймер, делает финальный снимок на диск (чтобы не потерять
+        /// результаты последних секунд при штатной остановке) и освобождает примитивы.
+        /// </summary>
         public void Dispose()
         {
             if (_disposed)
             {
                 return;
             }
-            _disposed = true;
             _persistTimer?.Dispose();
+
+            // Финальный флаш до выставления _disposed — иначе FlushToDiskAsync откажется писать.
+            try
+            {
+                FlushToDiskAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Не удалось сохранить результаты при остановке");
+            }
+
+            _disposed = true;
             _fileLock.Dispose();
             _takeLock.Dispose();
         }

@@ -701,8 +701,13 @@
         <member name="F:SPI.Twamp.Probe.Server.ResultStore.PersistenceFileName">
             <summary>Файл для сохранения ещё не доставленных результатов между перезапусками.</summary>
         </member>
-        <member name="F:SPI.Twamp.Probe.Server.ResultStore.PersistInterval">
-            <summary>Интервал фонового сохранения снимка очереди на диск.</summary>
+        <member name="F:SPI.Twamp.Probe.Server.ResultStore._persistInterval">
+            <summary>
+            Интервал фонового сохранения снимка очереди на диск (настройка
+            «Probe:PersistIntervalSec»). Диск — единственная точка записи пробы,
+            и каждый флаш переписывает файл целиком, поэтому интервал напрямую
+            определяет дисковую нагрузку. Потеря при аварии — максимум за интервал.
+            </summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ResultStore._maxPending">
             <summary>Максимум результатов в очереди; сверх лимита вытесняются самые старые.</summary>
@@ -732,7 +737,7 @@
             <summary>Признак наличия несохранённых изменений (снижает лишние записи на диск).</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration)">
-            <summary>Создаёт хранилище и читает лимит очереди из конфигурации.</summary>
+            <summary>Создаёт хранилище и читает лимит очереди и интервал сохранения из конфигурации.</summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.Add(SPI.Twamp.Probe.Contracts.ActionData)">
             <inheritdoc/>
@@ -752,14 +757,29 @@
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.EnsurePersistTimer">
             <summary>Запускает фоновый таймер сохранения при первом появлении данных.</summary>
         </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.PersistTickAsync">
+            <summary>Тик таймера: сохраняет снимок и перевзводит таймер с адаптивной паузой.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.NextFlushDelay(System.Int64)">
+            <summary>
+            Пауза до следующего сохранения. Обычно — настроенный интервал, но когда очередь
+            разрослась (сервер недоступен) и снимок большой, пауза растягивается так, чтобы
+            средняя скорость записи снимков не превышала ~10 МБ/с: гигантский файл не
+            переписывается каждые несколько секунд впустую.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.FlushToDiskAsync">
             <summary>
             Сохраняет на диск снимок недоставленных результатов: неподтверждённую пачку
             и очередь. После перезапуска всё возвращается в очередь на выдачу.
             </summary>
+            <returns>Размер записанного снимка в байтах (0 — запись не потребовалась).</returns>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.Dispose">
-            <summary>Освобождает таймер и примитивы синхронизации.</summary>
+            <summary>
+            Останавливает таймер, делает финальный снимок на диск (чтобы не потерять
+            результаты последних секунд при штатной остановке) и освобождает примитивы.
+            </summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Server.TaskRunRegistry">
             <summary>
