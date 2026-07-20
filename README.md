@@ -67,7 +67,7 @@ flowchart TB
         poller --> db
     end
 
-    subgraph probeN["SPI.TWamp.Probe — проба, порт 443 (на каждой площадке)"]
+    subgraph probeN["SPI.TWamp.Probe — проба, порт 8443 (на каждой площадке)"]
         direction TB
         worker["Реестр задач + cron-планировщик"]
         pool["Пул воркеров<br/>(Probe:MaxParallel)"]
@@ -153,7 +153,7 @@ sequenceDiagram
     participant S as Сервер
     participant P as Проба
 
-    Op->>S: «Опросить пробу» (адрес http://проба:443)
+    Op->>S: «Опросить пробу» (адрес http://проба:8443)
     S->>P: CheckIn
     P-->>S: паспорт: имя хоста, IP, MAC, версия сборки
     S-->>Op: проба появилась в списке неопознанных
@@ -315,7 +315,7 @@ dotnet publish SPI.Twamp.Server -c Release -r linux-x64 --self-contained true
 ### Запуск
 
 ```bash
-# Проба (на измерительной площадке), по умолчанию порт 443
+# Проба (на измерительной площадке), по умолчанию порт 8443
 dotnet SPI.TWamp.Probe.dll
 
 # Сервер (в центре), по умолчанию порт 9000
@@ -329,7 +329,7 @@ dotnet SPI.Twamp.Server.dll
 Схема процесса — [выше](#подключение-новой-пробы). Кратко:
 
 1. Откройте веб-интерфейс сервера: `http://сервер:9000/`.
-2. На вкладке **«Статус проб»** введите адрес пробы (`http://адрес-пробы:443`) и нажмите **«Опросить пробу»** — проба появится в списке неопознанных.
+2. На вкладке **«Статус проб»** введите адрес пробы (`http://адрес-пробы:8443`) и нажмите **«Опросить пробу»** — проба появится в списке неопознанных.
 3. Нажмите **«Подтвердить»** — сервер запустит опрос результатов и синхронизацию задач.
 
 После этого можно создавать задачи: проба получит их автоматически.
@@ -359,7 +359,7 @@ dotnet SPI.Twamp.Server.dll
 
 | Ключ | По умолчанию | Назначение |
 |---|---|---|
-| `Urls` | `http://0.0.0.0:443` | адрес и порт HTTP |
+| `Urls` | `http://0.0.0.0:8443` | адрес и порт HTTP |
 | `Auth:ApiKey` | *(пусто)* | тот же ключ, что на сервере |
 | `Probe:MaxParallel` | `1024` | **сколько процессов зонда работает одновременно** (пул воркеров) |
 | `Probe:MaxPendingResults` | `100000` | лимит очереди результатов при недоступности сервера (старые вытесняются) |
@@ -500,8 +500,8 @@ Swagger доступен по `/swagger` на обоих приложениях 
 
 ```csv
 Name;Probe;Request;Type;Repeats;Circles;Pause;Cron;Start;End;Mode;TimeOut
-d46;http://10.0.0.5:443;-c 300 -i 1 -D 46 -s 224;Scheduler;1;1;0;*/6 * * * *;;2 week 3 day;TWamp;30
-fast;http://10.0.0.5:443;-n 1;Repeater;1;1;0;;;1 day;WinPing;10
+d46;http://10.0.0.5:8443;-c 300 -i 1 -D 46 -s 224;Scheduler;1;1;0;*/6 * * * *;;2 week 3 day;TWamp;30
+fast;http://10.0.0.5:8443;-n 1;Repeater;1;1;0;;;1 day;WinPing;10
 ```
 
 | Колонка | Обязательна | Описание |
@@ -546,7 +546,7 @@ ADCTO24G|IP:10.23.179.54;4;HUAWEI;…;10.23.179.54;…;4
 
 ```csv
 Name;HostName;Ip;Probe;Request;Type;Repeats;Circles;Pause;Cron;Start;End;Mode;Timeout
-231101-10.106.23.33-d46;;10.106.23.33;http://10.0.0.5:443;-c 300 -i 1;Scheduler;1;1;0;*/6 * * * *;08.07.2026 10:00;25.07.2026 12:00;TWamp;30
+231101-10.106.23.33-d46;;10.106.23.33;http://10.0.0.5:8443;-c 300 -i 1;Scheduler;1;1;0;*/6 * * * *;08.07.2026 10:00;25.07.2026 12:00;TWamp;30
 ```
 
 Даты — в формате `dd.MM.yyyy HH:mm` (настраивается параметром запроса `formatDateTime`).
@@ -579,7 +579,7 @@ CSV с колонками: `Title; Id; Mode; CallLine; FromHost; FromPort; ToHos
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| POST | `/api/userinterface/checkin?client=http://проба:443` | опросить пробу (регистрация) |
+| POST | `/api/userinterface/checkin?client=http://проба:8443` | опросить пробу (регистрация) |
 | GET | `/api/userinterface/listnotidentifyclients` | пробы, ожидающие подтверждения |
 | POST | `/api/userinterface/setinfoclient` | подтвердить пробу (запускает опрос) |
 | GET | `/api/userinterface/listclients` | подтверждённые пробы |
