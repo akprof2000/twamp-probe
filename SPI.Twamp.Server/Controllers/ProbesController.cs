@@ -164,9 +164,20 @@ namespace SPI.Twamp.Server.Controllers
             IReadOnlyDictionary<string, ProbePollState> states = _probeStatus.GetStates();
             IReadOnlyList<TaskInfo> allTasks = await _taskService.GetAllAsync();
 
+            // Считаем задачи по пробам за один проход (O(задачи)), а не перебором всех
+            // задач для каждой пробы (O(пробы × задачи)) — важно при сотнях проб и
+            // десятках тысяч задач, тем более что статус перечитывается по событиям.
+            Dictionary<string, (int Active, int Deleted)> taskCounts = [];
+            foreach (TaskInfo task in allTasks)
+            {
+                (int active, int deleted) = taskCounts.GetValueOrDefault(task.RequestInfo);
+                taskCounts[task.RequestInfo] = task.Delete ? (active, deleted + 1) : (active + 1, deleted);
+            }
+
             var status = clients.Select(c =>
             {
                 ProbePollState? state = states.TryGetValue(c.RequestInfo, out ProbePollState? s) ? s : null;
+                (int activeTasks, int deletedTasks) = taskCounts.GetValueOrDefault(c.RequestInfo);
                 return new
                 {
                     c.RequestInfo,
@@ -179,8 +190,8 @@ namespace SPI.Twamp.Server.Controllers
                     LastErrorMessage = state?.LastErrorMessage,
                     BackoffSeconds = state?.BackoffSeconds ?? 0,
                     TotalResults = state?.TotalResults ?? 0,
-                    ActiveTasks = allTasks.Count(t => t.RequestInfo == c.RequestInfo && !t.Delete),
-                    DeletedTasks = allTasks.Count(t => t.RequestInfo == c.RequestInfo && t.Delete)
+                    ActiveTasks = activeTasks,
+                    DeletedTasks = deletedTasks
                 };
             });
 

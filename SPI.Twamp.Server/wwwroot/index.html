@@ -49,7 +49,16 @@
 <section id="tab-status" class="active">
   <div class="card">
     <h2>Пробы <button class="act" style="float:right" onclick="withBusy(this, loadStatus)">Обновить</button></h2>
-    <div class="scroll"><table id="tblStatus">
+    <div class="row">
+      <input id="fProbe2" type="text" placeholder="фильтр: адрес / имя / хост / версия" style="width:280px" oninput="renderProbes()">
+      <select id="fProbeLink" onchange="renderProbes()">
+        <option value="">связь: все</option>
+        <option value="ok">в порядке</option>
+        <option value="down">нет связи</option>
+      </select>
+      <span id="probeCount" style="color:var(--mut)"></span>
+    </div>
+    <div class="scroll" style="max-height:60vh;overflow-y:auto"><table id="tblStatus">
       <thead><tr><th>Проба</th><th>Имя</th><th>Хост</th><th>Версия</th><th>Связь</th><th>Последний ответ</th><th>Ошибка</th><th>Задач</th><th>Результатов</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
@@ -296,17 +305,12 @@ async function loadProbeTasks(btn, probe) {
 }
 
 // --- Статус ---
+let probesCache = []; // последний ответ probestatus — фильтруется на клиенте без перезапроса
+
 async function loadStatus() {
   try {
-    const data = await jget('probestatus');
-    $('#tblStatus tbody').innerHTML = data.map(p => `<tr>
-      <td class="wrap">${p.requestInfo}</td><td>${p.name||''}</td><td>${p.hostName||''}</td><td>${p.version||'—'}</td>
-      <td>${p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
-      <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
-      <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
-      <td><button class="act" onclick="loadProbeTasks(this,'${p.requestInfo.replace(/'/g,"\\'")}')">задачи</button>
-          <button class="act" onclick="renameProbe('${p.requestInfo.replace(/'/g,"\\'")}','${(p.name||'').replace(/'/g,"\\'")}')">имя</button>
-          <button class="act" onclick="removeProbe('${p.requestInfo.replace(/'/g,"\\'")}')">удалить</button></td></tr>`).join('');
+    probesCache = await jget('probestatus');
+    renderProbes();
     $('#msgStatus').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
     const un = await jget('listnotidentifyclients');
     $('#tblUnident tbody').innerHTML = un.map(u => `<tr>
@@ -314,6 +318,33 @@ async function loadStatus() {
       <td><button class="act" onclick="approve('${u.requestInfo||''}','${u.hostName||''}','${u.ipAddress||''}')">Подтвердить</button>
           <button class="act" onclick="rejectProbe('${(u.requestInfo||'').replace(/'/g,"\\'")}')">Отклонить</button></td></tr>`).join('');
   } catch (e) { $('#msgStatus').textContent = 'Ошибка: ' + e.message; }
+}
+
+// Отрисовка списка проб из кэша с учётом фильтров (текст + состояние связи).
+// Клиентская фильтрация мгновенна и не дёргает сервер при каждом наборе символа;
+// список скроллится внутри контейнера (max-height) — сотни проб не ломают вёрстку.
+function renderProbes() {
+  const q = $('#fProbe2').value.trim().toLowerCase();
+  const link = $('#fProbeLink').value;
+  const rows = probesCache.filter(p => {
+    if (link === 'ok' && p.backoffSeconds) return false;
+    if (link === 'down' && !p.backoffSeconds) return false;
+    if (!q) return true;
+    return [p.requestInfo, p.name, p.hostName, p.version].some(v => (v || '').toLowerCase().includes(q));
+  });
+  const esc = s => (s || '').replace(/'/g, "\\'");
+  $('#tblStatus tbody').innerHTML = rows.map(p => `<tr>
+    <td class="wrap">${p.requestInfo}</td><td>${p.name||''}</td><td>${p.hostName||''}</td><td>${p.version||'—'}</td>
+    <td>${p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
+    <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
+    <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
+    <td><button class="act" onclick="loadProbeTasks(this,'${esc(p.requestInfo)}')">задачи</button>
+        <button class="act" onclick="renameProbe('${esc(p.requestInfo)}','${esc(p.name)}')">имя</button>
+        <button class="act" onclick="removeProbe('${esc(p.requestInfo)}')">удалить</button></td></tr>`).join('')
+    || `<tr><td colspan="10">${probesCache.length ? 'ничего не найдено по фильтру' : 'пробы не подключены'}</td></tr>`;
+  $('#probeCount').textContent = (q || link)
+    ? `показано ${rows.length} из ${probesCache.length}`
+    : `всего проб: ${probesCache.length}`;
 }
 // Переименование пробы: SetInfoClient обновляет существующую запись по адресу.
 async function renameProbe(requestInfo, currentName) {
