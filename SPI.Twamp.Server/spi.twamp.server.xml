@@ -100,6 +100,15 @@
         <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.RemoveIdentifyAsync(System.String)">
             <summary>Удаляет пробу из списка неопознанных (например, после подтверждения).</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.AddCleanupAsync(SPI.Twamp.Server.Contracts.PendingProbeCleanup)">
+            <summary>Регистрирует отложенную очистку удалённой пробы (перезаписывает существующую).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.GetCleanupsAsync">
+            <summary>Возвращает все отложенные очистки удалённых проб.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.RemoveCleanupAsync(System.String)">
+            <summary>Снимает отложенную очистку (выполнена или истёк срок ожидания).</summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IClientService">
             <summary>
             Прикладной сервис управления пробами (клиентами): регистрация, подтверждение,
@@ -462,6 +471,12 @@
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.RemoveAsync(System.Guid)">
             <summary>Окончательно удаляет задачу из БД (используется фоновой очисткой).</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskRepository.RemoveByRequestInfoAsync(System.String)">
+            <summary>
+            Окончательно удаляет из БД все задачи пробы (очистка после удаления пробы,
+            которая так и не вышла на связь). Возвращает идентификаторы удалённых задач.
+            </summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ITaskService">
             <summary>
             Прикладной сервис управления задачами: связывает хранилище задач с их
@@ -512,6 +527,13 @@
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.DeleteByRequestInfoAsync(System.String,System.Threading.CancellationToken)">
             <summary>Помечает удалёнными все задачи пробы и отправляет ей обновлённый список.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.PurgeByRequestInfoAsync(System.String)">
+            <summary>
+            Окончательно удаляет из БД все задачи пробы (очистка после удаления пробы,
+            не вышедшей на связь). Возвращает идентификаторы удалённых задач.
+            </summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)">
             <summary>
@@ -815,6 +837,9 @@
         <member name="M:SPI.Twamp.Server.Application.TaskService.DeleteByRequestInfoAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.PurgeByRequestInfoAsync(System.String)">
+            <inheritdoc/>
+        </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
@@ -983,6 +1008,13 @@
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._reconcileIntervalSeconds">
             <summary>Интервал фоновой сверки задач с пробами, секунд.</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._cleanupWaitHours">
+            <summary>
+            Сколько часов после удаления пробы ждать её появления, чтобы снять с неё
+            задания. По истечении срока отложенная очистка снимается, а задачи пробы
+            и кэш её результатов вычищаются на сервере.
+            </summary>
+        </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._pollers">
             <summary>
             Запущенные циклы опроса по адресу пробы — защита от повторного запуска.
@@ -1055,6 +1087,20 @@
             <summary>
             Фоновый цикл сверки: периодически приводит набор задач каждой пробы
             в соответствие с хранилищем (досылает недостающее, убирает устаревшее).
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ProcessCleanupsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Обрабатывает отложенные очистки удалённых проб: если проба доступна —
+            снимает с неё все задания и закрывает очистку; если проба не появилась
+            в течение «Probe:CleanupWaitHours» часов — снимает очистку и вычищает
+            её задачи и кэш результатов на сервере.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.TryClearProbeTasksAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Пытается снять с пробы все её задания (известные и самой пробе, и серверу).
+            Возвращает <c>false</c>, если проба недоступна.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ReconcileSafeAsync(System.String,System.Threading.CancellationToken)">
@@ -1192,6 +1238,26 @@
             <summary>
             Версия сборки пробы (для контроля устаревших проб после обновлений).
             </summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Contracts.PendingProbeCleanup">
+            <summary>
+            Отложенное задание «снять все задачи с удалённой пробы».
+            <para>
+            Создаётся при удалении пробы. Фоновый цикл пытается дотянуться до пробы и
+            отправить ей удаление всех заданий; если проба не появилась в течение
+            «Probe:CleanupWaitHours» часов — задание снимается, а задачи пробы и кэш
+            её результатов вычищаются на сервере.
+            </para>
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.PendingProbeCleanup.Id">
+            <summary>Идентификатор записи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.PendingProbeCleanup.RequestInfo">
+            <summary>Адрес удалённой пробы (RequestInfo).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.PendingProbeCleanup.DeletedAt">
+            <summary>Момент удаления пробы — от него отсчитывается срок ожидания.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.ProbeResultBatch">
             <summary>
@@ -1900,6 +1966,15 @@
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.AddIdentifyAsync(SPI.Twamp.Server.Contracts.Identify)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.AddCleanupAsync(SPI.Twamp.Server.Contracts.PendingProbeCleanup)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.GetCleanupsAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.RemoveCleanupAsync(System.String)">
+            <inheritdoc/>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.RemoveIdentifyAsync(System.String)">
             <inheritdoc/>
         </member>
@@ -1930,6 +2005,9 @@
         </member>
         <member name="P:SPI.Twamp.Server.Infrastructure.LiteDbContext.Stats">
             <summary>Коллекция разобранной статистики замеров.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.LiteDbContext.Cleanups">
+            <summary>Коллекция отложенных очисток удалённых проб.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.LiteDbContext.CheckpointAsync">
             <summary>
@@ -2031,6 +2109,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.RemoveAsync(System.Guid)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.TaskRepository.RemoveByRequestInfoAsync(System.String)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.TemplateRepository">

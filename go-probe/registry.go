@@ -37,16 +37,22 @@ type scheduledTask struct {
 	timer *time.Timer
 }
 
+// Enqueuer — приёмник задач на выполнение (реализуется диспетчером;
+// в тестах подменяется заглушкой).
+type Enqueuer interface {
+	Enqueue(task *TaskInfo)
+}
+
 // TaskRegistry — реестр задач по расписанию.
 type TaskRegistry struct {
 	mu         sync.Mutex
 	tasks      map[string]*scheduledTask
-	dispatcher *Dispatcher
+	dispatcher Enqueuer
 	registry   *RunRegistry
 }
 
 // NewTaskRegistry создаёт пустой реестр.
-func NewTaskRegistry(dispatcher *Dispatcher, registry *RunRegistry) *TaskRegistry {
+func NewTaskRegistry(dispatcher Enqueuer, registry *RunRegistry) *TaskRegistry {
 	return &TaskRegistry{tasks: map[string]*scheduledTask{}, dispatcher: dispatcher, registry: registry}
 }
 
@@ -171,6 +177,25 @@ func (r *TaskRegistry) KnownTaskIds() []string {
 		ids = []string{}
 	}
 	return ids
+}
+
+// ClearAll останавливает и удаляет ВСЕ задачи по расписанию вместе с файлом реестра.
+// Используется сторожем связи: сервер молчит дольше таймаута — проба считает себя
+// удалённой. Возвращает число остановленных задач.
+func (r *TaskRegistry) ClearAll() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	count := len(r.tasks)
+	for id, entry := range r.tasks {
+		if entry.timer != nil {
+			entry.timer.Stop()
+		}
+		delete(r.tasks, id)
+		r.registry.Remove(id)
+	}
+	_ = os.Remove(tasksFileName)
+	return count
 }
 
 // persist сохраняет реестр на диск; вызывается под mu.

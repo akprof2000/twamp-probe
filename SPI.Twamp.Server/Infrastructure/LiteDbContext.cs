@@ -40,6 +40,10 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <summary>Коллекция разобранной статистики замеров.</summary>
         public ILiteCollectionAsync<StatRecord> Stats => _db.GetCollection<StatRecord>("stats");
 
+        /// <summary>Коллекция отложенных очисток удалённых проб.</summary>
+        public ILiteCollectionAsync<PendingProbeCleanup> Cleanups =>
+            _db.GetCollection<PendingProbeCleanup>("probe_cleanups");
+
         /// <summary>
         /// Переносит накопленные изменения из WAL-журнала (файл «*-log.db») в основную
         /// базу и очищает журнал. Без периодического вызова журнал растёт бесконечно

@@ -193,6 +193,39 @@ namespace SPI.Twamp.Probe.Server
         }
 
         /// <inheritdoc/>
+        public async Task ClearAsync()
+        {
+            lock (_batchLock)
+            {
+                _inFlight = null;
+                _inFlightId = Guid.Empty;
+            }
+            while (_pending.TryDequeue(out _))
+            {
+                _ = Interlocked.Decrement(ref _pendingCount);
+            }
+
+            // Снимок на диске тоже удаляем — «удалённая» проба не должна хранить хвосты.
+            await _fileLock.WaitAsync();
+            try
+            {
+                _dirty = false;
+                if (File.Exists(PersistenceFileName))
+                {
+                    File.Delete(PersistenceFileName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Не удалось удалить файл результатов при очистке");
+            }
+            finally
+            {
+                _ = _fileLock.Release();
+            }
+        }
+
+        /// <inheritdoc/>
         public async Task LoadAsync(CancellationToken cancellationToken)
         {
             if (!File.Exists(PersistenceFileName))

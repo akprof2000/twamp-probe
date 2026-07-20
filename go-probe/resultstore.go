@@ -108,6 +108,18 @@ func (s *ResultStore) Confirm(batchId string) bool {
 	return true
 }
 
+// Clear полностью очищает накопленные результаты (очередь, неподтверждённую пачку
+// и файл на диске). Используется сторожем связи при «удалении» пробы.
+func (s *ResultStore) Clear() {
+	s.mu.Lock()
+	s.pending = nil
+	s.inFlight = nil
+	s.inFlightId = ""
+	s.dirty = false
+	s.mu.Unlock()
+	_ = os.Remove(resultsFileName)
+}
+
 // Load восстанавливает недоставленные результаты после перезапуска.
 func (s *ResultStore) Load() {
 	data, err := os.ReadFile(resultsFileName)

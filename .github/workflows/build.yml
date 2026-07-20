@@ -25,3 +25,30 @@ jobs:
 
       - name: Юнит-тесты
         run: dotnet test SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release --no-build
+
+  # Go-проба: статический анализ, юнит-тесты и сборка обоих таргетов.
+  go-probe:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Установка Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: go-probe/go.sum
+
+      - name: Проверка и тесты
+        working-directory: go-probe
+        run: |
+          test -z "$(gofmt -l .)" || { echo "gofmt: файлы не отформатированы"; gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+
+      - name: Сборка (linux + windows)
+        working-directory: go-probe
+        run: |
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build ./...
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...

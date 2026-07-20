@@ -42,6 +42,13 @@ namespace SPI.Twamp.Server.BackgroundServices
             configuration["Probe:ReconcileIntervalSec"].ConvertTo(30);
 
         /// <summary>
+        /// Сколько часов после удаления пробы ждать её появления, чтобы снять с неё
+        /// задания. По истечении срока отложенная очистка снимается, а задачи пробы
+        /// и кэш её результатов вычищаются на сервере.
+        /// </summary>
+        private readonly int _cleanupWaitHours = configuration["Probe:CleanupWaitHours"].ConvertTo(24);
+
+        /// <summary>
         /// Запущенные циклы опроса по адресу пробы — защита от повторного запуска.
         /// Вместе с задачей хранится её персональный источник отмены, чтобы опрос
         /// одной пробы можно было остановить (удаление пробы), не трогая остальные.
@@ -354,6 +361,8 @@ namespace SPI.Twamp.Server.BackgroundServices
                     {
                         await ReconcileSafeAsync(client.RequestInfo, cancellationToken);
                     }
+
+                    await ProcessCleanupsAsync(cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -363,6 +372,85 @@ namespace SPI.Twamp.Server.BackgroundServices
                 {
                     _logger.Warn(ex, "Ошибка цикла сверки задач");
                 }
+            }
+        }
+
+        /// <summary>
+        /// Обрабатывает отложенные очистки удалённых проб: если проба доступна —
+        /// снимает с неё все задания и закрывает очистку; если проба не появилась
+        /// в течение «Probe:CleanupWaitHours» часов — снимает очистку и вычищает
+        /// её задачи и кэш результатов на сервере.
+        /// </summary>
+        private async Task ProcessCleanupsAsync(CancellationToken cancellationToken)
+        {
+            foreach (Contracts.PendingProbeCleanup cleanup in await _clients.GetCleanupsAsync())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (await TryClearProbeTasksAsync(cleanup.RequestInfo, cancellationToken))
+                {
+                    _logger.Info("Задания сняты с удалённой пробы {RequestInfo} — очистка закрыта", cleanup.RequestInfo);
+                    await _clients.RemoveCleanupAsync(cleanup.RequestInfo);
+                    continue;
+                }
+
+                if (DateTime.Now > cleanup.DeletedAt.AddHours(_cleanupWaitHours))
+                {
+                    // Проба так и не вышла на связь — забываем про неё: убираем задание
+                    // на удаление и вычищаем её задачи вместе с кэшем результатов.
+                    _logger.Info(
+                        "Проба {RequestInfo} не появилась за {Hours} ч после удаления — вычищаем её задачи и кэш",
+                        cleanup.RequestInfo, _cleanupWaitHours);
+
+                    IReadOnlyList<Guid> purged = await _taskService.PurgeByRequestInfoAsync(cleanup.RequestInfo);
+                    foreach (Guid id in purged)
+                    {
+                        _ = _lastResults.TryRemove(id, out _); // кэш «последних результатов»
+                    }
+                    await _clients.RemoveCleanupAsync(cleanup.RequestInfo);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Пытается снять с пробы все её задания (известные и самой пробе, и серверу).
+        /// Возвращает <c>false</c>, если проба недоступна.
+        /// </summary>
+        private async Task<bool> TryClearProbeTasksAsync(string requestInfo, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Union заданий: что проба помнит сама + что числится за ней в БД.
+                Guid[] onProbe = await _probe.GetTaskIdsAsync(requestInfo, cancellationToken);
+                HashSet<Guid> ids = [.. onProbe];
+                foreach (Contracts.TaskInfo task in await _taskService.GetAllAsync())
+                {
+                    if (task.RequestInfo == requestInfo)
+                    {
+                        _ = ids.Add(task.Id);
+                    }
+                }
+
+                if (ids.Count > 0)
+                {
+                    List<Contracts.TaskInfo> stubs = [.. ids.Select(id => new Contracts.TaskInfo
+                    {
+                        Id = id,
+                        RequestInfo = requestInfo,
+                        Type = Contracts.TaskType.Scheduler,
+                        Delete = true
+                    })];
+                    await _probe.PushTasksAsync(requestInfo, stubs, cancellationToken);
+                }
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return false; // проба недоступна — попробуем на следующем тике
             }
         }
 

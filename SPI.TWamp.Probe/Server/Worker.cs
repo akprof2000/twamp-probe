@@ -94,6 +94,36 @@ namespace SPI.Twamp.Probe.Server
         public Guid[] GetKnownTaskIds() => [.. _cron.Keys];
 
         /// <summary>
+        /// Полностью останавливает и удаляет ВСЕ задачи по расписанию (вместе с файлом
+        /// реестра). Используется сторожем связи: если сервер не обращался к пробе
+        /// дольше «Probe:ServerTimeoutHours», проба считает себя удалённой.
+        /// Возвращает число остановленных задач.
+        /// </summary>
+        public async Task<int> ClearAllAsync(CancellationToken cancellationToken)
+        {
+            await _registrationLock.WaitAsync(cancellationToken);
+            try
+            {
+                int count = _cron.Count;
+                foreach (Guid id in _cron.Keys)
+                {
+                    _ = RemoveScheduler(id);
+                }
+                _tasks.Clear();
+
+                if (File.Exists(TasksFileName))
+                {
+                    File.Delete(TasksFileName);
+                }
+                return count;
+            }
+            finally
+            {
+                _ = _registrationLock.Release();
+            }
+        }
+
+        /// <summary>
         /// Применяет одну задачу к реестру. Возвращает <c>true</c>, если реестр изменился
         /// (значит, его нужно сохранить на диск).
         /// </summary>

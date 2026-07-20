@@ -145,6 +145,18 @@ namespace SPI.Twamp.Server.Application
         }
 
         /// <inheritdoc/>
+        public async Task<IReadOnlyList<Guid>> PurgeByRequestInfoAsync(string requestInfo)
+        {
+            IReadOnlyList<Guid> removed = await _tasks.RemoveByRequestInfoAsync(requestInfo);
+            if (removed.Count > 0)
+            {
+                _logger.Info("Окончательно удалено задач пробы {RequestInfo}: {Count}", requestInfo, removed.Count);
+                _changeNotifier.Notify();
+            }
+            return removed;
+        }
+
+        /// <inheritdoc/>
         public async Task ReconcileAsync(string requestInfo, CancellationToken cancellationToken)
         {
             // Что проба знает прямо сейчас (задачи по расписанию).

@@ -63,7 +63,16 @@ namespace SPI.Twamp.Server.Application
             }
             else
             {
+                // Частичное обновление (например, переименование из интерфейса):
+                // незаполненные поля берём из существующей записи, чтобы не затереть
+                // версию, адреса и описание пустыми значениями.
                 client.Id = existing.Id;
+                client.Version = string.IsNullOrEmpty(client.Version) ? existing.Version : client.Version;
+                client.HostName = string.IsNullOrEmpty(client.HostName) ? existing.HostName : client.HostName;
+                client.IPAddress = client.IPAddress is null or "" or "0.0.0.0" ? existing.IPAddress : client.IPAddress;
+                client.MacAddress = client.MacAddress is "" or "00:00:00:00:00:00" ? existing.MacAddress : client.MacAddress;
+                client.Title ??= existing.Title;
+                client.Description ??= existing.Description;
                 await _clients.UpdateAsync(client);
             }
 
@@ -85,6 +94,14 @@ namespace SPI.Twamp.Server.Application
             {
                 // Пометка задач удалёнными + попытка снять их с самой пробы (если жива).
                 await _taskService.DeleteByRequestInfoAsync(requestInfo, cancellationToken);
+            }
+
+            if (removed)
+            {
+                // Отложенная очистка: фоновый цикл снимет ВСЕ задания с самой пробы,
+                // когда (и если) она будет доступна в течение «Probe:CleanupWaitHours»;
+                // по истечении срока задачи пробы и кэш вычищаются на сервере.
+                await _clients.AddCleanupAsync(new PendingProbeCleanup { RequestInfo = requestInfo });
             }
 
             _changeNotifier.Notify(); // список проб изменился — событие для интерфейса

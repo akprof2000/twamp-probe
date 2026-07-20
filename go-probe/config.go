@@ -23,6 +23,7 @@ type Config struct {
 	MaxParallel        int    // Probe:MaxParallel — размер пула воркеров
 	MaxPendingResults  int    // Probe:MaxPendingResults — лимит очереди результатов
 	PersistIntervalSec int    // Probe:PersistIntervalSec — период снимка очереди на диск
+	ServerTimeoutHours int    // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
 	Twampy             ProbeToolConfig
@@ -47,6 +48,7 @@ func LoadConfig(path string) (*Config, error) {
 		MaxParallel:        num(raw, "Probe:MaxParallel", 1024),
 		MaxPendingResults:  num(raw, "Probe:MaxPendingResults", 100000),
 		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
+		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
 		Ping:               ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
 		Twamp:              ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
 		Twampy:             ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},

@@ -1,2 +1,4 @@
 dist/
 *.exe
+JobResult.json
+TaskInfo.json

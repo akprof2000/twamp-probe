@@ -56,6 +56,13 @@ namespace SPI.Twamp.Server.Abstractions
         Task DeleteByRequestInfoAsync(string requestInfo, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Окончательно удаляет из БД все задачи пробы (очистка после удаления пробы,
+        /// не вышедшей на связь). Возвращает идентификаторы удалённых задач.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+        Task<IReadOnlyList<Guid>> PurgeByRequestInfoAsync(string requestInfo);
+
+        /// <summary>
         /// Сверяет состояние пробы с хранилищем и приводит его в соответствие:
         /// досылает недостающие активные задачи (в т. ч. на чистую перезалитую пробу),
         /// удаляет с пробы устаревшие и помеченные на удаление. Устаревшие задачи

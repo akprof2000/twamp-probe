@@ -87,7 +87,7 @@
       <tbody></tbody>
     </table></div>
     <div class="row" style="margin-top:10px">
-      <input id="probeUrl" type="text" placeholder="http://адрес-пробы:443" style="width:280px">
+      <input id="probeUrl" type="text" placeholder="http://адрес-пробы:8443" style="width:280px">
       <button class="act" onclick="withBusy(this, checkIn)">Опросить пробу (CheckIn)</button>
     </div>
     <div class="msg" id="msgUnident"></div>
@@ -305,6 +305,7 @@ async function loadStatus() {
       <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
       <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
       <td><button class="act" onclick="loadProbeTasks(this,'${p.requestInfo.replace(/'/g,"\\'")}')">задачи</button>
+          <button class="act" onclick="renameProbe('${p.requestInfo.replace(/'/g,"\\'")}','${(p.name||'').replace(/'/g,"\\'")}')">имя</button>
           <button class="act" onclick="removeProbe('${p.requestInfo.replace(/'/g,"\\'")}')">удалить</button></td></tr>`).join('');
     $('#msgStatus').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
     const un = await jget('listnotidentifyclients');
@@ -312,6 +313,15 @@ async function loadStatus() {
       <td class="wrap">${u.requestInfo||'<span class="bad">без адреса</span>'}</td><td>${u.hostName||''}</td><td>${u.ipAddress||''}</td><td>${u.macAddress||''}</td><td>${u.version||'—'}</td>
       <td><button class="act" onclick="approve('${u.requestInfo||''}','${u.hostName||''}','${u.ipAddress||''}')">Подтвердить</button>
           <button class="act" onclick="rejectProbe('${(u.requestInfo||'').replace(/'/g,"\\'")}')">Отклонить</button></td></tr>`).join('');
+  } catch (e) { $('#msgStatus').textContent = 'Ошибка: ' + e.message; }
+}
+// Переименование пробы: SetInfoClient обновляет существующую запись по адресу.
+async function renameProbe(requestInfo, currentName) {
+  const name = prompt('Новое имя пробы ' + requestInfo + ':', currentName || '');
+  if (name === null || !name.trim()) return;
+  try {
+    await jsend('setinfoclient', 'POST', { requestInfo, name: name.trim() });
+    $('#msgStatus').textContent = 'Имя пробы обновлено'; loadStatus();
   } catch (e) { $('#msgStatus').textContent = 'Ошибка: ' + e.message; }
 }
 // Удаление подтверждённой пробы: опрос останавливается; по желанию удаляются и её задачи.

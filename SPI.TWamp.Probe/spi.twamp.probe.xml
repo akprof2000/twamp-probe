@@ -59,6 +59,13 @@
             </summary>
             <param name="result">Результат одного замера зонда.</param>
         </member>
+        <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.ClearAsync">
+            <summary>
+            Полностью очищает накопленные результаты (очередь, неподтверждённую пачку
+            и файл на диске). Используется сторожем связи, когда проба считает себя
+            удалённой с сервера.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Probe.Abstractions.IResultStore.TakeBatchAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <summary>
             Асинхронно ожидает появления результатов и возвращает пачку на доставку.
@@ -748,6 +755,9 @@
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.ConfirmAsync(System.Guid)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Probe.Server.ResultStore.ClearAsync">
+            <inheritdoc/>
+        </member>
         <member name="M:SPI.Twamp.Probe.Server.ResultStore.LoadAsync(System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
@@ -780,6 +790,57 @@
             Останавливает таймер, делает финальный снимок на диск (чтобы не потерять
             результаты последних секунд при штатной остановке) и освобождает примитивы.
             </summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Server.ServerContactTracker">
+            <summary>
+            Трекер последнего обращения сервера к пробе. Отметку ставит middleware
+            на каждый входящий запрос к «api/**».
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Probe.Server.ServerContactTracker.LastContact">
+            <summary>Момент последнего запроса от сервера.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ServerContactTracker.MarkContact">
+            <summary>Фиксирует обращение сервера (вызывается middleware).</summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Server.ServerWatchdogService">
+            <summary>
+            Сторож связи с сервером: если сервер не обращался к пробе дольше
+            «Probe:ServerTimeoutHours» часов (0 — сторож выключен), проба считает себя
+            удалённой — останавливает все задачи по расписанию, удаляет реестр
+            (TaskInfo.json) и очищает кэш недоставленных результатов (JobResult.json).
+            <para>
+            Проба продолжает слушать HTTP: если сервер вернётся, CheckIn и фоновая
+            сверка сервера восстановят задачи автоматически (самосинхронизация).
+            </para>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ServerWatchdogService.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Server.ServerContactTracker,SPI.Twamp.Probe.Server.Worker,SPI.Twamp.Probe.Abstractions.IResultStore)">
+            <summary>
+            Сторож связи с сервером: если сервер не обращался к пробе дольше
+            «Probe:ServerTimeoutHours» часов (0 — сторож выключен), проба считает себя
+            удалённой — останавливает все задачи по расписанию, удаляет реестр
+            (TaskInfo.json) и очищает кэш недоставленных результатов (JobResult.json).
+            <para>
+            Проба продолжает слушать HTTP: если сервер вернётся, CheckIn и фоновая
+            сверка сервера восстановят задачи автоматически (самосинхронизация).
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ServerWatchdogService.CheckInterval">
+            <summary>Период проверки сторожа.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ServerWatchdogService._timeoutHours">
+            <summary>Таймаут молчания сервера, часов (0 — сторож выключен).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ServerWatchdogService._lastCleared">
+            <summary>Момент последней сработавшей очистки — защита от повторных срабатываний.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ServerWatchdogService.ExecuteAsync(System.Threading.CancellationToken)">
+            <summary>Цикл сторожа: периодическая проверка давности последнего обращения сервера.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ServerWatchdogService.CheckAsync(System.Threading.CancellationToken)">
+            <summary>Одна проверка: если сервер молчит дольше таймаута — остановить и вычистить всё.</summary>
         </member>
         <member name="T:SPI.Twamp.Probe.Server.TaskRunRegistry">
             <summary>
@@ -873,6 +934,14 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.GetKnownTaskIds">
             <summary>Возвращает идентификаторы задач по расписанию, известных пробе сейчас.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.ClearAllAsync(System.Threading.CancellationToken)">
+            <summary>
+            Полностью останавливает и удаляет ВСЕ задачи по расписанию (вместе с файлом
+            реестра). Используется сторожем связи: если сервер не обращался к пробе
+            дольше «Probe:ServerTimeoutHours», проба считает себя удалённой.
+            Возвращает число остановленных задач.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.MergeOneAsync(SPI.Twamp.Probe.Contracts.TaskInfo)">
             <summary>

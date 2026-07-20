@@ -57,6 +57,25 @@ namespace SPI.Twamp.Server.Infrastructure
         public async Task AddIdentifyAsync(Identify identify) => _ = await _context.Identify.InsertAsync(identify);
 
         /// <inheritdoc/>
+        public async Task AddCleanupAsync(PendingProbeCleanup cleanup)
+        {
+            // Повторное удаление той же пробы не плодит записи — очистка одна на адрес.
+            _ = await _context.Cleanups.DeleteManyAsync(x => x.RequestInfo == cleanup.RequestInfo);
+            _ = await _context.Cleanups.InsertAsync(cleanup);
+        }
+
+        /// <inheritdoc/>
+        public async Task<IReadOnlyList<PendingProbeCleanup>> GetCleanupsAsync()
+        {
+            IEnumerable<PendingProbeCleanup> data = await _context.Cleanups.FindAllAsync();
+            return [.. data];
+        }
+
+        /// <inheritdoc/>
+        public async Task RemoveCleanupAsync(string requestInfo) =>
+            _ = await _context.Cleanups.DeleteManyAsync(x => x.RequestInfo == requestInfo);
+
+        /// <inheritdoc/>
         public async Task RemoveIdentifyAsync(string requestInfo)
         {
             // Пустой адрес — вычищаем битые записи (без RequestInfo): их иначе

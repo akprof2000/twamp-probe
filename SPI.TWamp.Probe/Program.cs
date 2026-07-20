@@ -95,6 +95,11 @@ try
     _ = builder.Services.AddSingleton<Worker>();
     _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<Worker>());
 
+    // Сторож связи с сервером: молчание дольше «Probe:ServerTimeoutHours» означает,
+    // что пробу удалили, — задачи останавливаются, реестр и кэш результатов чистятся.
+    _ = builder.Services.AddSingleton<ServerContactTracker>();
+    _ = builder.Services.AddHostedService<ServerWatchdogService>();
+
     // Подробнее о настройке Swagger/OpenAPI: https://aka.ms/aspnetcore/swashbuckle
     _ = builder.Services.AddEndpointsApiExplorer();
     _ = builder.Services.AddSwaggerGen(c =>
@@ -136,6 +141,17 @@ try
     _ = builder.Services.AddRouting(options => options.LowercaseUrls = true);
 
     WebApplication app = builder.Build();
+
+    // Отметка «сервер выходил на связь» — для сторожа ServerWatchdogService.
+    ServerContactTracker contactTracker = app.Services.GetRequiredService<ServerContactTracker>();
+    _ = app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            contactTracker.MarkContact();
+        }
+        await next();
+    });
 
     // Аутентификация по общему ключу: включается, когда задан «Auth:ApiKey».
     // Проба исполняет команды по сети, поэтому в бою ключ обязателен.

@@ -45,5 +45,14 @@ namespace SPI.Twamp.Server.Abstractions
 
         /// <summary>Удаляет пробу из списка неопознанных (например, после подтверждения).</summary>
         Task RemoveIdentifyAsync(string requestInfo);
+
+        /// <summary>Регистрирует отложенную очистку удалённой пробы (перезаписывает существующую).</summary>
+        Task AddCleanupAsync(PendingProbeCleanup cleanup);
+
+        /// <summary>Возвращает все отложенные очистки удалённых проб.</summary>
+        Task<IReadOnlyList<PendingProbeCleanup>> GetCleanupsAsync();
+
+        /// <summary>Снимает отложенную очистку (выполнена или истёк срок ожидания).</summary>
+        Task RemoveCleanupAsync(string requestInfo);
     }
 }

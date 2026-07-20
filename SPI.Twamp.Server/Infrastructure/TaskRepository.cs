@@ -54,5 +54,14 @@ namespace SPI.Twamp.Server.Infrastructure
 
         /// <inheritdoc/>
         public async Task RemoveAsync(Guid id) => _ = await _context.Tasks.DeleteAsync(id);
+
+        /// <inheritdoc/>
+        public async Task<IReadOnlyList<Guid>> RemoveByRequestInfoAsync(string requestInfo)
+        {
+            IEnumerable<TaskInfo> doomed = await _context.Tasks.FindAsync(x => x.RequestInfo == requestInfo);
+            List<Guid> ids = [.. doomed.Select(t => t.Id)];
+            _ = await _context.Tasks.DeleteManyAsync(x => x.RequestInfo == requestInfo);
+            return ids;
+        }
     }
 }

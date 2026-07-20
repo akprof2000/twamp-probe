@@ -25,7 +25,10 @@ import (
 )
 
 // probeVersion отображается в списке проб на сервере (поле Version в CheckIn).
-const probeVersion = "go-0.1.0"
+// Релизные сборки прошивают версию тега через ldflags:
+//
+//	go build -ldflags "-X main.probeVersion=1.2.0-go"
+var probeVersion = "1.2.0-go-dev"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -47,7 +50,12 @@ func main() {
 	tasks := NewTaskRegistry(dispatcher, runReg)
 	tasks.Load()
 
-	api := &apiServer{cfg: cfg, results: results, tasks: tasks, runReg: runReg}
+	// Сторож связи: молчание сервера дольше Probe:ServerTimeoutHours означает,
+	// что пробу удалили, — задачи останавливаются, реестр и кэш чистятся.
+	tracker := NewContactTracker()
+	go RunWatchdog(ctx, cfg.ServerTimeoutHours, tracker, tasks, results)
+
+	api := &apiServer{cfg: cfg, results: results, tasks: tasks, runReg: runReg, tracker: tracker}
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.routes()}
 
 	go func() {
@@ -71,6 +79,7 @@ type apiServer struct {
 	results *ResultStore
 	tasks   *TaskRegistry
 	runReg  *RunRegistry
+	tracker *ContactTracker
 }
 
 // routes собирает маршруты. ASP.NET сопоставляет пути регистронезависимо,
@@ -86,6 +95,7 @@ func (a *apiServer) routes() http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.ToLower(r.URL.Path)
+		a.tracker.Mark() // отметка «сервер выходил на связь» — для сторожа
 
 		// Аутентификация по общему ключу — включается, когда задан Auth:ApiKey.
 		if a.cfg.ApiKey != "" && r.Header.Get("X-Api-Key") != a.cfg.ApiKey {

@@ -28,6 +28,7 @@ namespace SPI.Twamp.Tests
                 Task.FromResult(new ResultBatch());
             public Task<bool> ConfirmAsync(Guid batchId) => Task.FromResult(false);
             public Task LoadAsync(CancellationToken ct) => Task.CompletedTask;
+            public Task ClearAsync() => Task.CompletedTask;
         }
 
         private static TaskInfo Scheduler(Guid id) => new()

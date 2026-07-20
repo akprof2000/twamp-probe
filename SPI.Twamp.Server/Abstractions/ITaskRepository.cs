@@ -30,5 +30,11 @@ namespace SPI.Twamp.Server.Abstractions
 
         /// <summary>Окончательно удаляет задачу из БД (используется фоновой очисткой).</summary>
         Task RemoveAsync(Guid id);
+
+        /// <summary>
+        /// Окончательно удаляет из БД все задачи пробы (очистка после удаления пробы,
+        /// которая так и не вышла на связь). Возвращает идентификаторы удалённых задач.
+        /// </summary>
+        Task<IReadOnlyList<Guid>> RemoveByRequestInfoAsync(string requestInfo);
     }
 }

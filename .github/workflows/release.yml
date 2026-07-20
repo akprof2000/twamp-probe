@@ -38,10 +38,17 @@ jobs:
           [ "${GITHUB_REF_TYPE}" = "tag" ] || VERSION="manual-${GITHUB_SHA::8}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+          # Версия для .NET-сборок: из тега (например 1.2.0); для ручного запуска —
+          # предрелизная 0.0.1-<sha>. Прошивается в AssemblyVersion — сервер видит её
+          # в списке проб, и по ней легко найти отставшие после раскатки.
+          NETVER="$VERSION"
+          [ "${GITHUB_REF_TYPE}" = "tag" ] || NETVER="0.0.1-${GITHUB_SHA::8}"
+          echo "NETVER=$NETVER" >> "$GITHUB_ENV"
+
           publish_one () {
             local proj="$1" name="$2" variant="$3"; shift 3
             local out="publish/${name}-${variant}"
-            dotnet publish "$proj" -c Release -r linux-x64 -o "$out" "$@"
+            dotnet publish "$proj" -c Release -r linux-x64 -o "$out" -p:Version="$NETVER" "$@"
             # Папка публикации целиком уходит в архив с сохранением прав на запуск.
             tar -C "$out" -czf "publish/${name}-${VERSION}-linux-x64-${variant}.tar.gz" .
           }
@@ -64,29 +71,46 @@ jobs:
           go-version: "1.23"
           cache-dependency-path: go-probe/go.sum
 
-      # Go-проба: один статический бинарник ~6 МБ без зависимостей — работает на
-      # любом Linux x86-64 (CentOS 7+, Rocky, Alma, Ubuntu…) без установки .NET.
-      - name: Сборка Go-пробы (linux-x64, статическая)
+      # Go-проба: один статический бинарник ~6 МБ без зависимостей. Linux-вариант
+      # работает на любом дистрибутиве x86-64 (CentOS 7+, Rocky, Alma, Ubuntu…),
+      # Windows-вариант — на Windows 10+/Server. Итого в релизе 6 архивов.
+      - name: Сборка Go-пробы (linux-x64 + windows-x64, тесты)
         run: |
           set -e
           cd go-probe
           go vet ./...
-          OUT="dist/twamp-probe-go"
-          mkdir -p "$OUT"
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$OUT/twamp-probe" .
-          cp -r ../SPI.TWamp.Probe/twampy "$OUT/twampy"
-          rm -rf "$OUT/twampy/__pycache__"
-          cp deploy/appsettings.json deploy/README-DEPLOY.txt "$OUT/"
+          go test ./...
+
+          assemble () { # $1 — папка, $2 — бинарник, $3 — конфиг
+            mkdir -p "$1"
+            cp -r ../SPI.TWamp.Probe/twampy "$1/twampy"
+            rm -rf "$1/twampy/__pycache__"
+            cp "deploy/$3" "$1/appsettings.json"
+            cp deploy/README-DEPLOY.txt "$1/"
+          }
+
+          # Версия прошивается в бинарник и видна серверу в списке проб.
+          LDFLAGS="-s -w -X main.probeVersion=${VERSION}-go"
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go/twamp-probe .
+          assemble dist/twamp-probe-go twamp-probe appsettings.json
           tar -C dist -czf "../publish/twamp-probe-go-${VERSION}-linux-x64.tar.gz" twamp-probe-go
-          ls -lh ../publish/twamp-probe-go-*.tar.gz
+
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go-win/twamp-probe.exe .
+          assemble dist/twamp-probe-go-win twamp-probe.exe appsettings.windows.json
+          (cd dist && zip -qr "../../publish/twamp-probe-go-${VERSION}-windows-x64.zip" twamp-probe-go-win)
+
+          ls -lh ../publish/twamp-probe-go-*
 
       # Ручной запуск без тега: архивы доступны как артефакты workflow.
       - name: Артефакты (ручной запуск)
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: twamp-${{ env.VERSION }}-linux-x64
-          path: publish/*.tar.gz
+          name: twamp-${{ env.VERSION }}
+          path: |
+            publish/*.tar.gz
+            publish/*.zip
           retention-days: 14
 
       # Запуск по тегу: создаётся GitHub Release с четырьмя архивами.
@@ -94,7 +118,9 @@ jobs:
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: publish/*.tar.gz
+          files: |
+            publish/*.tar.gz
+            publish/*.zip
           generate_release_notes: true
           body: |
             Сборки для Linux x64 (в каждом архиве — папка приложения целиком):
@@ -105,4 +131,5 @@ jobs:
             | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный | нет — распаковал и запустил |
             | `twamp-probe-*-framework.tar.gz` | проба (C#), маленькая | .NET 10 Runtime (ASP.NET Core) |
             | `twamp-probe-*-selfcontained.tar.gz` | проба (C#), самодостаточная | нет; для режима TWampy — Python 3.8+ |
-            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба на Go** — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
+            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба на Go** (Linux) — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
+            | `twamp-probe-go-*-windows-x64.zip` | **проба на Go** (Windows) | нет; для TWampy — Python 3.8+ |
