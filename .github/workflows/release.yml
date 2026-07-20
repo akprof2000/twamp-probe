@@ -58,6 +58,28 @@ jobs:
 
           ls -lh publish/*.tar.gz
 
+      - name: Установка Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: go-probe/go.sum
+
+      # Go-проба: один статический бинарник ~6 МБ без зависимостей — работает на
+      # любом Linux x86-64 (CentOS 7+, Rocky, Alma, Ubuntu…) без установки .NET.
+      - name: Сборка Go-пробы (linux-x64, статическая)
+        run: |
+          set -e
+          cd go-probe
+          go vet ./...
+          OUT="dist/twamp-probe-go"
+          mkdir -p "$OUT"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$OUT/twamp-probe" .
+          cp -r ../SPI.TWamp.Probe/twampy "$OUT/twampy"
+          rm -rf "$OUT/twampy/__pycache__"
+          cp deploy/appsettings.json deploy/README-DEPLOY.txt "$OUT/"
+          tar -C dist -czf "../publish/twamp-probe-go-${VERSION}-linux-x64.tar.gz" twamp-probe-go
+          ls -lh ../publish/twamp-probe-go-*.tar.gz
+
       # Ручной запуск без тега: архивы доступны как артефакты workflow.
       - name: Артефакты (ручной запуск)
         if: github.ref_type != 'tag'
@@ -75,11 +97,12 @@ jobs:
           files: publish/*.tar.gz
           generate_release_notes: true
           body: |
-            Четыре сборки для Linux x64 (в каждом архиве — папка приложения целиком):
+            Сборки для Linux x64 (в каждом архиве — папка приложения целиком):
 
             | Архив | Что это | Требования на хосте |
             |---|---|---|
             | `twamp-server-*-framework.tar.gz` | сервер, маленький | .NET 10 Runtime (ASP.NET Core) |
             | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный | нет — распаковал и запустил |
-            | `twamp-probe-*-framework.tar.gz` | проба, маленькая | .NET 10 Runtime (ASP.NET Core) |
-            | `twamp-probe-*-selfcontained.tar.gz` | проба, самодостаточная | нет; для режима TWampy — Python 3.8+ |
+            | `twamp-probe-*-framework.tar.gz` | проба (C#), маленькая | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-probe-*-selfcontained.tar.gz` | проба (C#), самодостаточная | нет; для режима TWampy — Python 3.8+ |
+            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба на Go** — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
