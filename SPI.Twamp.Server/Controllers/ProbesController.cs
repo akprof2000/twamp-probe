@@ -63,6 +63,34 @@ namespace SPI.Twamp.Server.Controllers
         }
 
         /// <summary>
+        /// Удаляет подтверждённую пробу: останавливает опрос, убирает из списка;
+        /// при <paramref name="deleteTasks"/>=true помечает удалёнными и все её задачи.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+        /// <param name="deleteTasks">Удалить ли вместе с пробой все её задачи.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        [HttpDelete("clients")]
+        public async Task<ActionResult> DeleteClient(
+            [FromQuery][Required] string requestInfo, [FromQuery] bool deleteTasks = false,
+            CancellationToken cancellationToken = default)
+        {
+            bool removed = await _clientService.DeleteAsync(requestInfo, deleteTasks, cancellationToken);
+            return removed ? Ok() : NotFound($"Проба «{requestInfo}» не найдена");
+        }
+
+        /// <summary>
+        /// Отклоняет неопознанную пробу — убирает её из очереди на подтверждение.
+        /// Пустой адрес допустим: так вычищаются битые записи без RequestInfo.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы (RequestInfo); пусто — записи без адреса.</param>
+        [HttpDelete("unidentified")]
+        public async Task<ActionResult> RejectUnidentified([FromQuery] string? requestInfo = null)
+        {
+            await _clientService.RejectUnidentifiedAsync(requestInfo ?? "");
+            return Ok();
+        }
+
+        /// <summary>
         /// «Длинный опрос» изменений для веб-интерфейса: висит до 25 секунд и отвечает
         /// сразу, как только на сервере изменились задачи, результаты или состояние проб.
         /// Клиент передаёт последнюю известную версию и обновляет экран при её росте —

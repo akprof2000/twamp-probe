@@ -12,12 +12,13 @@ namespace SPI.Twamp.Server.Application
     /// </summary>
     public sealed class ClientService(
         Logger logger, IClientRepository clients, IProbeClient probe, IProbePoller poller,
-        IChangeNotifier changeNotifier) : IClientService
+        ITaskService taskService, IChangeNotifier changeNotifier) : IClientService
     {
         private readonly Logger _logger = logger;
         private readonly IClientRepository _clients = clients;
         private readonly IProbeClient _probe = probe;
         private readonly IProbePoller _poller = poller;
+        private readonly ITaskService _taskService = taskService;
         private readonly IChangeNotifier _changeNotifier = changeNotifier;
 
         /// <inheritdoc/>
@@ -67,6 +68,35 @@ namespace SPI.Twamp.Server.Application
             }
 
             _changeNotifier.Notify(); // список проб изменился — событие для интерфейса
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> DeleteAsync(string requestInfo, bool deleteTasks, CancellationToken cancellationToken)
+        {
+            _logger.Info("Удаление пробы {RequestInfo} (с задачами: {DeleteTasks})", requestInfo, deleteTasks);
+
+            // Сначала останавливаем опрос — чтобы фоновый цикл не «воскресил» статус пробы.
+            _poller.StopPolling(requestInfo);
+
+            bool removed = await _clients.DeleteAsync(requestInfo);
+            await _clients.RemoveIdentifyAsync(requestInfo); // и из очереди неопознанных, если была
+
+            if (removed && deleteTasks)
+            {
+                // Пометка задач удалёнными + попытка снять их с самой пробы (если жива).
+                await _taskService.DeleteByRequestInfoAsync(requestInfo, cancellationToken);
+            }
+
+            _changeNotifier.Notify(); // список проб изменился — событие для интерфейса
+            return removed;
+        }
+
+        /// <inheritdoc/>
+        public async Task RejectUnidentifiedAsync(string requestInfo)
+        {
+            _logger.Info("Отклонение неопознанной пробы {RequestInfo}", requestInfo);
+            await _clients.RemoveIdentifyAsync(requestInfo);
+            _changeNotifier.Notify();
         }
 
         /// <summary>

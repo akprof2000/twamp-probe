@@ -82,6 +82,9 @@
         <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.UpdateAsync(SPI.Twamp.Server.Contracts.Client)">
             <summary>Обновляет данные существующей пробы.</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.DeleteAsync(System.String)">
+            <summary>Удаляет подтверждённую пробу. Возвращает <c>true</c>, если проба существовала.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IClientRepository.GetUnidentifiedAsync">
             <summary>Возвращает список неопознанных проб (ожидающих подтверждения).</summary>
         </member>
@@ -120,6 +123,22 @@
             Подтверждает пробу: сохраняет её как клиента и запускает фоновый опрос.
             Для уже существующей пробы обновляет её данные.
             </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientService.DeleteAsync(System.String,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            Удаляет подтверждённую пробу: останавливает её опрос, убирает из БД
+            и (по флагу) помечает удалёнными все её задачи.
+            </summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+            <param name="deleteTasks">Удалить ли вместе с пробой все её задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns><c>true</c>, если проба существовала и удалена.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClientService.RejectUnidentifiedAsync(System.String)">
+            <summary>
+            Отклоняет неопознанную пробу — убирает её из очереди на подтверждение.
+            </summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbeClient">
             <summary>
@@ -185,6 +204,13 @@
             Повторный запуск для уже опрашиваемой пробы игнорируется.
             </summary>
             <param name="client">Проба, которую нужно начать опрашивать.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbePoller.StopPolling(System.String)">
+            <summary>
+            Останавливает фоновый цикл опроса пробы и убирает её со страницы статуса
+            (используется при удалении пробы). Для неизвестной пробы ничего не делает.
+            </summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.ProbePollState">
             <summary>
@@ -531,7 +557,7 @@
             запуск их фонового опроса.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ClientService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IProbePoller,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
+        <member name="M:SPI.Twamp.Server.Application.ClientService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IProbePoller,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IClientService"/>: регистрация и подтверждение проб,
             запуск их фонового опроса.
@@ -547,6 +573,12 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ClientService.SetInfoAsync(SPI.Twamp.Server.Contracts.Client,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ClientService.DeleteAsync(System.String,System.Boolean,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ClientService.RejectUnidentifiedAsync(System.String)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ClientService.RegisterUnidentifiedAsync(SPI.Twamp.Server.Contracts.Identify)">
@@ -952,7 +984,11 @@
             <summary>Интервал фоновой сверки задач с пробами, секунд.</summary>
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._pollers">
-            <summary>Запущенные циклы опроса по адресу пробы — защита от повторного запуска.</summary>
+            <summary>
+            Запущенные циклы опроса по адресу пробы — защита от повторного запуска.
+            Вместе с задачей хранится её персональный источник отмены, чтобы опрос
+            одной пробы можно было остановить (удаление пробы), не трогая остальные.
+            </summary>
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._states">
             <summary>Текущее состояние опроса каждой пробы (для страницы статуса).</summary>
@@ -986,6 +1022,9 @@
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartPolling(SPI.Twamp.Server.Contracts.Client)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StopPolling(System.String)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.PollLoopAsync(System.String,System.Threading.CancellationToken)">
@@ -1177,7 +1216,7 @@
             <para>
             CSV — с заголовками, разделитель «;», порядок колонок любой (маппинг по имени
             заголовка), большинство колонок необязательны. Пример строки:
-            <c>d46;http://100.123.20.60:443;-c 300 -i 1 -D 46;Scheduler;1;1;0;*/6 * * * *;;2 week 3 day 2 hour;TWamp;10</c>.
+            <c>d46;http://100.123.20.60:8443;-c 300 -i 1 -D 46;Scheduler;1;1;0;*/6 * * * *;;2 week 3 day 2 hour;TWamp;10</c>.
             </para>
             <para>
             Поля <see cref="P:SPI.Twamp.Server.Contracts.ProbeTemplate.Start"/> и <see cref="P:SPI.Twamp.Server.Contracts.ProbeTemplate.End"/> задаются либо абсолютной датой,
@@ -1573,6 +1612,22 @@
             <param name="client">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.DeleteClient(System.String,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            Удаляет подтверждённую пробу: останавливает опрос, убирает из списка;
+            при <paramref name="deleteTasks"/>=true помечает удалёнными и все её задачи.
+            </summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+            <param name="deleteTasks">Удалить ли вместе с пробой все её задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.RejectUnidentified(System.String)">
+            <summary>
+            Отклоняет неопознанную пробу — убирает её из очереди на подтверждение.
+            Пустой адрес допустим: так вычищаются битые записи без RequestInfo.
+            </summary>
+            <param name="requestInfo">Адрес пробы (RequestInfo); пусто — записи без адреса.</param>
+        </member>
         <member name="M:SPI.Twamp.Server.Controllers.ProbesController.WaitChanges(System.Int64,System.Threading.CancellationToken)">
             <summary>
             «Длинный опрос» изменений для веб-интерфейса: висит до 25 секунд и отвечает
@@ -1828,6 +1883,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.UpdateAsync(SPI.Twamp.Server.Contracts.Client)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.DeleteAsync(System.String)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.GetUnidentifiedAsync">

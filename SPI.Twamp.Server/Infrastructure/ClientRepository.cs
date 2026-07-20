@@ -35,6 +35,10 @@ namespace SPI.Twamp.Server.Infrastructure
         public async Task UpdateAsync(Client client) => _ = await _context.Clients.UpdateAsync(client);
 
         /// <inheritdoc/>
+        public async Task<bool> DeleteAsync(string requestInfo) =>
+            await _context.Clients.DeleteManyAsync(x => x.RequestInfo == requestInfo) > 0;
+
+        /// <inheritdoc/>
         public async Task<IReadOnlyList<Identify>> GetUnidentifiedAsync()
         {
             IEnumerable<Identify> data = await _context.Identify.FindAllAsync();
@@ -53,7 +57,13 @@ namespace SPI.Twamp.Server.Infrastructure
         public async Task AddIdentifyAsync(Identify identify) => _ = await _context.Identify.InsertAsync(identify);
 
         /// <inheritdoc/>
-        public async Task RemoveIdentifyAsync(string requestInfo) =>
-            _ = await _context.Identify.DeleteManyAsync(x => x.RequestInfo == requestInfo);
+        public async Task RemoveIdentifyAsync(string requestInfo)
+        {
+            // Пустой адрес — вычищаем битые записи (без RequestInfo): их иначе
+            // невозможно ни подтвердить, ни отклонить из интерфейса.
+            _ = string.IsNullOrEmpty(requestInfo)
+                ? await _context.Identify.DeleteManyAsync(x => x.RequestInfo == null || x.RequestInfo == "")
+                : await _context.Identify.DeleteManyAsync(x => x.RequestInfo == requestInfo);
+        }
     }
 }

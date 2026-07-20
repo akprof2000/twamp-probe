@@ -16,5 +16,12 @@ namespace SPI.Twamp.Server.Abstractions
         /// </summary>
         /// <param name="client">Проба, которую нужно начать опрашивать.</param>
         void StartPolling(Client client);
+
+        /// <summary>
+        /// Останавливает фоновый цикл опроса пробы и убирает её со страницы статуса
+        /// (используется при удалении пробы). Для неизвестной пробы ничего не делает.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+        void StopPolling(string requestInfo);
     }
 }

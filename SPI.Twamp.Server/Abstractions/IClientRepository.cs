@@ -28,6 +28,9 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>Обновляет данные существующей пробы.</summary>
         Task UpdateAsync(Client client);
 
+        /// <summary>Удаляет подтверждённую пробу. Возвращает <c>true</c>, если проба существовала.</summary>
+        Task<bool> DeleteAsync(string requestInfo);
+
         /// <summary>Возвращает список неопознанных проб (ожидающих подтверждения).</summary>
         Task<IReadOnlyList<Identify>> GetUnidentifiedAsync();
 

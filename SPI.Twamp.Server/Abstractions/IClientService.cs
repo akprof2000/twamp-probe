@@ -27,5 +27,21 @@ namespace SPI.Twamp.Server.Abstractions
         /// Для уже существующей пробы обновляет её данные.
         /// </summary>
         Task SetInfoAsync(Client client, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Удаляет подтверждённую пробу: останавливает её опрос, убирает из БД
+        /// и (по флагу) помечает удалёнными все её задачи.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+        /// <param name="deleteTasks">Удалить ли вместе с пробой все её задачи.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <returns><c>true</c>, если проба существовала и удалена.</returns>
+        Task<bool> DeleteAsync(string requestInfo, bool deleteTasks, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Отклоняет неопознанную пробу — убирает её из очереди на подтверждение.
+        /// </summary>
+        /// <param name="requestInfo">Адрес пробы (RequestInfo).</param>
+        Task RejectUnidentifiedAsync(string requestInfo);
     }
 }

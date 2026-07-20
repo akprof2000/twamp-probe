@@ -41,8 +41,12 @@ namespace SPI.Twamp.Server.BackgroundServices
         private readonly int _reconcileIntervalSeconds =
             configuration["Probe:ReconcileIntervalSec"].ConvertTo(30);
 
-        /// <summary>Запущенные циклы опроса по адресу пробы — защита от повторного запуска.</summary>
-        private readonly ConcurrentDictionary<string, Task> _pollers = new();
+        /// <summary>
+        /// Запущенные циклы опроса по адресу пробы — защита от повторного запуска.
+        /// Вместе с задачей хранится её персональный источник отмены, чтобы опрос
+        /// одной пробы можно было остановить (удаление пробы), не трогая остальные.
+        /// </summary>
+        private readonly ConcurrentDictionary<string, (Task Loop, CancellationTokenSource Cts)> _pollers = new();
 
         /// <summary>Текущее состояние опроса каждой пробы (для страницы статуса).</summary>
         private readonly ConcurrentDictionary<string, ProbePollState> _states = new();
@@ -154,15 +158,33 @@ namespace SPI.Twamp.Server.BackgroundServices
             }
 
             // GetOrAdd гарантирует один цикл на пробу даже при параллельных вызовах.
+            // Токен цикла связан с общим: отменяется и при остановке сервиса,
+            // и индивидуально при удалении пробы (StopPolling).
             _ = _pollers.GetOrAdd(client.RequestInfo, url =>
             {
                 _logger.Info("Старт опроса пробы {ProbeUrl}", url);
-                return Task.Run(() => PollLoopAsync(url, _cts.Token));
+                CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                return (Task.Run(() => PollLoopAsync(url, cts.Token)), cts);
             });
 
             // Немедленная первичная сверка — например, чтобы сразу настроить только что
             // подтверждённую (или перезалитую) пробу, не дожидаясь тика фонового цикла.
             _ = Task.Run(() => ReconcileSafeAsync(client.RequestInfo, _cts.Token));
+        }
+
+        /// <inheritdoc/>
+        public void StopPolling(string requestInfo)
+        {
+            if (!_pollers.TryRemove(requestInfo, out (Task Loop, CancellationTokenSource Cts) poller))
+            {
+                return;
+            }
+
+            _logger.Info("Остановка опроса пробы {ProbeUrl}", requestInfo);
+            poller.Cts.Cancel();
+            poller.Cts.Dispose();
+            _ = _states.TryRemove(requestInfo, out _); // пробы больше нет на странице статуса
+            _changeNotifier.Notify();
         }
 
         /// <summary>
@@ -369,7 +391,7 @@ namespace SPI.Twamp.Server.BackgroundServices
 
             try
             {
-                await Task.WhenAll(_pollers.Values).WaitAsync(cancellationToken);
+                await Task.WhenAll(_pollers.Values.Select(p => p.Loop)).WaitAsync(cancellationToken);
             }
             catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
             {
