@@ -637,7 +637,7 @@
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.RouterLineRegex">
             <remarks>
             Pattern:<br/>
-            <code>^\\s*([^|\\s]+)\\|IP:(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})</code><br/>
+            <code>^\\s*([^|\\s]+)\\|IP:(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(?::\\d{1,5})?)</code><br/>
             Explanation:<br/>
             <code>
             ○ Match if at the beginning of the string.<br/>
@@ -652,7 +652,10 @@
                 ○ Match '.'.<br/>
                 ○ Match a Unicode digit atomically at least 1 and at most 3 times.<br/>
                 ○ Match '.'.<br/>
-                ○ Match a Unicode digit atomically at least 1 and at most 3 times.<br/>
+                ○ Match a Unicode digit greedily at least 1 and at most 3 times.<br/>
+                ○ Optional (greedy).<br/>
+                    ○ Match ':'.<br/>
+                    ○ Match a Unicode digit atomically at least 1 and at most 5 times.<br/>
             </code>
             </remarks>
         </member>
@@ -669,7 +672,7 @@
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.IpRegex">
             <remarks>
             Pattern:<br/>
-            <code>^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$</code><br/>
+            <code>^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(?::\\d{1,5})?$</code><br/>
             Explanation:<br/>
             <code>
             ○ Match if at the beginning of the string.<br/>
@@ -679,7 +682,10 @@
             ○ Match '.'.<br/>
             ○ Match a Unicode digit atomically at least 1 and at most 3 times.<br/>
             ○ Match '.'.<br/>
-            ○ Match a Unicode digit atomically at least 1 and at most 3 times.<br/>
+            ○ Match a Unicode digit greedily at least 1 and at most 3 times.<br/>
+            ○ Optional (greedy).<br/>
+                ○ Match ':'.<br/>
+                ○ Match a Unicode digit atomically at least 1 and at most 5 times.<br/>
             ○ Match if at the end of the string or if before an ending newline.<br/>
             </code>
             </remarks>
@@ -3084,6 +3090,12 @@
         </member>
         <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfNonAsciiOrAny_8C4067B49002678203BF041783BDAD4A186CF84DBCF6168B92A9BA75B8420FB4(System.ReadOnlySpan{System.Char})">
             <summary>Finds the next index of any character that matches a character in the set [IORior\s].</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.StackPush(System.Int32[]@,System.Int32@,System.Int32)">
+            <summary>Pushes 1 value onto the backtracking stack.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.StackPush(System.Int32[]@,System.Int32@,System.Int32,System.Int32)">
+            <summary>Pushes 2 values onto the backtracking stack.</summary>
         </member>
         <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_asciiExceptDigits">
             <summary>Supports searching for characters in or not in "\0\u0001\u0002\u0003\u0004\u0005\u0006\a\b\t\n\v\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&amp;'()*+,-./:;&lt;=&gt;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f".</summary>

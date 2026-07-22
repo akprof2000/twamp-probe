@@ -67,6 +67,34 @@ namespace SPI.Twamp.Tests
             Assert.Equal(("R2", "10.0.0.2"), routers[1]);
         }
 
+        [Theory(DisplayName = "IP-адрес с портом (host:port) распознаётся и порт сохраняется")]
+        [InlineData("R1|IP:10.106.169.217:5018", "R1", "10.106.169.217:5018")]
+        [InlineData("R1|IP:10.106.169.217", "R1", "10.106.169.217")]
+        public void RouterLine_IpWithPort(string line, string expName, string expIp)
+        {
+            bool ok = ProvisioningService.TryParseRouterLine(line, out string name, out string ip);
+
+            Assert.True(ok);
+            Assert.Equal(expName, name);
+            Assert.Equal(expIp, ip);
+        }
+
+        [Fact(DisplayName = "Адрес с портом в отдельной колонке IP: строка не отбрасывается")]
+        public void RouterFile_IpColumnWithPort()
+        {
+            string[] lines =
+            [
+                "SNODE;VENDOR;IP;RNUM",
+                "231101;HUAWEI;10.106.169.217:5018;1"
+            ];
+
+            var (routers, rejected) = SPI.Twamp.Server.Application.ProvisioningService.ParseRouterFile(lines);
+
+            Assert.Empty(rejected);
+            _ = Assert.Single(routers);
+            Assert.Equal(("231101", "10.106.169.217:5018"), routers[0]);
+        }
+
         [Fact(DisplayName = "Формат с табуляцией без заголовка по-прежнему работает")]
         public void RouterFile_TabWithoutHeader()
         {

@@ -28,8 +28,11 @@ namespace SPI.Twamp.Server.Application
         private readonly Logger _logger = logger;
         private readonly ITemplateRepository _templates = templates;
 
-        /// <summary>Первое поле строки маршрутизатора: «ИМЯ|IP:x.x.x.x».</summary>
-        [GeneratedRegex(@"^\s*([^|\s]+)\|IP:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})")]
+        /// <summary>
+        /// Первое поле строки маршрутизатора: «ИМЯ|IP:x.x.x.x» с необязательным портом
+        /// «:порт» (адрес цели TWAMP может содержать порт — он сохраняется в IP).
+        /// </summary>
+        [GeneratedRegex(@"^\s*([^|\s]+)\|IP:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?)")]
         private static partial Regex RouterLineRegex();
 
         /// <summary>
@@ -48,8 +51,8 @@ namespace SPI.Twamp.Server.Application
             return m.Success;
         }
 
-        /// <summary>Проверка, что строка — корректный IPv4-адрес.</summary>
-        [GeneratedRegex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")]
+        /// <summary>Проверка, что строка — корректный IPv4-адрес с необязательным портом «:порт».</summary>
+        [GeneratedRegex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?$")]
         private static partial Regex IpRegex();
 
         /// <summary>
