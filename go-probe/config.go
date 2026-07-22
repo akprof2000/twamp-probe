@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -45,7 +46,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{
 		ListenAddr:         parseUrls(str(raw, "Urls", "http://0.0.0.0:8443")),
 		ApiKey:             str(raw, "Auth:ApiKey", ""),
-		MaxParallel:        num(raw, "Probe:MaxParallel", 1024),
+		MaxParallel:        resolveParallel(num(raw, "Probe:MaxParallel", 0)),
 		MaxPendingResults:  num(raw, "Probe:MaxPendingResults", 100000),
 		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
@@ -54,6 +55,17 @@ func LoadConfig(path string) (*Config, error) {
 		Twampy:             ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
 	}
 	return cfg, nil
+}
+
+// resolveParallel возвращает число воркеров: явное значение (>0) — как есть;
+// 0 (или меньше) — автоподбор «ядра × 16» с потолком 1024 и полом 16. Зонды —
+// внешние процессы, в основном ждущие I/O (особенно длинный TWAMP), поэтому
+// воркеров нужно много; потолок бережёт многоядерные машины.
+func resolveParallel(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	return min(max(runtime.NumCPU()*16, 16), 1024) // min/max — Go 1.21
 }
 
 // parseUrls выделяет адрес прослушивания из строки Urls ASP.NET ("http://0.0.0.0:8443").

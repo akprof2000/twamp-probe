@@ -673,8 +673,28 @@
         <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher._cts">
             <summary>Токен жизненного цикла пула воркеров.</summary>
         </member>
+        <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoFactor">
+            <summary>Коэффициент автоподбора числа воркеров: ядра × <see cref="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoFactor"/>.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoCap">
+            <summary>Потолок автоподбора — чтобы на многоядерных машинах не разлеталось.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoFloor">
+            <summary>Пол автоподбора — минимальный параллелизм даже на слабом хосте.</summary>
+        </member>
         <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IProbeRunner,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
             <summary>Создаёт диспетчер и вычисляет число воркеров (предел параллелизма) из конфигурации.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.ResolveWorkerCount(System.Int32,System.Int32)">
+            <summary>
+            Число воркеров: явное значение (&gt; 0) используется как есть; 0 (или меньше) —
+            автоподбор «ядра × 16» с потолком 1024 и полом 16.
+            <para>
+            Каждый зонд — отдельный процесс ОС, который в основном ждёт I/O (особенно
+            длинный TWAMP: twping -c 300 живёт минуты и почти спит), поэтому воркеров
+            нужно много — параллелизм должен покрывать число одновременно активных задач.
+            </para>
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.Enqueue(SPI.Twamp.Probe.Contracts.TaskInfo)">
             <inheritdoc/>

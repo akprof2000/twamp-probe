@@ -35,6 +35,15 @@ namespace SPI.Twamp.Probe.Server
 
         private readonly ITaskRunRegistry _runRegistry;
 
+        /// <summary>Коэффициент автоподбора числа воркеров: ядра × <see cref="AutoFactor"/>.</summary>
+        private const int AutoFactor = 16;
+
+        /// <summary>Потолок автоподбора — чтобы на многоядерных машинах не разлеталось.</summary>
+        private const int AutoCap = 1024;
+
+        /// <summary>Пол автоподбора — минимальный параллелизм даже на слабом хосте.</summary>
+        private const int AutoFloor = 16;
+
         /// <summary>Создаёт диспетчер и вычисляет число воркеров (предел параллелизма) из конфигурации.</summary>
         public ProbeDispatcher(Logger logger, IConfiguration configuration, IProbeRunner runner, ITaskRunRegistry runRegistry)
         {
@@ -42,14 +51,26 @@ namespace SPI.Twamp.Probe.Server
             _runner = runner;
             _runRegistry = runRegistry;
 
-            // Каждый зонд — это отдельный процесс ОС (ping/TWamp). Для коротких
-            // CPU-активных зондов (ping) разумно немного воркеров (~4 × ядра), а для
-            // длинных I/O-зондов (twping -c 300 живёт минуты и почти спит) параллелизм
-            // должен покрывать число одновременно активных задач — сотни и тысячи.
-            // Точное значение задаётся ключом «Probe:MaxParallel».
-            int defaultCount = Math.Max(16, System.Environment.ProcessorCount * 4);
-            int count = configuration["Probe:MaxParallel"].ConvertTo(defaultCount);
-            _workerCount = count > 0 ? count : defaultCount;
+            int configured = configuration["Probe:MaxParallel"].ConvertTo(0);
+            _workerCount = ResolveWorkerCount(configured, System.Environment.ProcessorCount);
+        }
+
+        /// <summary>
+        /// Число воркеров: явное значение (&gt; 0) используется как есть; 0 (или меньше) —
+        /// автоподбор «ядра × 16» с потолком 1024 и полом 16.
+        /// <para>
+        /// Каждый зонд — отдельный процесс ОС, который в основном ждёт I/O (особенно
+        /// длинный TWAMP: twping -c 300 живёт минуты и почти спит), поэтому воркеров
+        /// нужно много — параллелизм должен покрывать число одновременно активных задач.
+        /// </para>
+        /// </summary>
+        public static int ResolveWorkerCount(int configured, int processorCount)
+        {
+            if (configured > 0)
+            {
+                return configured;
+            }
+            return Math.Clamp(processorCount * AutoFactor, AutoFloor, AutoCap);
         }
 
         /// <inheritdoc/>

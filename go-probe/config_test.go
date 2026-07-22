@@ -49,7 +49,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.ListenAddr != "0.0.0.0:8443" {
 		t.Errorf("порт по умолчанию должен быть 8443: %s", cfg.ListenAddr)
 	}
-	if cfg.MaxParallel != 1024 || cfg.PersistIntervalSec != 5 || cfg.ServerTimeoutHours != 24 {
+	// MaxParallel по умолчанию (0 в конфиге) — автоподбор в диапазоне [16..1024].
+	if cfg.MaxParallel < 16 || cfg.MaxParallel > 1024 {
+		t.Errorf("MaxParallel по умолчанию вне [16..1024]: %d", cfg.MaxParallel)
+	}
+	if cfg.PersistIntervalSec != 5 || cfg.ServerTimeoutHours != 24 {
 		t.Errorf("значения по умолчанию: %+v", cfg)
 	}
 }
