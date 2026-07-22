@@ -179,6 +179,18 @@ func (r *TaskRegistry) KnownTaskIds() []string {
 	return ids
 }
 
+// AllTasks возвращает полные определения задач по расписанию, которые держит проба.
+// Сервер забирает их для восстановления своей БД после потери данных.
+func (r *TaskRegistry) AllTasks() []TaskInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	all := make([]TaskInfo, 0, len(r.tasks))
+	for _, entry := range r.tasks {
+		all = append(all, *entry.task)
+	}
+	return all
+}
+
 // ClearAll останавливает и удаляет ВСЕ задачи по расписанию вместе с файлом реестра.
 // Используется сторожем связи: сервер молчит дольше таймаута — проба считает себя
 // удалённой. Возвращает число остановленных задач.

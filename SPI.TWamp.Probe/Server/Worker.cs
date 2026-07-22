@@ -94,6 +94,23 @@ namespace SPI.Twamp.Probe.Server
         public Guid[] GetKnownTaskIds() => [.. _cron.Keys];
 
         /// <summary>
+        /// Возвращает ПОЛНЫЕ определения задач по расписанию, которые проба держит сейчас.
+        /// Сервер использует это для восстановления своей БД после потери данных.
+        /// </summary>
+        public async Task<TaskInfo[]> GetTasksAsync(CancellationToken cancellationToken)
+        {
+            await _registrationLock.WaitAsync(cancellationToken);
+            try
+            {
+                return [.. _tasks];
+            }
+            finally
+            {
+                _ = _registrationLock.Release();
+            }
+        }
+
+        /// <summary>
         /// Полностью останавливает и удаляет ВСЕ задачи по расписанию (вместе с файлом
         /// реестра). Используется сторожем связи: если сервер не обращался к пробе
         /// дольше «Probe:ServerTimeoutHours», проба считает себя удалённой.

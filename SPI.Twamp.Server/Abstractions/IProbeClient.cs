@@ -47,6 +47,15 @@ namespace SPI.Twamp.Server.Abstractions
         Task<Guid[]> GetTaskIdsAsync(string probeUrl, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Запрашивает у пробы ПОЛНЫЕ определения задач по расписанию, которые она держит.
+        /// Используется для восстановления сервера после потери данных: задачи, которых
+        /// на сервере нет, забираются с пробы и добавляются обратно в БД.
+        /// </summary>
+        /// <param name="probeUrl">Базовый адрес пробы.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        Task<IReadOnlyList<TaskInfo>> GetTasksAsync(string probeUrl, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Запрашивает у пробы состояние выполнения задач (запущена ли сейчас,
         /// последний старт/финиш, ближайший запуск, последняя ошибка).
         /// Ответ отдаётся как есть (сырой JSON) — сервер лишь проксирует его в UI.

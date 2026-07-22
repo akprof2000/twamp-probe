@@ -69,6 +69,24 @@ func TestRegistry_RepeaterGoesToQueue(t *testing.T) {
 	}
 }
 
+// AllTasks отдаёт полные определения задач (для восстановления сервера).
+func TestRegistry_AllTasksFullDefinitions(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+
+	task := schedulerTask("x")
+	task.Title = "восстанавливаемая"
+	task.EndNode = "10.0.0.7:5018"
+	reg.MergeJobs([]TaskInfo{task})
+
+	all := reg.AllTasks()
+	if len(all) != 1 {
+		t.Fatalf("ожидалась 1 задача, получено %d", len(all))
+	}
+	if all[0].Id != "x" || all[0].Title != "восстанавливаемая" || all[0].EndNode != "10.0.0.7:5018" {
+		t.Errorf("неполное определение задачи: %+v", all[0])
+	}
+}
+
 // Пустой реестр отдаёт «[]», а не null, — сервер не проверяет ответ на null.
 func TestRegistry_EmptyIdsNotNil(t *testing.T) {
 	reg, _ := newTestRegistry(t)

@@ -54,6 +54,7 @@
 | POST | `/api/probeinterface/checkin?requestInfo=…` | идентификация пробы (адреса, версия) |
 | POST | `/api/probeinterface/setjobs` | принять **изменившиеся** задачи (инкрементальное слияние) |
 | GET | `/api/probeinterface/taskids` | идентификаторы задач, известных пробе (для сверки) |
+| GET | `/api/probeinterface/tasks` | полные определения задач по расписанию (сервер забирает для восстановления БД после потери данных) |
 | GET | `/api/probeinterface/taskstatus` | состояние выполнения задач (running, старт/финиш, следующий запуск, ошибка) |
 | GET | `/api/probeinterface/checkdata` | длинный опрос: пачка результатов с `batchId` |
 | POST | `/api/probeinterface/confirmdata?batchId=…` | подтвердить запись пачки (проба удаляет её) |

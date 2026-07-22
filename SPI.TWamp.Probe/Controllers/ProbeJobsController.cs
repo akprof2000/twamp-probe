@@ -79,6 +79,17 @@ namespace SPI.Twamp.Probe.Controllers
         }
 
         /// <summary>
+        /// Возвращает полные определения задач по расписанию, которые держит проба.
+        /// Сервер забирает их для восстановления своей БД после потери данных.
+        /// </summary>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        [HttpGet("[action]")]
+        public async Task<ActionResult<TaskInfo[]>> Tasks(CancellationToken cancellationToken)
+        {
+            return Ok(await storage.GetTasksAsync(cancellationToken));
+        }
+
+        /// <summary>
         /// Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
         /// когда был последний запуск/завершение, сколько раз выполнялась,
         /// ближайший запланированный запуск и последняя ошибка.

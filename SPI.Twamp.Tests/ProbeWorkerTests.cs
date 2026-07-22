@@ -55,6 +55,24 @@ namespace SPI.Twamp.Tests
             Assert.Contains(id, worker.GetKnownTaskIds());
         }
 
+        [Fact(DisplayName = "GetTasksAsync возвращает полные определения задач (для восстановления сервера)")]
+        public async Task GetTasks_ReturnsFullDefinitions()
+        {
+            using Worker worker = CreateWorker();
+            Guid id = Guid.NewGuid();
+            TaskInfo task = Scheduler(id);
+            task.Title = "восстанавливаемая";
+            task.EndNode = "10.0.0.7:5018";
+            await worker.MergeJobs([task], TestContext.Current.CancellationToken);
+
+            TaskInfo[] tasks = await worker.GetTasksAsync(TestContext.Current.CancellationToken);
+
+            TaskInfo restored = Assert.Single(tasks);
+            Assert.Equal(id, restored.Id);
+            Assert.Equal("восстанавливаемая", restored.Title);
+            Assert.Equal("10.0.0.7:5018", restored.EndNode);
+        }
+
         [Fact(DisplayName = "Задача с Delete=true удаляется из реестра")]
         public async Task Merge_RemovesDeleted()
         {

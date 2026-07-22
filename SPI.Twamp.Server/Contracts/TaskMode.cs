@@ -1,10 +1,15 @@
 // Ignore Spelling: SPI Twamp
 
+using System.Text.Json.Serialization;
+
 namespace SPI.Twamp.Server.Contracts
 {
     /// <summary>
     /// Режим зондирования: системный ping, утилита TWamp или TWampy.
     /// </summary>
+    // Конвертер для System.Text.Json (Flurl): проба отдаёт enum строкой — нужно для
+    // чтения задач с пробы при восстановлении. Newtonsoft/LiteDB его игнорируют.
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum TaskMode
     {
         /// <summary>

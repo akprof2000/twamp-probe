@@ -74,6 +74,12 @@ namespace SPI.Twamp.Server.Infrastructure
                 .ReceiveJson<Guid[]>();
 
         /// <inheritdoc/>
+        public async Task<IReadOnlyList<TaskInfo>> GetTasksAsync(string probeUrl, CancellationToken cancellationToken) =>
+            await Request(probeUrl, "api/ProbeInterface/Tasks")
+                .GetAsync(cancellationToken: cancellationToken)
+                .ReceiveJson<TaskInfo[]>();
+
+        /// <inheritdoc/>
         public Task<string> GetTaskStatusRawAsync(string probeUrl, string query, CancellationToken cancellationToken)
         {
             IFlurlRequest request = Request(probeUrl, "api/ProbeInterface/TaskStatus");

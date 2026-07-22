@@ -504,6 +504,13 @@
             Используется сервером для сверки состояния и досылки недостающих задач.
             </summary>
         </member>
+        <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.Tasks(System.Threading.CancellationToken)">
+            <summary>
+            Возвращает полные определения задач по расписанию, которые держит проба.
+            Сервер забирает их для восстановления своей БД после потери данных.
+            </summary>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
         <member name="M:SPI.Twamp.Probe.Controllers.ProbeJobsController.TaskStatus(System.Int32,System.Int32,System.String,System.String)">
             <summary>
             Возвращает состояние выполнения задач на пробе: выполняется ли сейчас,
@@ -954,6 +961,12 @@
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.GetKnownTaskIds">
             <summary>Возвращает идентификаторы задач по расписанию, известных пробе сейчас.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.Worker.GetTasksAsync(System.Threading.CancellationToken)">
+            <summary>
+            Возвращает ПОЛНЫЕ определения задач по расписанию, которые проба держит сейчас.
+            Сервер использует это для восстановления своей БД после потери данных.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Probe.Server.Worker.ClearAllAsync(System.Threading.CancellationToken)">
             <summary>

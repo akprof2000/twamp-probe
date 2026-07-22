@@ -184,25 +184,58 @@ namespace SPI.Twamp.Server.Application
                 }
             }
 
-            // Задачи-«сироты»: есть на пробе, но серверу неизвестны (например, БД сервера
-            // восстановили из резервной копии или задачу уже вычистила ретенция).
-            // Отправляем пробе заглушки на удаление.
-            foreach (Guid orphan in onProbe.Where(id => !knownSchedulers.Contains(id)))
-            {
-                toPush.Add(new TaskInfo
-                {
-                    Id = orphan,
-                    RequestInfo = requestInfo,
-                    Type = TaskType.Scheduler,
-                    Delete = true
-                });
-            }
-
             if (toPush.Count > 0)
             {
                 _logger.Info("Синхронизация пробы {RequestInfo}: отправляем изменений {Count}", requestInfo, toPush.Count);
                 await _probe.PushTasksAsync(requestInfo, toPush, cancellationToken);
                 _changeNotifier.Notify(); // сверка изменила состояние задач
+            }
+
+            // Задачи-«сироты»: есть на пробе, но серверу неизвестны — сервер переустановили
+            // с потерей данных. Не удаляем их, а ЗАБИРАЕМ с пробы и добавляем обратно на
+            // сервер (восстановление). Тем самым чистый сервер перенимает задачи живой пробы.
+            List<Guid> orphans = [.. onProbe.Where(id => !knownSchedulers.Contains(id))];
+            if (orphans.Count > 0)
+            {
+                await AdoptFromProbeAsync(requestInfo, orphans, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Восстанавливает на сервере задачи, которые есть на пробе, но отсутствуют в БД
+        /// сервера (после его переустановки с потерей данных). Полные определения задач
+        /// забираются с пробы и добавляются в БД; удалённые (Delete) не усыновляются.
+        /// </summary>
+        private async Task AdoptFromProbeAsync(string requestInfo, IReadOnlyList<Guid> orphanIds, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<TaskInfo> probeTasks;
+            try
+            {
+                probeTasks = await _probe.GetTasksAsync(requestInfo, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Старая проба без эндпоинта Tasks или временная ошибка — не трогаем сироты
+                // (лучше оставить как есть, чем потерять). Повторим на следующей сверке.
+                _logger.Warn(ex, "Не удалось забрать задачи с пробы {RequestInfo} для восстановления", requestInfo);
+                return;
+            }
+
+            HashSet<Guid> orphanSet = [.. orphanIds];
+            List<TaskInfo> adopted = [.. probeTasks.Where(t =>
+                orphanSet.Contains(t.Id) && !t.Delete && t.Type == TaskType.Scheduler)];
+
+            if (adopted.Count > 0)
+            {
+                await _tasks.UpsertRangeAsync(adopted);
+                _logger.Info(
+                    "Восстановлено задач с пробы {RequestInfo}: {Count} (сервер был переустановлен, задачи перенесены с пробы)",
+                    requestInfo, adopted.Count);
+                _changeNotifier.Notify();
             }
         }
 

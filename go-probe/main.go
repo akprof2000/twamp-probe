@@ -89,6 +89,7 @@ func (a *apiServer) routes() http.Handler {
 	mux.HandleFunc("POST /api/probeinterface/checkin", a.checkIn)
 	mux.HandleFunc("POST /api/probeinterface/setjobs", a.setJobs)
 	mux.HandleFunc("GET /api/probeinterface/taskids", a.taskIds)
+	mux.HandleFunc("GET /api/probeinterface/tasks", a.tasksFull)
 	mux.HandleFunc("GET /api/probeinterface/taskstatus", a.taskStatus)
 	mux.HandleFunc("GET /api/probeinterface/checkdata", a.checkData)
 	mux.HandleFunc("POST /api/probeinterface/confirmdata", a.confirmData)
@@ -157,6 +158,16 @@ func (a *apiServer) setJobs(w http.ResponseWriter, r *http.Request) {
 // taskIds возвращает идентификаторы задач по расписанию (для сверки).
 func (a *apiServer) taskIds(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, a.tasks.KnownTaskIds())
+}
+
+// tasksFull возвращает полные определения задач по расписанию (для восстановления
+// сервера после потери данных).
+func (a *apiServer) tasksFull(w http.ResponseWriter, _ *http.Request) {
+	tasks := a.tasks.AllTasks()
+	if tasks == nil {
+		tasks = []TaskInfo{}
+	}
+	writeJSON(w, tasks)
 }
 
 // taskStatus возвращает состояние выполнения задач с фильтрами и пагинацией.

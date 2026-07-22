@@ -191,6 +191,15 @@
             <param name="probeUrl">Базовый адрес пробы.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTasksAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Запрашивает у пробы ПОЛНЫЕ определения задач по расписанию, которые она держит.
+            Используется для восстановления сервера после потери данных: задачи, которых
+            на сервере нет, забираются с пробы и добавляются обратно в БД.
+            </summary>
+            <param name="probeUrl">Базовый адрес пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetTaskStatusRawAsync(System.String,System.String,System.Threading.CancellationToken)">
             <summary>
             Запрашивает у пробы состояние выполнения задач (запущена ли сейчас,
@@ -848,6 +857,13 @@
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.ReconcileAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.AdoptFromProbeAsync(System.String,System.Collections.Generic.IReadOnlyList{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            Восстанавливает на сервере задачи, которые есть на пробе, но отсутствуют в БД
+            сервера (после его переустановки с потерей данных). Полные определения задач
+            забираются с пробы и добавляются в БД; удалённые (Delete) не усыновляются.
+            </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.NeedsPushAsync(SPI.Twamp.Server.Contracts.TaskInfo,System.Collections.Generic.HashSet{System.Guid},System.DateTime)">
             <summary>
@@ -2056,6 +2072,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskIdsAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTasksAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskStatusRawAsync(System.String,System.String,System.Threading.CancellationToken)">
