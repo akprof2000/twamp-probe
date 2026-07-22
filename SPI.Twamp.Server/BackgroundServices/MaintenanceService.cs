@@ -56,24 +56,22 @@ namespace SPI.Twamp.Server.BackgroundServices
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                // Редкая полная очистка по своему интервалу (первый проход — сразу).
                 try
                 {
-                    // Редкая полная очистка по своему интервалу (первый проход — сразу).
                     if (firstPass || sinceCleanup.Elapsed.TotalMinutes >= _intervalMinutes)
                     {
                         await RunOnceAsync();
                         sinceCleanup.Restart();
                         firstPass = false;
                     }
-
-                    // Частый checkpoint: WAL-журнал переносится в основную базу и очищается.
-                    await _dbContext.CheckpointAsync();
-                    _logger.Debug("Checkpoint LiteDB выполнен");
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, "Ошибка фонового обслуживания БД");
+                    _logger.Error(ex, "Ошибка ретенции БД");
                 }
+
+                await TryCheckpointAsync();
 
                 try
                 {
@@ -84,6 +82,55 @@ namespace SPI.Twamp.Server.BackgroundServices
                     break;
                 }
             }
+        }
+
+        /// <summary>
+        /// Best-effort checkpoint WAL-журнала. Под нагрузкой LiteDB не всегда успевает взять
+        /// эксклюзивную блокировку и бросает «lock timeout» — это НЕ ошибка обслуживания:
+        /// размер журнала всё равно ограничивает встроенный авто-checkpoint LiteDB (по порогу
+        /// в страницах, срабатывает на пути записи). Поэтому такой случай логируем кратким
+        /// предупреждением, а не ошибкой со стеком.
+        /// </summary>
+        /// <summary>Сколько ближайших циклов пропустить checkpoint после провала по блокировке.</summary>
+        private int _checkpointSkip;
+
+        private async Task TryCheckpointAsync()
+        {
+            // После провала под нагрузкой не пытаемся каждые CheckpointMin минут (иначе
+            // впустую блокируемся до таймаута) — даём БД передышку на несколько циклов.
+            if (_checkpointSkip > 0)
+            {
+                _checkpointSkip--;
+                return;
+            }
+
+            try
+            {
+                await _dbContext.CheckpointAsync();
+                _logger.Debug("Checkpoint LiteDB выполнен");
+            }
+            catch (Exception ex) when (IsLockTimeout(ex))
+            {
+                _checkpointSkip = 6; // при CheckpointMin=5 — следующая попытка примерно через полчаса
+                _logger.Warn("Checkpoint пропущен: БД занята (журнал сведёт авто-checkpoint LiteDB)");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Ошибка checkpoint БД");
+            }
+        }
+
+        /// <summary>Проверяет, вызвано ли исключение таймаутом блокировки LiteDB.</summary>
+        private static bool IsLockTimeout(Exception ex)
+        {
+            for (Exception? e = ex; e is not null; e = e.InnerException)
+            {
+                if (e.Message.Contains("lock timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>Один проход очистки всех коллекций.</summary>

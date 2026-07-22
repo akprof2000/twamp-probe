@@ -1016,6 +1016,19 @@
         <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.ExecuteAsync(System.Threading.CancellationToken)">
             <summary>Периодический цикл: checkpoint — часто, полная очистка — редко.</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.MaintenanceService._checkpointSkip">
+            <summary>
+            Best-effort checkpoint WAL-журнала. Под нагрузкой LiteDB не всегда успевает взять
+            эксклюзивную блокировку и бросает «lock timeout» — это НЕ ошибка обслуживания:
+            размер журнала всё равно ограничивает встроенный авто-checkpoint LiteDB (по порогу
+            в страницах, срабатывает на пути записи). Поэтому такой случай логируем кратким
+            предупреждением, а не ошибкой со стеком.
+            </summary>
+            <summary>Сколько ближайших циклов пропустить checkpoint после провала по блокировке.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.IsLockTimeout(System.Exception)">
+            <summary>Проверяет, вызвано ли исключение таймаутом блокировки LiteDB.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.MaintenanceService.RunOnceAsync">
             <summary>Один проход очистки всех коллекций.</summary>
         </member>
