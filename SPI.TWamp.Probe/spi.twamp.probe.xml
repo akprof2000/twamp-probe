@@ -677,7 +677,7 @@
             <summary>Коэффициент автоподбора числа воркеров: ядра × <see cref="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoFactor"/>.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoCap">
-            <summary>Потолок автоподбора — чтобы на многоядерных машинах не разлеталось.</summary>
+            <summary>Потолок автоподбора — верхний предел числа воркеров при авторасчёте.</summary>
         </member>
         <member name="F:SPI.Twamp.Probe.Server.ProbeDispatcher.AutoFloor">
             <summary>Пол автоподбора — минимальный параллелизм даже на слабом хосте.</summary>
@@ -688,7 +688,7 @@
         <member name="M:SPI.Twamp.Probe.Server.ProbeDispatcher.ResolveWorkerCount(System.Int32,System.Int32)">
             <summary>
             Число воркеров: явное значение (&gt; 0) используется как есть; 0 (или меньше) —
-            автоподбор «ядра × 16» с потолком 1024 и полом 16.
+            автоподбор «ядра × 16» с потолком 10000 и полом 16.
             <para>
             Каждый зонд — отдельный процесс ОС, который в основном ждёт I/O (особенно
             длинный TWAMP: twping -c 300 живёт минуты и почти спит), поэтому воркеров
