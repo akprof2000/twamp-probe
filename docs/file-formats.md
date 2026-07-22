@@ -66,8 +66,9 @@ Name;HostName;Ip;Probe;Request;Type;Repeats;Circles;Pause;Cron;Start;End;Mode;Ti
 
 ### 4. Отчёт (выгрузка `DownloadFile`)
 
-CSV с колонками: `Title; Id; Mode; CallLine; FromHost; FromPort; ToHost; ToPort; SID; First; Last; Sent; Lost; LossPercent; RttMin/Median/Max; SendMin/Median/Max; ReflectMin/Median/Max; ReflectProcMin/Max; TwoWayJitter; SendJitter; ReflectJitter; SendHops; ReflectHops; Errors`.
+CSV с колонками: `Started; Title; Id; Mode; CallLine; FromHost; FromPort; ToHost; ToPort; SID; First; Last; Sent; Lost; LossPercent; RttMin/Median/Max; SendMin/Median/Max; ReflectMin/Median/Max; ReflectProcMin/Max; TwoWayJitter; SendJitter; ReflectJitter; SendHops; ReflectHops; Errors`.
 
+- **`Started`** — дата и время запуска задачи (момент выполнения замера пробой), формат `dd.MM.yyyy HH.mm.ss`.
 - **`CallLine`** — фактическая команда, которую выполнила проба (например `ping 10.106.23.33 -n 2`) — надёжная идентификация ответа даже после изменения задачи.
 - Прерванные по таймауту и ошибочные замеры попадают в отчёт со заполненной колонкой `Errors`.
 - Разделители колонок и десятичный разделитель настраиваются параметрами запроса.

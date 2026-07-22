@@ -106,5 +106,20 @@ namespace SPI.Twamp.Tests
             Assert.Equal("TWampy", cells[Array.IndexOf(header, "Mode")]);
             Assert.Equal("./twampy -c 1 10.0.0.1", cells[Array.IndexOf(header, "CallLine")]);
         }
+
+        [Fact(DisplayName = "Первая колонка отчёта — Started (дата-время запуска, dd.MM.yyyy HH.mm.ss)")]
+        public void ToCsvLine_StartedFirstColumn()
+        {
+            TwPingStats stats = new()
+            {
+                Started = new DateTime(2026, 7, 22, 16, 9, 5, DateTimeKind.Local),
+                Title = "t"
+            };
+            string[] header = TwPingParser.CsvHeader(';').Split(';');
+            string[] cells = TwPingParser.ToCsvLine(stats, ';', ',').Split(';');
+
+            Assert.Equal("Started", header[0]); // первая колонка
+            Assert.Equal("22.07.2026 16.09.05", cells[0]);
+        }
     }
 }

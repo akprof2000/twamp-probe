@@ -3,7 +3,7 @@
        как есть; релизные — версию из тега (release.yml передаёт -p:Version).
        Версия пробы видна серверу в списке проб (Identify.Version из сборки). -->
   <PropertyGroup>
-    <Version>1.2.4</Version>
+    <Version>1.2.5</Version>
     <Authors>akprof2000</Authors>
     <Product>SPI TWamp</Product>
   </PropertyGroup>

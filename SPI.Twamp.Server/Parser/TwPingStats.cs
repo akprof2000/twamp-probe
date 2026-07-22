@@ -6,6 +6,11 @@ namespace SPI.Twamp.Server.Parser
     public class TwPingStats
     {
         /// <summary>
+        /// Дата и время запуска задачи (момент выполнения замера пробой) —
+        /// первая колонка отчёта.
+        /// </summary>
+        public DateTime? Started { get; set; }
+        /// <summary>
         /// Идентификатор задачи, к которой относится статистика.
         /// </summary>
         public Guid? Id { get; set; }

@@ -58,6 +58,7 @@ namespace SPI.Twamp.Server.Application
 
                     foreach (StatRecord record in page)
                     {
+                        record.Stats.Started = record.Creation; // дата-время запуска задачи
                         record.Stats.CallLine = record.CallLine;
                         record.Stats.Title = await GetTitleAsync(record.TaskId);
                         await writer.WriteLineAsync(TwPingParser.ToCsvLine(record.Stats, separator, decimalSeparator));
@@ -75,6 +76,7 @@ namespace SPI.Twamp.Server.Application
                 cancellationToken.ThrowIfCancellationRequested();
                 foreach (TwPingStats row in ProbeOutputParser.Parse(action.Mode, action.Console, action.ErrorConsole, action.TaskId))
                 {
+                    row.Started = action.Creation; // дата-время запуска задачи
                     row.CallLine = action.CallLine;
                     row.Title = await GetTitleAsync(row.Id ?? Guid.Empty);
                     await writer.WriteLineAsync(TwPingParser.ToCsvLine(row, separator, decimalSeparator));

@@ -2560,6 +2560,12 @@
             Разобранная статистика одного сеанса TWamp/ping.
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Started">
+            <summary>
+            Дата и время запуска задачи (момент выполнения замера пробой) —
+            первая колонка отчёта.
+            </summary>
+        </member>
         <member name="P:SPI.Twamp.Server.Parser.TwPingStats.Id">
             <summary>
             Идентификатор задачи, к которой относится статистика.
