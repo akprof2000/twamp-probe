@@ -76,6 +76,19 @@ namespace SPI.Twamp.Server.Controllers
             return restored ? Ok() : NotFound("Задача не найдена или не была удалена");
         }
 
+        /// <summary>
+        /// Полностью стирает задачу из БД (вторая ступень удаления). Активную сначала
+        /// помечает удалённой; перед стиранием снимает задачу с пробы.
+        /// </summary>
+        /// <param name="id">Идентификатор задачи.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        [HttpDelete("tasks/{id}/purge")]
+        public async Task<ActionResult> PurgeAsync(Guid id, CancellationToken cancellationToken)
+        {
+            bool purged = await _taskService.PurgeAsync(id, cancellationToken);
+            return purged ? Ok() : NotFound("Задача не найдена");
+        }
+
         /// <summary>Удаляет все задачи пробы по её адресу.</summary>
         /// <param name="IPAddress">Адрес пробы (RequestInfo).</param>
         /// <param name="cancellationToken">Токен отмены.</param>

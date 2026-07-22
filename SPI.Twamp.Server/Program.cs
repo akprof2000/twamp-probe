@@ -197,8 +197,21 @@ try
 
     app.UseResponseCompression();
 
-    app.UseStaticFiles();
-    app.UseSpaStaticFiles();
+    // index.html не кэшируем: иначе после обновления сервера браузер показывает
+    // старый интерфейс (пропавшие кнопки и т. п.). Прочая статика кэшируется как обычно.
+    Microsoft.AspNetCore.Builder.StaticFileOptions noCacheHtml = new()
+    {
+        OnPrepareResponse = ctx =>
+        {
+            if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            }
+        }
+    };
+    app.UseDefaultFiles();
+    app.UseStaticFiles(noCacheHtml);
+    app.UseSpaStaticFiles(noCacheHtml);
 
     app.MapControllers(); // <-- API теперь работает стабильно
 

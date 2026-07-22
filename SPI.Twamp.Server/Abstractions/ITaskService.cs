@@ -33,6 +33,16 @@ namespace SPI.Twamp.Server.Abstractions
         Task DeleteAsync(Guid id, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Полностью стирает задачу из БД (вторая ступень удаления). Если задача была
+        /// активной — сначала помечает удалённой; перед стиранием best-effort снимает её
+        /// с пробы, чтобы восстановление не вернуло её обратно.
+        /// </summary>
+        /// <param name="id">Идентификатор задачи.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <returns><c>true</c>, если задача существовала и стёрта.</returns>
+        Task<bool> PurgeAsync(Guid id, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Восстанавливает удалённую задачу: снимает пометку удаления и заново
         /// отправляет задачу её пробе.
         /// </summary>

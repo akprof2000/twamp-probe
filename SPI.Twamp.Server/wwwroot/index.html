@@ -178,10 +178,10 @@
   <div class="card">
     <h2>2. Файл маршрутизаторов (CSV «;» с заголовками SNODE/IP)</h2>
     <div class="row">
-      <input id="fileRouters" type="file">
-      <select id="routerSet" style="padding:6px;border:1px solid var(--line);border-radius:6px"></select>
-      <button class="act" onclick="withBusy(this, () => uploadRouters(false))">Предпросмотр (CSV)</button>
-      <button class="act" onclick="withBusy(this, () => uploadRouters(true))">Создать задачи</button>
+      <input id="fileRouters" type="file" onchange="updateRouterButtons()">
+      <select id="routerSet" style="padding:6px;border:1px solid var(--line);border-radius:6px" onchange="updateRouterButtons()"></select>
+      <button id="btnPreviewRouters" class="act" disabled onclick="withBusy(this, () => uploadRouters(false))">Предпросмотр (CSV)</button>
+      <button id="btnCreateTasks" class="act" disabled onclick="withBusy(this, () => uploadRouters(true))">Создать задачи</button>
     </div>
     <div class="msg" id="msgRouters"></div>
   </div>
@@ -472,7 +472,8 @@ function renderTasks(items) {
     <td>${runCell(t.last)}</td>
     <td class="wrap" style="white-space:normal;max-width:340px">${resultCell(t.last)}</td>
     <td>${t.delete
-      ? `<button class="act" style="background:var(--ok);padding:2px 8px" onclick="restoreTask('${t.id}')">восстановить</button>`
+      ? `<button class="act" style="background:var(--ok);padding:2px 8px" onclick="restoreTask('${t.id}')">восстановить</button>
+         <button class="del" onclick="purgeTask('${t.id}')">стереть</button>`
       : `<button class="del" onclick="delTask('${t.id}')">удалить</button>`}</td></tr>`).join('')
     || '<tr><td colspan="12">ничего не найдено</td></tr>';
 }
@@ -480,6 +481,12 @@ function renderTasks(items) {
 async function delTask(id) {
   if (!confirm('Удалить задачу?')) return;
   try { await jsend('tasks/' + id, 'DELETE'); loadTasks(); }
+  catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
+}
+// Полное стирание уже удалённой задачи из БД (вторая ступень, необратимо).
+async function purgeTask(id) {
+  if (!confirm('Стереть задачу из базы НАВСЕГДА?\nЭто необратимо (в отличие от «удалить», после которого можно восстановить).')) return;
+  try { await jsend('tasks/' + id + '/purge', 'DELETE'); loadTasks(); }
   catch (e) { $('#msgTasks').textContent = 'Ошибка: ' + e.message; }
 }
 async function restoreTask(id) {
@@ -516,7 +523,17 @@ async function loadSets() {
     // Выпадающий список для применения набора к файлу маршрутизаторов.
     $('#routerSet').innerHTML = '<option value="">— все наборы —</option>' +
       sets.map(s => `<option value="${s.set}">${s.set} (${s.templates})</option>`).join('');
+    updateRouterButtons();
   } catch (e) { $('#msgTemplates').textContent = 'Ошибка: ' + e.message; }
+}
+// Кнопки «Предпросмотр» и «Создать задачи» активны только когда выбран файл
+// маршрутизаторов И есть хотя бы один набор шаблонов (иначе создавать нечего).
+function updateRouterButtons() {
+  const hasFile = $('#fileRouters').files.length > 0;
+  const hasSets = $('#routerSet').querySelectorAll('option[value]:not([value=""])').length > 0;
+  const off = !(hasFile && hasSets);
+  $('#btnPreviewRouters').disabled = off;
+  $('#btnCreateTasks').disabled = off;
 }
 // Показать состав набора: тянем все шаблоны и фильтруем по имени набора на клиенте.
 async function showSet(name) {

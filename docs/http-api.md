@@ -13,7 +13,8 @@
 | GET | `/api/userinterface/tasks` | все задачи |
 | GET | `/api/userinterface/tasks/{requestInfo}` | задачи одной пробы |
 | POST | `/api/userinterface/tasks` | создать/обновить задачу (JSON `TaskInfo`) |
-| DELETE | `/api/userinterface/tasks/{id}` | удалить задачу |
+| DELETE | `/api/userinterface/tasks/{id}` | удалить задачу (пометить удалённой — можно восстановить) |
+| DELETE | `/api/userinterface/tasks/{id}/purge` | полностью стереть задачу из БД (вторая ступень, необратимо) |
 | DELETE | `/api/userinterface/tasks?IPAddress=…` | удалить все задачи пробы |
 
 ### Сервер — пробы и мониторинг

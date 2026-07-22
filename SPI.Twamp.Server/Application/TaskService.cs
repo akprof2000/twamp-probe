@@ -34,9 +34,8 @@ namespace SPI.Twamp.Server.Application
             _logger.Info("Сохранение задачи {@Task}", task);
             await _tasks.UpsertAsync(task);
             _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
-            // Передаём пробе только изменившуюся задачу. Если проба недоступна —
-            // ничего страшного: недостающее досошлёт фоновая сверка.
-            await TryPushAsync(task.RequestInfo, [task], cancellationToken);
+            // Доставка пробе — в фоне (ответ оператору не ждёт SetJobs).
+            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct));
         }
 
         /// <inheritdoc/>
@@ -50,7 +49,9 @@ namespace SPI.Twamp.Server.Application
             _logger.Info("Массовое сохранение задач: {Count}", tasks.Count);
             await _tasks.UpsertRangeAsync(tasks);
             _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
-            await PushGroupedAsync(tasks, cancellationToken);
+            // Рассылка пробам — в фоне: массовая заливка не должна держать HTTP-ответ,
+            // пока все пробы примут пачки (медленная/недоступная проба зависла бы ответ).
+            QueueBackgroundPush(ct => PushGroupedAsync(tasks, ct));
         }
 
         /// <summary>
@@ -85,7 +86,7 @@ namespace SPI.Twamp.Server.Application
             task.DeletedAt = null;
             await _tasks.UpsertAsync(task);
             _changeNotifier.Notify();
-            await TryPushAsync(task.RequestInfo, [task], cancellationToken); // проба добавит задачу заново
+            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct)); // проба добавит задачу заново
             return true;
         }
 
@@ -110,7 +111,7 @@ namespace SPI.Twamp.Server.Application
                 deleted ? "удаление" : "восстановление", changed.Count);
             await _tasks.UpsertRangeAsync(changed);
             _changeNotifier.Notify();
-            await PushGroupedAsync(changed, cancellationToken);
+            QueueBackgroundPush(ct => PushGroupedAsync(changed, ct));
             return changed.Count;
         }
 
@@ -129,7 +130,35 @@ namespace SPI.Twamp.Server.Application
             task.DeletedAt = DateTime.Now; // для фоновой очистки давно удалённых
             await _tasks.UpsertAsync(task);
             _changeNotifier.Notify(); // задача удалена — событие для интерфейса
-            await TryPushAsync(task.RequestInfo, [task], cancellationToken); // отправляем удаление
+            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct)); // отправляем удаление
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> PurgeAsync(Guid id, CancellationToken cancellationToken)
+        {
+            TaskInfo? task = await _tasks.GetByIdAsync(id);
+            if (task is null)
+            {
+                return false;
+            }
+
+            // Полностью стираем только уже удалённую задачу (двойная операция: сначала
+            // «удалить» — потом «стереть»). Активную сначала помечаем удалённой.
+            if (!task.Delete)
+            {
+                await DeleteAsync(id, cancellationToken);
+            }
+
+            _logger.Info("Полное удаление задачи {Id} из БД", id);
+
+            // Best-effort снимаем задачу с пробы ПЕРЕД стиранием: иначе, если проба ещё
+            // держит её, восстановление (усыновление сирот) вернуло бы задачу обратно.
+            task.Delete = true;
+            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct));
+
+            await _tasks.RemoveAsync(id);
+            _changeNotifier.Notify();
+            return true;
         }
 
         /// <inheritdoc/>
@@ -141,7 +170,7 @@ namespace SPI.Twamp.Server.Application
 
             IReadOnlyList<TaskInfo> all = await _tasks.GetByRequestInfoAsync(requestInfo);
             TaskInfo[] deleted = [.. all.Where(t => t.Delete)];
-            await TryPushAsync(requestInfo, deleted, cancellationToken);
+            QueueBackgroundPush(ct => TryPushAsync(requestInfo, deleted, ct));
         }
 
         /// <inheritdoc/>
@@ -263,6 +292,25 @@ namespace SPI.Twamp.Server.Application
             // Активная задача, которой у пробы нет, — досылаем (так чистая проба получает всё).
             return !onProbe.Contains(task.Id);
         }
+
+        /// <summary>
+        /// Ставит доставку изменений пробам в ФОН: HTTP-ответ оператору не должен ждать
+        /// SetJobs — проба может быть медленной или недоступной, а таймаут запроса к ней —
+        /// до минуты. Недоставленное гарантированно досылает фоновая сверка. Токен запроса
+        /// не используется (он отменится при возврате ответа) — доставка идёт своим ходом.
+        /// </summary>
+        private void QueueBackgroundPush(Func<CancellationToken, Task> push) =>
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await push(CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(ex, "Фоновая доставка изменений пробе не удалась — досошлёт сверка");
+                }
+            });
 
         /// <summary>Пытается передать пробе изменения; при недоступности пробы только логирует.</summary>
         private async Task TryPushAsync(string requestInfo, IReadOnlyList<TaskInfo> changed, CancellationToken cancellationToken)

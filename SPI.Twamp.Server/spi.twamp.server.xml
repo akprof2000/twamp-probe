@@ -514,6 +514,16 @@
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Помечает задачу удалённой и отправляет обновлённый список её пробе.</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.PurgeAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Полностью стирает задачу из БД (вторая ступень удаления). Если задача была
+            активной — сначала помечает удалённой; перед стиранием best-effort снимает её
+            с пробы, чтобы восстановление не вернуло её обратно.
+            </summary>
+            <param name="id">Идентификатор задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns><c>true</c>, если задача существовала и стёрта.</returns>
+        </member>
         <member name="M:SPI.Twamp.Server.Abstractions.ITaskService.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Восстанавливает удалённую задачу: снимает пометку удаления и заново
@@ -849,6 +859,9 @@
         <member name="M:SPI.Twamp.Server.Application.TaskService.DeleteAsync(System.Guid,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.PurgeAsync(System.Guid,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.DeleteByRequestInfoAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
@@ -869,6 +882,14 @@
             <summary>
             Решает, нужно ли досылать пробе задачу по расписанию, и при необходимости
             помечает истёкшую задачу удалённой. Возвращает <c>true</c>, если задачу надо отправить.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TaskService.QueueBackgroundPush(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task})">
+            <summary>
+            Ставит доставку изменений пробам в ФОН: HTTP-ответ оператору не должен ждать
+            SetJobs — проба может быть медленной или недоступной, а таймаут запроса к ней —
+            до минуты. Недоставленное гарантированно досылает фоновая сверка. Токен запроса
+            не используется (он отменится при возврате ответа) — доставка идёт своим ходом.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.TryPushAsync(System.String,System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
@@ -1861,6 +1882,14 @@
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.TasksController.RestoreAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Восстанавливает удалённую задачу (снимает пометку удаления).</summary>
+            <param name="id">Идентификатор задачи.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.TasksController.PurgeAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Полностью стирает задачу из БД (вторая ступень удаления). Активную сначала
+            помечает удалённой; перед стиранием снимает задачу с пробы.
+            </summary>
             <param name="id">Идентификатор задачи.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
