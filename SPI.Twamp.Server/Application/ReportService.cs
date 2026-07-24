@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -17,72 +17,38 @@ namespace SPI.Twamp.Server.Application
     /// Реализация <see cref="IReportService"/>: потоковая выгрузка результатов в CSV
     /// и импорт задач из CSV.
     /// </summary>
-    public sealed class ReportService(
-        Logger logger, IActionRepository actions, IStatRepository stats,
-        ITaskRepository tasks, ITaskService taskService, IMemoryCache cache)
+    public sealed class ReportService(Logger logger, IResultSpool spool, ITaskService taskService)
         : IReportService
     {
-        /// <summary>Срок хранения названия задачи в кэше.</summary>
-        private static readonly TimeSpan TitleCacheDuration = TimeSpan.FromMinutes(60);
-
-        /// <summary>Размер страницы при потоковом чтении статистики из БД.</summary>
-        private const int ExportPageSize = 5000;
+        /// <summary>Как часто сбрасывать накопленное в поток ответа, строк.</summary>
+        private const int FlushEvery = 5000;
 
         private readonly Logger _logger = logger;
-        private readonly IActionRepository _actions = actions;
-        private readonly IStatRepository _stats = stats;
-        private readonly ITaskRepository _tasks = tasks;
+        private readonly IResultSpool _spool = spool;
         private readonly ITaskService _taskService = taskService;
-        private readonly IMemoryCache _cache = cache;
 
         /// <inheritdoc/>
         public async Task StreamCsvAsync(
-            DateTime from, DateTime to, char separator, char decimalSeparator,
-            TextWriter writer, CancellationToken cancellationToken)
+            char separator, char decimalSeparator, TextWriter writer, CancellationToken cancellationToken)
         {
-            _logger.Info("Потоковая выгрузка CSV за период {From} — {To}", from, to);
-            await writer.WriteLineAsync(TwPingParser.CsvHeader(separator));
+            _logger.Info("Потоковая выгрузка CSV из буфера: сегментов в очереди {Queued}, строк в текущем {Rows}",
+                _spool.SealedCount, _spool.CurrentRows);
 
-            int total = await _stats.CountByPeriodAsync(from, to);
-            if (total > 0)
+            await writer.WriteLineAsync(ExportRow.CsvHeader(separator));
+
+            int written = 0;
+            await foreach (ExportRow row in _spool.ReadPendingAsync(cancellationToken))
             {
-                // Основной путь: статистика уже разобрана при приёме — читаем постранично.
-                for (int skip = 0; skip < total; skip += ExportPageSize)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    IReadOnlyList<StatRecord> page = await _stats.GetPageAsync(from, to, skip, ExportPageSize);
-                    if (page.Count == 0)
-                    {
-                        break;
-                    }
+                await writer.WriteLineAsync(row.ToCsvLine(separator, decimalSeparator));
 
-                    foreach (StatRecord record in page)
-                    {
-                        record.Stats.Started = record.Creation; // дата-время запуска задачи
-                        record.Stats.CallLine = record.CallLine;
-                        record.Stats.Title = await GetTitleAsync(record.TaskId);
-                        await writer.WriteLineAsync(TwPingParser.ToCsvLine(record.Stats, separator, decimalSeparator));
-                    }
+                if (++written % FlushEvery == 0)
+                {
                     await writer.FlushAsync(cancellationToken);
                 }
-                return;
             }
 
-            // Совместимость: данные, накопленные до внедрения разбора при приёме,
-            // разбираем по-старому из сырых ответов.
-            IReadOnlyList<ActionData> raw = await _actions.GetByPeriodAsync(from, to);
-            foreach (ActionData action in raw)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                foreach (TwPingStats row in ProbeOutputParser.Parse(action.Mode, action.Console, action.ErrorConsole, action.TaskId))
-                {
-                    row.Started = action.Creation; // дата-время запуска задачи
-                    row.CallLine = action.CallLine;
-                    row.Title = await GetTitleAsync(row.Id ?? Guid.Empty);
-                    await writer.WriteLineAsync(TwPingParser.ToCsvLine(row, separator, decimalSeparator));
-                }
-            }
             await writer.FlushAsync(cancellationToken);
+            _logger.Info("Выгружено строк: {Count}", written);
         }
 
         /// <inheritdoc/>
@@ -162,27 +128,5 @@ namespace SPI.Twamp.Server.Application
             Title = $"Task from {sourceName} by {row.Name} created {createdAt:dd.MM.yyyy HH:mm}"
         };
 
-        /// <summary>Возвращает название задачи по идентификатору, кэшируя результат.</summary>
-        private async Task<string> GetTitleAsync(Guid id)
-        {
-            if (_cache.TryGetValue(id, out string? cached))
-            {
-                return cached ?? "";
-            }
-
-            TaskInfo? task = await _tasks.GetByIdAsync(id);
-            string title = task?.Title ?? "not find";
-
-            // Найденное имя держим дольше, «не найдено» — короткое время, вдруг задача появится.
-            TimeSpan lifetime = task is null ? TimeSpan.FromMinutes(1) : TitleCacheDuration;
-            _ = _cache.Set(id, title, new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = lifetime,
-                Priority = CacheItemPriority.High,
-                Size = 1
-            });
-
-            return title;
-        }
     }
 }

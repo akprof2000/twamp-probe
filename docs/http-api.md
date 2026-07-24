@@ -28,6 +28,7 @@
 | DELETE | `/api/userinterface/clients?requestInfo=…&deleteTasks=…` | удалить пробу: остановить опрос, убрать из списка; `deleteTasks=true` — удалить и её задачи |
 | DELETE | `/api/userinterface/unidentified?requestInfo=…` | отклонить неопознанную пробу (пустой адрес — вычистить битые записи) |
 | GET | `/api/userinterface/probestatus` | статус связи, версия, число задач по каждой пробе |
+| GET | `/api/userinterface/clickhousestatus` | состояние переноса измерений в ClickHouse: связь с базой, очередь буфера, счётчики выгруженного |
 | GET | `/api/userinterface/probetaskstatus?probe=…` | живой статус выполнения задач на пробе (запущена ли, следующий запуск, ошибка) |
 | GET | `/api/userinterface/lastresults` | последние результаты по задачам (момент + признак ошибки) |
 | GET | `/api/userinterface/waitchanges?version=N` | длинный опрос изменений (до 25 с): ответ сразу при изменении задач/результатов/проб |
@@ -46,7 +47,7 @@
 | POST | `/api/userinterface/uploadrouters?set=…` | файл маршрутизаторов → **создать** задачи (набор × строки; без `set` — все наборы) |
 | POST | `/api/userinterface/previewrouters?set=…` | то же, но вернуть CSV **без создания** |
 | POST | `/api/userinterface/UploadCsv` | загрузить готовый CSV задач |
-| GET | `/api/userinterface/downloadfile?from=…&to=…` | потоковая выгрузка отчёта CSV |
+| GET | `/api/userinterface/downloadfile` | потоковая выгрузка CSV: результаты, ещё не перенесённые в ClickHouse (параметров периода нет) |
 
 ### Проба (используется сервером)
 

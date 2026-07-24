@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using NLog;
 using spi.twamp.server.Environment;
@@ -21,19 +21,21 @@ namespace SPI.Twamp.Server.BackgroundServices
     /// </summary>
     public sealed class ProbePollingService(
         IConfiguration configuration, IClientRepository clients,
-        IProbeClient probe, IActionRepository actions, IStatRepository stats,
+        IProbeClient probe, IResultIngestService ingest,
         ITaskService taskService, IChangeNotifier changeNotifier)
         : IHostedService, IProbePoller, IProbeStatusProvider, IDisposable
     {
         /// <summary>Максимальная задержка между попытками при ошибках связи, секунд.</summary>
         private const int MaxBackoffSeconds = 900;
 
+        /// <summary>Пауза опроса, пока буфер результатов переполнен, секунд.</summary>
+        private const int BackpressureDelaySeconds = 15;
+
         // Логгер берём статически (а не через DI): иначе у конструктора 8 зависимостей.
         private static readonly Logger _logger = LogManager.GetCurrentClassLogger();
         private readonly IClientRepository _clients = clients;
         private readonly IProbeClient _probe = probe;
-        private readonly IActionRepository _actions = actions;
-        private readonly IStatRepository _stats = stats;
+        private readonly IResultIngestService _ingest = ingest;
         private readonly ITaskService _taskService = taskService;
         private readonly IChangeNotifier _changeNotifier = changeNotifier;
 
@@ -77,8 +79,6 @@ namespace SPI.Twamp.Server.BackgroundServices
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.Info("Запуск сервиса опроса проб");
-            await _actions.EnsureIndexesAsync();
-            await _stats.EnsureIndexesAsync();
 
             IReadOnlyList<Client> known = await _clients.GetAllAsync();
             foreach (Client client in known)
@@ -89,47 +89,9 @@ namespace SPI.Twamp.Server.BackgroundServices
             // Единый фоновый цикл сверки задач для всех проб.
             _ = Task.Run(() => ReconcileLoopAsync(_cts.Token), CancellationToken.None);
 
-            // Прогрев «последних результатов» из БД: после перезапуска сервера история
-            // выполнения не должна выглядеть пустой («не выполнялась ни разу»).
-            _ = Task.Run(() => WarmupLastResultsAsync(_cts.Token), CancellationToken.None);
-        }
-
-        /// <summary>
-        /// Заполняет реестр последних результатов из БД: для каждой известной задачи
-        /// берётся её последний сохранённый результат. Свежие записи, успевшие прийти
-        /// от проб, не затираются (TryAdd).
-        /// </summary>
-        private async Task WarmupLastResultsAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                int restored = 0;
-                IEnumerable<Guid> taskIds = (await _taskService.GetAllAsync()).Select(task => task.Id);
-                foreach (Guid taskId in taskIds)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    ActionData? last = await _actions.GetLastByTaskAsync(taskId);
-                    if (last is not null && _lastResults.TryAdd(taskId, BuildLastResult(last)))
-                    {
-                        restored++;
-                    }
-                }
-
-                if (restored > 0)
-                {
-                    _logger.Info("Восстановлено последних результатов из БД: {Count}", restored);
-                    _changeNotifier.Notify(); // интерфейс перечитает статусы
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Остановка сервиса во время прогрева — штатно.
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn(ex, "Не удалось восстановить последние результаты из БД");
-            }
+            // Прогрева «последних результатов» из БД больше нет: результаты не оседают
+            // в базе сервера, а сразу уходят в буфер и далее в ClickHouse. Реестр
+            // наполняется заново по мере прихода результатов от проб.
         }
 
         /// <summary>
@@ -237,6 +199,15 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// </summary>
         private async Task<int> PollOnceAsync(string probeUrl, CancellationToken cancellationToken)
         {
+            // Буфер переполнен: ClickHouse недоступен слишком долго. Не забираем результаты —
+            // они подождут на пробе (у неё своя очередь с сохранением на диск), а мы не
+            // потеряем уже принятое. Ждём разбора очереди и пробуем снова.
+            if (_ingest.IsBackpressured)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(BackpressureDelaySeconds), cancellationToken);
+                return 0;
+            }
+
             ProbeResultBatch batch = await _probe.GetResultsAsync(probeUrl, cancellationToken);
             if (batch.Items.Length == 0)
             {
@@ -245,28 +216,25 @@ namespace SPI.Twamp.Server.BackgroundServices
 
             _logger.Info("Получено {Count} результатов от пробы {ProbeUrl}", batch.Items.Length, probeUrl);
 
-            // Сохраняем с отбрасыванием дубликатов (повторная доставка после сбоя).
-            IReadOnlyList<ActionData> fresh = await _actions.AddRangeAsync(batch.Items);
+            // Разбираем вывод зонда и укладываем строки в буфер. Метод возвращает
+            // управление только после сброса данных на диск.
+            int rows = await _ingest.IngestAsync(batch.Items, cancellationToken);
 
             // Обновляем «последний результат» каждой задачи — он показывается
             // в списке задач веб-интерфейса.
-            foreach (ActionData action in fresh)
+            foreach (ActionData action in batch.Items)
             {
                 _lastResults[action.TaskId] = BuildLastResult(action);
             }
 
-            // Разбираем статистику сразу при приёме — выгрузка отчёта
-            // потом читает готовые записи без повторного парсинга.
-            await StoreStatsAsync(fresh);
-
             // Подтверждаем доставку — только теперь проба удалит пачку у себя.
+            // Повторная доставка (если подтверждение не дойдёт) не страшна:
+            // ClickHouse схлопнет повтор по ResultId.
             await _probe.ConfirmResultsAsync(probeUrl, batch.BatchId, cancellationToken);
 
-            if (fresh.Count > 0)
-            {
-                _changeNotifier.Notify(); // новые результаты — будим веб-интерфейс
-            }
-            return fresh.Count;
+            _changeNotifier.Notify(); // новые результаты — будим веб-интерфейс
+            _logger.Debug("Уложено в буфер строк: {Rows}", rows);
+            return batch.Items.Length;
         }
 
         /// <summary>Фиксирует успешный опрос: сбрасывает состояние и будит интерфейс при восстановлении связи.</summary>
@@ -306,35 +274,6 @@ namespace SPI.Twamp.Server.BackgroundServices
             {
                 return false;
             }
-        }
-
-        /// <summary>Разбирает принятые результаты в статистику и сохраняет её.</summary>
-        private async Task StoreStatsAsync(IReadOnlyList<ActionData> fresh)
-        {
-            if (fresh.Count == 0)
-            {
-                return;
-            }
-
-            List<StatRecord> records = [];
-            foreach (ActionData action in fresh)
-            {
-                // Парсер выбирается по режиму задачи (twampy — свой формат вывода),
-                // Mode проставляется внутри диспетчера.
-                foreach (Parser.TwPingStats parsed in
-                         Parser.ProbeOutputParser.Parse(action.Mode, action.Console, action.ErrorConsole, action.TaskId))
-                {
-                    records.Add(new StatRecord
-                    {
-                        Creation = action.Creation ?? DateTime.Now,
-                        TaskId = action.TaskId,
-                        CallLine = action.CallLine,
-                        Stats = parsed
-                    });
-                }
-            }
-
-            await _stats.AddRangeAsync(records);
         }
 
         /// <summary>

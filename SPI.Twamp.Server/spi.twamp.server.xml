@@ -58,6 +58,39 @@
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
             <returns>Актуальная версия состояния.</returns>
         </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IClickHouseStatusProvider">
+            <summary>
+            Поставщик состояния переноса результатов в ClickHouse для веб-интерфейса.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClickHouseStatusProvider.GetState">
+            <summary>Текущее состояние выгрузки: объёмы, очередь и связь с базой.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IClickHouseWriter">
+            <summary>
+            Запись результатов в ClickHouse через HTTP-интерфейс базы.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IClickHouseWriter.Enabled">
+            <summary>Выгрузка включена в конфигурации (секция <c>ClickHouse:Enabled</c>).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IClickHouseWriter.Url">
+            <summary>Адрес HTTP-интерфейса базы.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IClickHouseWriter.Target">
+            <summary>Назначение вставки в виде <c>база.таблица</c>.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClickHouseWriter.EnsureTableAsync(System.Threading.CancellationToken)">
+            <summary>Создаёт базу и таблицу, если их ещё нет.</summary>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IClickHouseWriter.InsertSegmentAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Отправляет файл сегмента (NDJSON) в таблицу одним запросом <c>FORMAT JSONEachRow</c>.
+            </summary>
+            <param name="path">Путь файла сегмента.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IClientRepository">
             <summary>
             Репозиторий проб (клиентов) и «неопознанных» проб, ожидающих подтверждения.
@@ -400,14 +433,15 @@
             загрузка задач из CSV-файла.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Abstractions.IReportService.StreamCsvAsync(System.DateTime,System.DateTime,System.Char,System.Char,System.IO.TextWriter,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Abstractions.IReportService.StreamCsvAsync(System.Char,System.Char,System.IO.TextWriter,System.Threading.CancellationToken)">
             <summary>
-            Потоково пишет CSV-отчёт по результатам за период в указанный писатель.
-            Данные читаются из БД постранично, поэтому даже очень большой период
-            не загружается в память целиком.
+            Потоково пишет CSV-отчёт в указанный писатель.
+            <para>
+            Источник — буфер результатов, то есть данные, ещё не уехавшие в ClickHouse.
+            Выбора периода нет: вся история живёт в ClickHouse и запрашивается оттуда.
+            Чтение потоковое, поэтому объём буфера не влияет на память сервера.
+            </para>
             </summary>
-            <param name="from">Начало периода.</param>
-            <param name="to">Конец периода.</param>
             <param name="separator">Разделитель полей CSV.</param>
             <param name="decimalSeparator">Десятичный разделитель чисел.</param>
             <param name="writer">Куда писать CSV (тело HTTP-ответа).</param>
@@ -423,6 +457,102 @@
             <param name="dateTimeFormat">Формат дат в файле.</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>Названия задач с некорректной датой окончания (не приняты).</returns>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IResultIngestService">
+            <summary>
+            Приём результатов от проб: разбор вывода зонда в строки формата экспорта
+            и запись их в буфер, откуда они уезжают в ClickHouse.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultIngestService.IsBackpressured">
+            <summary>
+            Буфер переполнен (ClickHouse долго недоступен) — приём новых результатов
+            приостановлен, опрашивать пробы не следует.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IResultIngestService.IngestAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ActionData},System.Threading.CancellationToken)">
+            <summary>
+            Разбирает пачку результатов и укладывает её в буфер. Возвращает число
+            записанных строк. Метод завершается только после сброса данных на диск —
+            подтверждать пачку пробе можно лишь после его успешного завершения.
+            </summary>
+            <param name="items">Сырые результаты от пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.SpoolSegment">
+            <summary>Запечатанный сегмент буфера, ожидающий отправки.</summary>
+            <param name="Path">Путь файла сегмента.</param>
+            <param name="Rows">Число строк в нём.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.SpoolSegment.#ctor(System.String,System.Int32)">
+            <summary>Запечатанный сегмент буфера, ожидающий отправки.</summary>
+            <param name="Path">Путь файла сегмента.</param>
+            <param name="Rows">Число строк в нём.</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.SpoolSegment.Path">
+            <summary>Путь файла сегмента.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.SpoolSegment.Rows">
+            <summary>Число строк в нём.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Abstractions.IResultSpool">
+            <summary>
+            Буфер результатов между пробами и ClickHouse: строки копятся в текущем сегменте,
+            по достижении лимита строк или срока сегмент «запечатывается», а фоновая выгрузка
+            отправляет запечатанные сегменты в ClickHouse и удаляет их.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.IsFull">
+            <summary>
+            Достигнут предел числа запечатанных сегментов: ClickHouse недоступен слишком
+            долго. Пока это так, опрос проб приостанавливается — данные ждут на пробах.
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.SealedCount">
+            <summary>Число запечатанных (ожидающих отправки) сегментов.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.CurrentRows">
+            <summary>Число строк в текущем (заполняемом) сегменте.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.PendingRows">
+            <summary>Всего строк ждёт отправки: запечатанные сегменты плюс текущий.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.MaxSegments">
+            <summary>Предел числа сегментов, после которого приём приостанавливается.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.BatchRows">
+            <summary>Предел числа строк в сегменте.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Abstractions.IResultSpool.FlushMinutes">
+            <summary>Срок накопления сегмента, минут.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IResultSpool.AppendAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ExportRow},System.Threading.CancellationToken)">
+            <summary>
+            Дописывает строки в текущий сегмент и гарантирует их попадание на диск.
+            Запечатывает сегмент, если он достиг предела по числу строк.
+            </summary>
+            <param name="rows">Строки результатов.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IResultSpool.SealIfDueAsync">
+            <summary>
+            Запечатывает текущий сегмент, если он непустой и старше заданного срока.
+            </summary>
+            <returns><c>true</c>, если сегмент был запечатан.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IResultSpool.GetSealedSegments">
+            <summary>Запечатанные сегменты в порядке их создания.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IResultSpool.DeleteSegment(System.String)">
+            <summary>Удаляет отправленный в ClickHouse сегмент.</summary>
+            <param name="path">Путь сегмента, полученный из <see cref="M:SPI.Twamp.Server.Abstractions.IResultSpool.GetSealedSegments"/>.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IResultSpool.ReadPendingAsync(System.Threading.CancellationToken)">
+            <summary>
+            Читает все строки, ещё не уехавшие в ClickHouse (запечатанные сегменты и текущий) —
+            источник CSV-отчёта.
+            </summary>
+            <param name="cancellationToken">Токен отмены.</param>
         </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IStatRepository">
             <summary>
@@ -789,19 +919,16 @@
             и импорт задач из CSV.
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ReportService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskRepository,SPI.Twamp.Server.Abstractions.ITaskService,Microsoft.Extensions.Caching.Memory.IMemoryCache)">
+        <member name="M:SPI.Twamp.Server.Application.ReportService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IResultSpool,SPI.Twamp.Server.Abstractions.ITaskService)">
             <summary>
             Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IReportService"/>: потоковая выгрузка результатов в CSV
             и импорт задач из CSV.
             </summary>
         </member>
-        <member name="F:SPI.Twamp.Server.Application.ReportService.TitleCacheDuration">
-            <summary>Срок хранения названия задачи в кэше.</summary>
+        <member name="F:SPI.Twamp.Server.Application.ReportService.FlushEvery">
+            <summary>Как часто сбрасывать накопленное в поток ответа, строк.</summary>
         </member>
-        <member name="F:SPI.Twamp.Server.Application.ReportService.ExportPageSize">
-            <summary>Размер страницы при потоковом чтении статистики из БД.</summary>
-        </member>
-        <member name="M:SPI.Twamp.Server.Application.ReportService.StreamCsvAsync(System.DateTime,System.DateTime,System.Char,System.Char,System.IO.TextWriter,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Application.ReportService.StreamCsvAsync(System.Char,System.Char,System.IO.TextWriter,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Application.ReportService.ImportCsvAsync(System.IO.Stream,System.String,System.String,System.String,System.Threading.CancellationToken)">
@@ -813,7 +940,30 @@
         <member name="M:SPI.Twamp.Server.Application.ReportService.MapToTask(SPI.Twamp.Server.Contracts.CsvRow,System.String,System.DateTime)">
             <summary>Преобразует строку CSV в задачу.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Application.ReportService.GetTitleAsync(System.Guid)">
+        <member name="T:SPI.Twamp.Server.Application.ResultIngestService">
+            <summary>
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IResultIngestService"/>: вывод зонда разбирается сразу при
+            приёме, готовые строки складываются в буфер. В базе сервера результаты больше
+            не хранятся — постоянное место их жизни это ClickHouse.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ResultIngestService.#ctor(SPI.Twamp.Server.Abstractions.IResultSpool,SPI.Twamp.Server.Abstractions.ITaskRepository,Microsoft.Extensions.Caching.Memory.IMemoryCache)">
+            <summary>
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IResultIngestService"/>: вывод зонда разбирается сразу при
+            приёме, готовые строки складываются в буфер. В базе сервера результаты больше
+            не хранятся — постоянное место их жизни это ClickHouse.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.ResultIngestService.TitleCacheDuration">
+            <summary>Срок хранения названия задачи в кэше.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Application.ResultIngestService.IsBackpressured">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ResultIngestService.IngestAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ActionData},System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.ResultIngestService.GetTitleAsync(System.Guid)">
             <summary>Возвращает название задачи по идентификатору, кэшируя результат.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Application.TaskService">
@@ -976,6 +1126,72 @@
         <member name="M:SPI.Twamp.Server.Application.TimeSpec.Apply(SPI.Twamp.Server.Application.TimeSpec.Unit,System.Int32,System.Int32@,System.Int32@,System.TimeSpan@)">
             <summary>Добавляет компонент длительности к накопителям.</summary>
         </member>
+        <member name="T:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService">
+            <summary>
+            Переносит накопленные результаты в ClickHouse: запечатывает текущий сегмент по
+            истечении срока накопления и отправляет запечатанные сегменты по порядку, удаляя
+            каждый сразу после успешной вставки.
+            <para>
+            Пока база недоступна, сегменты копятся в буфере; при достижении настроенного
+            предела буфер сообщает о переполнении, и опрос проб приостанавливается —
+            результаты остаются на пробах и будут забраны после восстановления связи.
+            </para>
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.#ctor(NLog.Logger,SPI.Twamp.Server.Abstractions.IResultSpool,SPI.Twamp.Server.Abstractions.IClickHouseWriter,Microsoft.Extensions.Configuration.IConfiguration)">
+            <summary>
+            Переносит накопленные результаты в ClickHouse: запечатывает текущий сегмент по
+            истечении срока накопления и отправляет запечатанные сегменты по порядку, удаляя
+            каждый сразу после успешной вставки.
+            <para>
+            Пока база недоступна, сегменты копятся в буфере; при достижении настроенного
+            предела буфер сообщает о переполнении, и опрос проб приостанавливается —
+            результаты остаются на пробах и будут забраны после восстановления связи.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.PollInterval">
+            <summary>Как часто проверять буфер (срок накопления проверяется здесь же).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._retrySeconds">
+            <summary>Пауза после ошибки базы, секунд.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._tableReady">
+            <summary>Таблица уже создана в текущем сеансе связи с базой.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._reportedFailure">
+            <summary>О недоступности базы сообщаем один раз — до восстановления.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._online">
+            <summary>Итог последнего обращения к базе; <c>null</c> — обращений ещё не было.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._lastError">
+            <summary>Текст последней ошибки базы и время её появления.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._lastUploadAt">
+            <summary>Время последней успешной выгрузки сегмента.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService._segmentsUploaded">
+            <summary>Накопительные счётчики выгруженного с момента запуска сервера.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.GetState">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.ExecuteAsync(System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.RunCycleAsync(System.Threading.CancellationToken)">
+            <summary>
+            Один цикл: запечатать просроченный сегмент и отправить очередь.
+            Возвращает <c>false</c>, если база недоступна и нужна длинная пауза.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.FlushSegmentsAsync(System.Threading.CancellationToken)">
+            <summary>Отправляет запечатанные сегменты по порядку, удаляя каждый после вставки.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ClickHouseExportService.HandleFailure(System.Exception)">
+            <summary>Обрабатывает недоступность базы: сообщает один раз и сбрасывает готовность таблицы.</summary>
+        </member>
         <member name="T:SPI.Twamp.Server.BackgroundServices.MaintenanceService">
             <summary>
             Фоновое обслуживание БД:
@@ -1045,7 +1261,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IActionRepository,SPI.Twamp.Server.Abstractions.IStatRepository,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.#ctor(Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Server.Abstractions.IClientRepository,SPI.Twamp.Server.Abstractions.IProbeClient,SPI.Twamp.Server.Abstractions.IResultIngestService,SPI.Twamp.Server.Abstractions.ITaskService,SPI.Twamp.Server.Abstractions.IChangeNotifier)">
             <summary>
             Фоновый сервис опроса проб. Для каждой подтверждённой пробы поддерживает
             цикл «длинного опроса» результатов (CheckData) и сохраняет их в БД, а также
@@ -1060,6 +1276,9 @@
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService.MaxBackoffSeconds">
             <summary>Максимальная задержка между попытками при ошибках связи, секунд.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService.BackpressureDelaySeconds">
+            <summary>Пауза опроса, пока буфер результатов переполнен, секунд.</summary>
         </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._reconcileIntervalSeconds">
             <summary>Интервал фоновой сверки задач с пробами, секунд.</summary>
@@ -1096,13 +1315,6 @@
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StartAsync(System.Threading.CancellationToken)">
             <summary>Старт сервиса: индексы, опрос известных проб и цикл сверки задач.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.WarmupLastResultsAsync(System.Threading.CancellationToken)">
-            <summary>
-            Заполняет реестр последних результатов из БД: для каждой известной задачи
-            берётся её последний сохранённый результат. Свежие записи, успевшие прийти
-            от проб, не затираются (TryAdd).
-            </summary>
-        </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.BuildLastResult(SPI.Twamp.Server.Contracts.ActionData)">
             <summary>
             Собирает «последний результат» задачи из записи БД: исход запуска,
@@ -1135,9 +1347,6 @@
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.DelayBackoffAsync(System.Int32,System.Threading.CancellationToken)">
             <summary>Ждёт backoff-паузу; возвращает <c>false</c>, если сервис остановлен во время ожидания.</summary>
-        </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.StoreStatsAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ActionData})">
-            <summary>Разбирает принятые результаты в статистику и сохраняет её.</summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ReconcileLoopAsync(System.Threading.CancellationToken)">
             <summary>
@@ -1238,6 +1447,98 @@
             Вывод ошибок процесса зонда.
             </summary>
         </member>
+        <member name="T:SPI.Twamp.Server.Contracts.ClickHouseState">
+            <summary>
+            Состояние переноса результатов в ClickHouse — то, что показывает
+            вкладка «Хранилище» веб-интерфейса.
+            </summary>
+            <param name="Enabled">Выгрузка включена в конфигурации.</param>
+            <param name="Url">Адрес HTTP-интерфейса базы.</param>
+            <param name="Target">База и таблица назначения (<c>база.таблица</c>).</param>
+            <param name="Online">Последняя попытка обращения к базе была успешной; <c>null</c> — обращений ещё не было.</param>
+            <param name="LastError">Текст последней ошибки базы (<c>null</c> — ошибок нет).</param>
+            <param name="LastErrorAt">Когда произошла последняя ошибка.</param>
+            <param name="LastUploadAt">Когда последний сегмент успешно уехал в базу.</param>
+            <param name="SegmentsUploaded">Сколько сегментов выгружено с момента запуска сервера.</param>
+            <param name="RowsUploaded">Сколько строк выгружено с момента запуска сервера.</param>
+            <param name="CurrentRows">Строк в заполняемом сегменте.</param>
+            <param name="PendingRows">Строк всего ждёт отправки (очередь + заполняемый).</param>
+            <param name="SealedSegments">Запечатанных сегментов в очереди.</param>
+            <param name="MaxSegments">Предел числа сегментов (за ним — пауза приёма).</param>
+            <param name="BatchRows">Порог строк, по которому сегмент запечатывается.</param>
+            <param name="FlushMinutes">Срок, по которому сегмент запечатывается, минут.</param>
+            <param name="Backpressured">Приём результатов с проб приостановлен: буфер полон.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Contracts.ClickHouseState.#ctor(System.Boolean,System.String,System.String,System.Nullable{System.Boolean},System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime},System.Int64,System.Int64,System.Int32,System.Int64,System.Int32,System.Int32,System.Int32,System.Int32,System.Boolean)">
+            <summary>
+            Состояние переноса результатов в ClickHouse — то, что показывает
+            вкладка «Хранилище» веб-интерфейса.
+            </summary>
+            <param name="Enabled">Выгрузка включена в конфигурации.</param>
+            <param name="Url">Адрес HTTP-интерфейса базы.</param>
+            <param name="Target">База и таблица назначения (<c>база.таблица</c>).</param>
+            <param name="Online">Последняя попытка обращения к базе была успешной; <c>null</c> — обращений ещё не было.</param>
+            <param name="LastError">Текст последней ошибки базы (<c>null</c> — ошибок нет).</param>
+            <param name="LastErrorAt">Когда произошла последняя ошибка.</param>
+            <param name="LastUploadAt">Когда последний сегмент успешно уехал в базу.</param>
+            <param name="SegmentsUploaded">Сколько сегментов выгружено с момента запуска сервера.</param>
+            <param name="RowsUploaded">Сколько строк выгружено с момента запуска сервера.</param>
+            <param name="CurrentRows">Строк в заполняемом сегменте.</param>
+            <param name="PendingRows">Строк всего ждёт отправки (очередь + заполняемый).</param>
+            <param name="SealedSegments">Запечатанных сегментов в очереди.</param>
+            <param name="MaxSegments">Предел числа сегментов (за ним — пауза приёма).</param>
+            <param name="BatchRows">Порог строк, по которому сегмент запечатывается.</param>
+            <param name="FlushMinutes">Срок, по которому сегмент запечатывается, минут.</param>
+            <param name="Backpressured">Приём результатов с проб приостановлен: буфер полон.</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.Enabled">
+            <summary>Выгрузка включена в конфигурации.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.Url">
+            <summary>Адрес HTTP-интерфейса базы.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.Target">
+            <summary>База и таблица назначения (<c>база.таблица</c>).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.Online">
+            <summary>Последняя попытка обращения к базе была успешной; <c>null</c> — обращений ещё не было.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.LastError">
+            <summary>Текст последней ошибки базы (<c>null</c> — ошибок нет).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.LastErrorAt">
+            <summary>Когда произошла последняя ошибка.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.LastUploadAt">
+            <summary>Когда последний сегмент успешно уехал в базу.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.SegmentsUploaded">
+            <summary>Сколько сегментов выгружено с момента запуска сервера.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.RowsUploaded">
+            <summary>Сколько строк выгружено с момента запуска сервера.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.CurrentRows">
+            <summary>Строк в заполняемом сегменте.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.PendingRows">
+            <summary>Строк всего ждёт отправки (очередь + заполняемый).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.SealedSegments">
+            <summary>Запечатанных сегментов в очереди.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.MaxSegments">
+            <summary>Предел числа сегментов (за ним — пауза приёма).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.BatchRows">
+            <summary>Порог строк, по которому сегмент запечатывается.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.FlushMinutes">
+            <summary>Срок, по которому сегмент запечатывается, минут.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ClickHouseState.Backpressured">
+            <summary>Приём результатов с проб приостановлен: буфер полон.</summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Contracts.Client">
             <summary>
             Подтверждённая проба (клиент), которую сервер опрашивает.
@@ -1254,6 +1555,173 @@
             <summary>
             Отображаемое имя пробы.
             </summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Contracts.ExportRow">
+            <summary>
+            Одна строка результата зондирования — единый формат для CSV-отчёта, файлов
+            буфера (NDJSON) и таблицы ClickHouse. Порядок свойств задаёт порядок колонок.
+            <para>
+            Первые поля (до <see cref="P:SPI.Twamp.Server.Contracts.ExportRow.Errors"/>) — ровно формат файла экспорта; далее идут
+            сырые данные ответа зонда и служебные <see cref="P:SPI.Twamp.Server.Contracts.ExportRow.ResultId"/>/<see cref="P:SPI.Twamp.Server.Contracts.ExportRow.RowNo"/>,
+            по которым ClickHouse (ReplacingMergeTree) схлопывает повторно доставленные пачки.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Contracts.ExportRow.TimeFormat">
+            <summary>Формат даты-времени: и для CSV, и для ClickHouse (DateTime).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Contracts.ExportRow.CsvStartedFormat">
+            <summary>Формат даты-времени запуска в CSV-отчёте (как просили в ТЗ).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Started">
+            <summary>Дата и время запуска задачи (момент выполнения замера пробой).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Title">
+            <summary>Название задачи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Id">
+            <summary>Идентификатор задачи.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Mode">
+            <summary>Режим зондирования (WinPing / TWamp / TWampy).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.CallLine">
+            <summary>Фактическая строка вызова зонда.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.FromHost">
+            <summary>Хост-источник.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.FromPort">
+            <summary>Порт источника.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ToHost">
+            <summary>Хост-получатель.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ToPort">
+            <summary>Порт получателя.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.SID">
+            <summary>Идентификатор сеанса TWAMP.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.First">
+            <summary>Время первого пакета.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Last">
+            <summary>Время последнего пакета.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Sent">
+            <summary>Отправлено пакетов.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Lost">
+            <summary>Потеряно пакетов.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.LossPercent">
+            <summary>Процент потерь.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.RttMin">
+            <summary>Круговая задержка, минимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.RttMedian">
+            <summary>Круговая задержка, медиана (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.RttMax">
+            <summary>Круговая задержка, максимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.SendMin">
+            <summary>Задержка в прямом направлении, минимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.SendMedian">
+            <summary>Задержка в прямом направлении, медиана (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.SendMax">
+            <summary>Задержка в прямом направлении, максимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectMin">
+            <summary>Задержка в обратном направлении, минимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectMedian">
+            <summary>Задержка в обратном направлении, медиана (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectMax">
+            <summary>Задержка в обратном направлении, максимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectProcMin">
+            <summary>Время обработки на отражателе, минимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectProcMax">
+            <summary>Время обработки на отражателе, максимум (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.TwoWayJitter">
+            <summary>Двусторонний джиттер (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.SendJitter">
+            <summary>Джиттер в прямом направлении (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectJitter">
+            <summary>Джиттер в обратном направлении (мс).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.SendHops">
+            <summary>Число переходов в прямом направлении.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ReflectHops">
+            <summary>Число переходов в обратном направлении.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Errors">
+            <summary>Текст ошибок замера.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.EndNode">
+            <summary>Конечный узел (цель зондирования).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Outcome">
+            <summary>Исход запуска: Success / ExitCodeError / TimedOut / StartFailed.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ExitCode">
+            <summary>Код выхода процесса зонда.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.Console">
+            <summary>Стандартный вывод зонда.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ErrorConsole">
+            <summary>Вывод ошибок зонда.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.ResultId">
+            <summary>Идентификатор результата (присвоен пробой) — ключ дедупликации.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.ExportRow.RowNo">
+            <summary>Номер блока статистики внутри одного результата (0, 1, …).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Contracts.ExportRow.Create(SPI.Twamp.Server.Contracts.ActionData,SPI.Twamp.Server.Parser.TwPingStats,System.Int32,System.String)">
+            <summary>
+            Собирает строку из сырого ответа зонда и разобранной статистики.
+            </summary>
+            <param name="action">Сырой результат от пробы.</param>
+            <param name="stats">Разобранная статистика (один блок).</param>
+            <param name="rowNo">Номер блока внутри результата.</param>
+            <param name="title">Название задачи.</param>
+        </member>
+        <member name="F:SPI.Twamp.Server.Contracts.ExportRow.CsvColumns">
+            <summary>Колонки CSV-отчёта (без сырых данных и служебных полей).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Contracts.ExportRow.CsvHeader(System.Char)">
+            <summary>Строка заголовка CSV-отчёта.</summary>
+            <param name="columnSeparator">Разделитель колонок.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Contracts.ExportRow.ToCsvLine(System.Char,System.Char)">
+            <summary>Формирует строку CSV-отчёта.</summary>
+            <param name="columnSeparator">Разделитель колонок.</param>
+            <param name="decimalSeparator">Десятичный разделитель чисел.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Contracts.ExportRow.FormatStarted">
+            <summary>Переводит время запуска из формата хранения в формат CSV-отчёта.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Contracts.ExportRow.CreateTableDdl(System.String,System.String)">
+            <summary>
+            DDL таблицы ClickHouse. Колонки повторяют формат экспорта, далее — сырые данные
+            ответа зонда. ReplacingMergeTree по (ResultId, RowNo) схлопывает повторные
+            доставки одной и той же пачки.
+            </summary>
+            <param name="database">Имя базы.</param>
+            <param name="table">Имя таблицы.</param>
         </member>
         <member name="T:SPI.Twamp.Server.Contracts.Identify">
             <summary>
@@ -1799,13 +2267,11 @@
             генерация задач по файлу маршрутизаторов. Часть API оператора (<c>api/userinterface</c>).
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.DownloadFile(System.Nullable{System.DateOnly},System.Nullable{System.DateOnly},System.Char,System.Char,System.Threading.CancellationToken)">
+        <member name="M:SPI.Twamp.Server.Controllers.ProvisioningController.DownloadFile(System.Char,System.Char,System.Threading.CancellationToken)">
             <summary>
-            Выгружает результаты зондирования за период в CSV-файл потоково:
-            данные пишутся в ответ постранично, большой период не загружается в память.
+            Выгружает в CSV результаты, ещё не перенесённые в ClickHouse (содержимое буфера).
+            Выборка по датам не нужна: вся история хранится в ClickHouse и запрашивается оттуда.
             </summary>
-            <param name="from">Начало периода (по умолчанию — 14 дней назад).</param>
-            <param name="to">Конец периода (по умолчанию — сейчас).</param>
             <param name="separator">Разделитель полей.</param>
             <param name="decimalSeparator">Десятичный разделитель.</param>
             <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
@@ -1861,6 +2327,22 @@
             <param name="set">Имя применяемого набора шаблонов; пусто — все наборы.</param>
             <param name="cancellationToken">Токен отмены.</param>
             <returns>CSV-файл с задачами.</returns>
+        </member>
+        <member name="T:SPI.Twamp.Server.Controllers.StorageController">
+            <summary>
+            Состояние хранилища измерений: буфер результатов и перенос их в ClickHouse.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.StorageController.#ctor(SPI.Twamp.Server.Abstractions.IClickHouseStatusProvider)">
+            <summary>
+            Состояние хранилища измерений: буфер результатов и перенос их в ClickHouse.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.StorageController.ClickHouseStatus">
+            <summary>
+            Возвращает состояние переноса результатов в ClickHouse: объёмы очереди,
+            сколько уже выгружено, доступность базы и текст последней ошибки.
+            </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Controllers.TasksController">
             <summary>
@@ -1989,6 +2471,52 @@
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ChangeNotifier.WaitAsync(System.Int64,System.TimeSpan,System.Threading.CancellationToken)">
             <inheritdoc/>
+        </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.ClickHouseWriter">
+            <summary>
+            Реализация <see cref="T:SPI.Twamp.Server.Abstractions.IClickHouseWriter"/> поверх HTTP-интерфейса ClickHouse.
+            <para>
+            Внешний драйвер не нужен: база принимает запрос в параметре <c>query</c>, а данные —
+            телом запроса. Файл сегмента уже лежит в формате <c>JSONEachRow</c>, поэтому
+            отправляется потоком без чтения в память — вставка 100 000 строк не зависит
+            от объёма ОЗУ сервера.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.InsertSettings">
+            <summary>Настройки вставки: не падать на незнакомых полях и понимать любые формы дат.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration)">
+            <summary>Создаёт писателя по конфигурации (секция <c>ClickHouse</c>).</summary>
+            <param name="logger">Логгер.</param>
+            <param name="configuration">Конфигурация приложения.</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.Enabled">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.Url">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.Target">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.EnsureTableAsync(System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.InsertSegmentAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.ExecuteAsync(System.String,System.Threading.CancellationToken)">
+            <summary>Выполняет запрос без данных (DDL).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.EnsureSuccessAsync(System.Net.Http.HttpResponseMessage,System.Threading.CancellationToken)">
+            <summary>
+            Проверяет ответ базы. ClickHouse возвращает текст ошибки телом, поэтому
+            включаем его в исключение — иначе в журнале остаётся один код состояния.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ClickHouseWriter.Dispose">
+            <summary>Освобождает HTTP-клиент.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.ClientRepository">
             <summary>
@@ -2121,6 +2649,117 @@
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskStatusRawAsync(System.String,System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
+        </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.ResultSpool">
+            <summary>
+            Файловая реализация <see cref="T:SPI.Twamp.Server.Abstractions.IResultSpool"/>: каждый сегмент — отдельный файл NDJSON.
+            <para>
+            Почему файлы, а не коллекции в LiteDB: сегменты живут недолго и нужны только как
+            очередь на отправку. Файл дописывается последовательно (дёшево), отправляется в
+            ClickHouse потоком без разбора и удаляется целиком; база при этом не разрастается
+            и не ловит блокировки при накоплении сотен тысяч записей.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ResultSpool.CurrentFileName">
+            <summary>Имя файла заполняемого сегмента.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ResultSpool.SealedPattern">
+            <summary>Шаблон поиска запечатанных сегментов.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ResultSpool._gate">
+            <summary>Один писатель на процесс: все обращения к текущему сегменту сериализуются.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration)">
+            <summary>Создаёт буфер и подхватывает сегменты, оставшиеся от прошлого запуска.</summary>
+            <param name="logger">Логгер.</param>
+            <param name="configuration">Конфигурация (секция <c>ClickHouse</c>).</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.IsFull">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.SealedCount">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.CurrentRows">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.PendingRows">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.MaxSegments">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.BatchRows">
+            <inheritdoc/>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ResultSpool.FlushMinutes">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.Recover">
+            <summary>
+            Восстанавливает состояние после перезапуска: считает уже запечатанные сегменты,
+            продолжает нумерацию и запечатывает недописанный текущий сегмент, чтобы его
+            содержимое не застряло в ожидании новых данных.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.ParseName(System.String)">
+            <summary>
+            Разбирает имя файла сегмента <c>seg-{номер}-{строк}.ndjson</c>.
+            Число строк вшито в имя, чтобы объём очереди был виден без чтения файлов.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.ExtractSequence(System.String)">
+            <summary>Порядковый номер сегмента — по нему определяется очередь отправки.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.AppendAsync(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ExportRow},System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.SealIfDueAsync">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.EnsureWriter">
+            <summary>Открывает (при необходимости) писателя текущего сегмента.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.SealCurrent(System.String)">
+            <summary>Закрывает текущий сегмент и переводит его в очередь на отправку.</summary>
+            <param name="reason">Причина запечатывания — для журнала.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.SealFile(System.String,System.Int32)">
+            <summary>Переименовывает файл текущего сегмента в запечатанный и учитывает его в очереди.</summary>
+            <param name="currentPath">Путь заполняемого сегмента.</param>
+            <param name="rows">Число строк в нём — попадает в имя файла.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.GetSealedSegments">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.DeleteSegment(System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.ReadPendingAsync(System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.ReadFileAsync(System.String,System.Threading.CancellationToken)">
+            <summary>Читает строки одного файла сегмента.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.TryDeserialize(System.String,System.String)">
+            <summary>Разбирает строку сегмента, пропуская повреждённую (обрыв записи при падении).</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ResultSpool.Dispose">
+            <summary>Закрывает текущий сегмент, не теряя записанное.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.SpoolJson">
+            <summary>
+            Настройки сериализации строк буфера. Формат файла сегмента — NDJSON
+            (по одному JSON-объекту в строке), он же формат <c>JSONEachRow</c> ClickHouse:
+            поэтому файл сегмента отправляется в базу потоком как есть, без разбора.
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.SpoolJson.Options">
+            <summary>
+            Имена свойств — как есть (совпадают с именами колонок таблицы), <c>null</c>
+            сохраняются (ClickHouse кладёт их в Nullable-колонки), кириллица не экранируется.
+            </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.StatRepository">
             <summary>

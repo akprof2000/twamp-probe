@@ -40,6 +40,7 @@
     <button data-tab="status" class="active">Статус проб</button>
     <button data-tab="tasks">Задачи</button>
     <button data-tab="upload">Загрузка</button>
+    <button data-tab="storage">Хранилище</button>
     <button data-tab="report">Отчёт</button>
   </nav>
   <div class="key">Ключ API: <input id="apiKey" type="text" placeholder="пусто, если выключен"></div>
@@ -192,14 +193,37 @@
   </div>
 </section>
 
+<section id="tab-storage">
+  <div class="card">
+    <h2>Перенос измерений в ClickHouse
+      <button class="act" style="float:right" onclick="withBusy(this, loadStorage)">Обновить</button>
+    </h2>
+    <div id="chState"></div>
+  </div>
+
+  <div class="card">
+    <h2>Буфер результатов</h2>
+    <div class="msg">
+      Результаты не хранятся в базе сервера: они копятся в сегментах на диске и уезжают в ClickHouse,
+      когда сегмент набрал заданное число строк <b>или</b> истёк срок накопления. Выгруженный сегмент
+      сразу удаляется. Если база недоступна, сегменты копятся; исчерпав предел, сервер приостанавливает
+      опрос проб — данные ждут на пробах и не теряются.
+    </div>
+    <div id="chBuffer"></div>
+  </div>
+</section>
+
 <section id="tab-report">
   <div class="card">
     <h2>Выгрузка результатов (CSV)</h2>
     <div class="row">
-      С <input id="repFrom" type="date"> по <input id="repTo" type="date">
       <button class="act" onclick="withBusy(this, downloadReport)">Скачать CSV</button>
     </div>
-    <div class="msg">Если даты не заданы — последние 14 дней. Колонка CallLine содержит фактическую строку вызова зонда.</div>
+    <div class="msg">
+      Выгружаются результаты, ещё не перенесённые в ClickHouse. Вся история хранится
+      в ClickHouse — выборка за произвольный период делается запросом к нему,
+      поэтому выбора дат здесь нет. Колонка CallLine содержит фактическую строку вызова зонда.
+    </div>
   </div>
 </section>
 
@@ -221,6 +245,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   if (b.dataset.tab === 'status') loadStatus();
   if (b.dataset.tab === 'tasks') loadTasks();
   if (b.dataset.tab === 'upload') loadSets();
+  if (b.dataset.tab === 'storage') loadStorage();
 });
 
 async function jget(p) {
@@ -236,6 +261,9 @@ async function jsend(p, method, body, isForm) {
   return r;
 }
 const fmt = d => d ? new Date(d).toLocaleString('ru-RU') : '—';
+// Экранирование для вставки в HTML (тексты ошибок и адреса приходят с сервера).
+const escHtml = s => (s ?? '').toString()
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // Индикация ожидания: на время запроса кнопка блокируется и показывает «⏳».
 // Так всегда видно, что нажатие принято и операция выполняется.
@@ -594,12 +622,66 @@ async function uploadCsv() {
   } catch (e) { $('#msgCsv').textContent = 'Ошибка: ' + e.message; }
 }
 
+// --- Хранилище: перенос измерений в ClickHouse ---
+const num = n => (n ?? 0).toLocaleString('ru-RU');
+
+async function loadStorage() {
+  let s;
+  try {
+    s = await jget('clickhousestatus');
+  } catch (e) {
+    $('#chState').innerHTML = '<div class="bad">Не удалось получить состояние: ' + e.message + '</div>';
+    return;
+  }
+
+  // Состояние связи с базой.
+  let state;
+  if (!s.enabled) {
+    state = '<span style="color:var(--mut)">выключен</span> — перенос отключён в настройках (ClickHouse:Enabled)';
+  } else if (s.online === true) {
+    state = '<span class="ok">на связи</span>';
+  } else if (s.online === false) {
+    state = '<span class="bad">нет связи</span>';
+  } else {
+    state = '<span style="color:var(--mut)">проверяется…</span>';
+  }
+
+  const rows = [
+    ['Состояние', state],
+    ['Адрес базы', s.enabled ? escHtml(s.url) + ' → <b>' + escHtml(s.target) + '</b>' : '—'],
+    ['Последняя выгрузка', fmt(s.lastUploadAt)],
+    ['Выгружено с запуска сервера', num(s.rowsUploaded) + ' строк в ' + num(s.segmentsUploaded) + ' сегментах']
+  ];
+  if (s.lastError) {
+    rows.push(['Последняя ошибка', '<span class="bad">' + escHtml(s.lastError) + '</span><br>'
+      + '<span style="color:var(--mut)">' + fmt(s.lastErrorAt) + '</span>']);
+  }
+  $('#chState').innerHTML = '<table>' + rows.map(r =>
+    '<tr><th style="text-align:left;width:260px">' + r[0] + '</th><td>' + r[1] + '</td></tr>').join('') + '</table>';
+
+  // Буфер: заполнение очереди и пороги отправки.
+  const fill = s.maxSegments ? Math.min(100, Math.round(s.sealedSegments * 100 / s.maxSegments)) : 0;
+  const capacity = s.batchRows * s.maxSegments;
+  const bar = '<div style="background:var(--brd);border-radius:4px;height:14px;overflow:hidden;max-width:420px">'
+    + '<div style="width:' + fill + '%;height:100%;background:' + (s.backpressured ? 'var(--bad)' : 'var(--ok)') + '"></div></div>';
+
+  const buf = [
+    ['Ждёт отправки', '<b>' + num(s.pendingRows) + '</b> строк'],
+    ['В заполняемом сегменте', num(s.currentRows) + ' из ' + num(s.batchRows) + ' строк'],
+    ['Очередь сегментов', s.sealedSegments + ' из ' + s.maxSegments + '<br>' + bar],
+    ['Ёмкость буфера', num(capacity) + ' строк (' + num(s.batchRows) + ' × ' + s.maxSegments + ')'],
+    ['Сегмент отправляется', 'по ' + num(s.batchRows) + ' строкам или раз в ' + s.flushMinutes + ' мин'],
+    ['Приём с проб', s.backpressured
+      ? '<span class="bad">приостановлен</span> — буфер полон, результаты ждут на пробах'
+      : '<span class="ok">идёт</span>']
+  ];
+  $('#chBuffer').innerHTML = '<table>' + buf.map(r =>
+    '<tr><th style="text-align:left;width:260px">' + r[0] + '</th><td>' + r[1] + '</td></tr>').join('') + '</table>';
+}
+
 // --- Отчёт ---
 async function downloadReport() {
-  let q = [];
-  if ($('#repFrom').value) q.push('from=' + $('#repFrom').value);
-  if ($('#repTo').value) q.push('to=' + $('#repTo').value);
-  const r = await fetch(api('downloadfile' + (q.length ? '?' + q.join('&') : '')), { headers: hdrs() });
+  const r = await fetch(api('downloadfile'), { headers: hdrs() });
   if (!r.ok) { alert('Ошибка: ' + r.status); return; }
   const blob = await r.blob(); const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = 'report.csv'; a.click();
@@ -620,6 +702,8 @@ function refreshActiveTab() {
     if (currentProbe) loadProbeTasks(null, currentProbe);
   } else if (tab === 'tasks') {
     loadTasks();
+  } else if (tab === 'storage') {
+    loadStorage();
   }
 }
 

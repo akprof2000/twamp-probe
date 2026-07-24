@@ -9,19 +9,19 @@ namespace SPI.Twamp.Server.Abstractions
     public interface IReportService
     {
         /// <summary>
-        /// Потоково пишет CSV-отчёт по результатам за период в указанный писатель.
-        /// Данные читаются из БД постранично, поэтому даже очень большой период
-        /// не загружается в память целиком.
+        /// Потоково пишет CSV-отчёт в указанный писатель.
+        /// <para>
+        /// Источник — буфер результатов, то есть данные, ещё не уехавшие в ClickHouse.
+        /// Выбора периода нет: вся история живёт в ClickHouse и запрашивается оттуда.
+        /// Чтение потоковое, поэтому объём буфера не влияет на память сервера.
+        /// </para>
         /// </summary>
-        /// <param name="from">Начало периода.</param>
-        /// <param name="to">Конец периода.</param>
         /// <param name="separator">Разделитель полей CSV.</param>
         /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
         /// <param name="writer">Куда писать CSV (тело HTTP-ответа).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         Task StreamCsvAsync(
-            DateTime from, DateTime to, char separator, char decimalSeparator,
-            TextWriter writer, CancellationToken cancellationToken);
+            char separator, char decimalSeparator, TextWriter writer, CancellationToken cancellationToken);
 
         /// <summary>
         /// Импортирует задачи из CSV-потока и ставит их на выполнение.

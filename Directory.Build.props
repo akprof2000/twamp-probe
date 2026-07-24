@@ -1,9 +1,9 @@
-<Project>
+﻿<Project>
   <!-- Единая версия всех .NET-проектов решения. Локальные сборки получают её
        как есть; релизные — версию из тега (release.yml передаёт -p:Version).
        Версия пробы видна серверу в списке проб (Identify.Version из сборки). -->
   <PropertyGroup>
-    <Version>1.2.6</Version>
+    <Version>1.3.0</Version>
     <Authors>akprof2000</Authors>
     <Product>SPI TWamp</Product>
   </PropertyGroup>

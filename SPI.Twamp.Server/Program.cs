@@ -92,6 +92,10 @@ try
     _ = builder.Services.AddSingleton<IActionRepository, ActionRepository>();
     _ = builder.Services.AddSingleton<IStatRepository, StatRepository>();
     _ = builder.Services.AddSingleton<IProbeClient, ProbeClient>();
+
+    // Путь результатов: буфер-сегменты на диске → выгрузка в ClickHouse.
+    _ = builder.Services.AddSingleton<IResultSpool, ResultSpool>();
+    _ = builder.Services.AddSingleton<IClickHouseWriter, ClickHouseWriter>();
     // Шина изменений для «длинного опроса» веб-интерфейса (WaitChanges).
     _ = builder.Services.AddSingleton<IChangeNotifier, ChangeNotifier>();
 
@@ -99,6 +103,7 @@ try
     _ = builder.Services.AddSingleton<ITaskService, TaskService>();
     _ = builder.Services.AddSingleton<IClientService, ClientService>();
     _ = builder.Services.AddSingleton<IReportService, ReportService>();
+    _ = builder.Services.AddSingleton<IResultIngestService, ResultIngestService>();
     _ = builder.Services.AddSingleton<ITemplateRepository, TemplateRepository>();
     _ = builder.Services.AddSingleton<IProvisioningService, ProvisioningService>();
 
@@ -107,6 +112,13 @@ try
     _ = builder.Services.AddSingleton<IProbePoller>(provider => provider.GetRequiredService<ProbePollingService>());
     _ = builder.Services.AddSingleton<IProbeStatusProvider>(provider => provider.GetRequiredService<ProbePollingService>());
     _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<ProbePollingService>());
+
+    // --- Фоновая выгрузка накопленных результатов в ClickHouse ---
+    // Один синглтон: он же хостед-сервис и поставщик состояния для вкладки «Хранилище».
+    _ = builder.Services.AddSingleton<ClickHouseExportService>();
+    _ = builder.Services.AddSingleton<IClickHouseStatusProvider>(
+        provider => provider.GetRequiredService<ClickHouseExportService>());
+    _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<ClickHouseExportService>());
 
     // --- Фоновая очистка БД (ретенция) ---
     _ = builder.Services.AddHostedService<MaintenanceService>();
