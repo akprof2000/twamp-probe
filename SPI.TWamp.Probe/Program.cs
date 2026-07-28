@@ -1,4 +1,4 @@
-
+﻿
 
 // Ignore Spelling: SPI Twamp
 
@@ -18,11 +18,8 @@ using System.Reflection;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 string fileNamesStr = "appsettings.json";
 
-int mesln = 70;
-string OperSystem = $"Operation system {System.Runtime.InteropServices.RuntimeInformation.OSDescription}";
-OperSystem = OperSystem.PadLeft(OperSystem.Length + ((mesln - OperSystem.Length) / 2)).PadRight(mesln);
-string Version = $"Version {Assembly.GetEntryAssembly()?.GetName().Version}";
-Version = Version.PadLeft(Version.Length + ((mesln - Version.Length) / 2)).PadRight(mesln);
+string OperSystem = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
+string Version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "неизвестна";
 
 Logger? logger = null;
 
@@ -46,12 +43,7 @@ try
     logger = LogManager.Setup().LoadConfigurationFromSection(builder.Configuration).GetCurrentClassLogger();
 
 
-    string sd = $"Program start at {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-    sd = sd.PadLeft(sd.Length + ((mesln - sd.Length) / 2)).PadRight(mesln);
-
-    logger.Info($"{sd}");
-    // Версию и ОС пишем одной записью — иначе баннер старта раздувает число Info-вызовов.
-    logger.Info($"{Version}{System.Environment.NewLine}{OperSystem}");
+    logger.Info("Запуск пробы: версия {Version}, ОС {OperSystem}", Version, OperSystem);
 
 
     // Выполнение зондов и выдача результатов теперь полностью асинхронны и не
@@ -198,21 +190,19 @@ try
     ConfigSettingLayoutRenderer.DefaultConfiguration = builder.Configuration;
     LogManager.ReconfigExistingLoggers();
 
-    logger.Debug("Start is configure as : {StrConfiguration}", builder.Configuration.GetDebugView());
+    // Полный дамп конфигурации (GetDebugView) не пишем: он вываливает все переменные
+    // окружения процесса, включая секреты, и раздувает журнал на старте.
     await app.RunAsync();
 
 }
 catch (Exception ex)
 {
-    logger?.Fatal(ex, "Stopped program because of exception");
+    logger?.Fatal(ex, "Аварийная остановка: необработанное исключение");
     Environment.Exit(1);
 }
 finally
 {
-    string se = $"Program end at {DateTime.Now:dd.MM.yyyy HH:mm:ss}";
-    se = se.PadLeft(se.Length + ((mesln - se.Length) / 2)).PadRight(mesln);
-    logger?.Info($"{se}");
-    logger?.Info($"{Version}{System.Environment.NewLine}{OperSystem}");
+    logger?.Info("Проба остановлена");
     LogManager.Shutdown();
 }
 

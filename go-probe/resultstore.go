@@ -9,7 +9,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"slices"
 	"sync"
@@ -54,7 +53,8 @@ func (s *ResultStore) Add(result ActionData) {
 		s.pending = s.pending[1:]
 		s.dropped++
 		if s.dropped == 1 || s.dropped%1000 == 0 {
-			log.Printf("Очередь результатов переполнена (лимит %d) — всего вытеснено %d", s.maxPending, s.dropped)
+			logResults.Error("Очередь результатов переполнена — старые записи вытесняются",
+				"лимит", s.maxPending, "всего_вытеснено", s.dropped)
 		}
 	}
 	s.dirty = true
@@ -128,14 +128,14 @@ func (s *ResultStore) Load() {
 	}
 	var saved []ActionData
 	if err := json.Unmarshal(data, &saved); err != nil {
-		log.Printf("Не удалось загрузить %s: %v", resultsFileName, err)
+		logResults.Error("Не удалось загрузить недоставленные результаты", "файл", resultsFileName, "ошибка", err)
 		return
 	}
 	s.mu.Lock()
 	s.pending = append(saved, s.pending...)
 	s.mu.Unlock()
 	if len(saved) > 0 {
-		log.Printf("Загружено %d недоставленных результатов из %s", len(saved), resultsFileName)
+		logResults.Info("Недоставленные результаты восстановлены с диска", "результатов", len(saved), "файл", resultsFileName)
 		select {
 		case s.signal <- struct{}{}:
 		default:
@@ -175,16 +175,16 @@ func (s *ResultStore) flush() {
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
-		log.Printf("Ошибка сериализации результатов: %v", err)
+		logResults.Error("Не удалось сериализовать результаты", "ошибка", err)
 		return
 	}
 	tmp := resultsFileName + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		log.Printf("Ошибка сохранения результатов: %v", err)
+		logResults.Error("Не удалось сохранить результаты", "ошибка", err)
 		return
 	}
 	if err := os.Rename(tmp, resultsFileName); err != nil {
-		log.Printf("Ошибка замены файла результатов: %v", err)
+		logResults.Error("Не удалось заменить файл результатов", "файл", resultsFileName, "ошибка", err)
 	}
 }
 

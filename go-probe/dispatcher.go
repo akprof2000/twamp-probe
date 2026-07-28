@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"log"
 )
 
 // Dispatcher — очередь задач и пул воркеров с ограниченной параллельностью.
@@ -27,7 +26,7 @@ func NewDispatcher(ctx context.Context, workers int, runner *ProbeRunner, regist
 	for range workers { // range по числу — Go 1.22
 		go d.workerLoop()
 	}
-	log.Printf("Запущено %d воркеров обработки зондов", workers)
+	logDispatcher.Info("Пул воркеров запущен", "воркеров", workers, "ёмкость_очереди", cap(d.queue))
 	return d
 }
 
@@ -36,7 +35,8 @@ func (d *Dispatcher) Enqueue(task *TaskInfo) {
 	select {
 	case d.queue <- task:
 	default:
-		log.Printf("Очередь диспетчера переполнена — задача %s пропущена", task.Id)
+		logDispatcher.Error("Очередь переполнена — задача пропущена",
+			"задача", task.Id, "название", task.Title, "ёмкость", cap(d.queue))
 	}
 }
 

@@ -10,7 +10,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"maps"
 	"os"
 	"slices"
@@ -64,11 +63,11 @@ func (r *TaskRegistry) Load() {
 	}
 	var saved []TaskInfo
 	if err := json.Unmarshal(data, &saved); err != nil {
-		log.Printf("Не удалось загрузить %s: %v", tasksFileName, err)
+		logRegistry.Error("Не удалось загрузить реестр задач", "файл", tasksFileName, "ошибка", err)
 		return
 	}
 	r.MergeJobs(saved)
-	log.Printf("Восстановлено задач из %s: %d", tasksFileName, len(saved))
+	logRegistry.Info("Реестр задач восстановлен с диска", "файл", tasksFileName, "задач", len(saved))
 }
 
 // MergeJobs применяет инкрементальные изменения задач (добавить/обновить/удалить).
@@ -106,7 +105,7 @@ func (r *TaskRegistry) mergeOne(item *TaskInfo) bool {
 		}
 		delete(r.tasks, item.Id)
 		r.registry.Remove(item.Id)
-		log.Printf("Задача %s удалена", item.Id)
+		logRegistry.Info("Задача удалена", "задача", item.Id, "название", item.Title)
 		return true
 	}
 
@@ -117,14 +116,15 @@ func (r *TaskRegistry) mergeOne(item *TaskInfo) bool {
 		}
 		entry.task = item
 		r.scheduleNext(entry)
-		log.Printf("Задача %s обновлена", item.Id)
+		logRegistry.Debug("Задача обновлена", "задача", item.Id, "название", item.Title)
 		return true
 	}
 
 	entry := &scheduledTask{task: item}
 	r.tasks[item.Id] = entry
 	r.scheduleNext(entry)
-	log.Printf("Задача %s добавлена: «%s»", item.Id, item.Title)
+	logRegistry.Debug("Задача добавлена", "задача", item.Id, "название", item.Title,
+		"режим", item.Mode, "узел", item.EndNode, "расписание", item.CronExpression)
 	return true
 }
 
@@ -138,14 +138,16 @@ func (r *TaskRegistry) scheduleNext(entry *scheduledTask) {
 	}
 	schedule, err := parser.Parse(task.CronExpression)
 	if err != nil {
-		log.Printf("Задача %s: некорректное cron-выражение «%s»: %v", task.Id, task.CronExpression, err)
+		logRegistry.Error("Некорректное cron-выражение — задача не будет запускаться",
+			"задача", task.Id, "название", task.Title, "выражение", task.CronExpression, "ошибка", err)
 		r.registry.SetNextRun(task.Id, task.Title, string(task.Mode), nil)
 		return
 	}
 
 	next := schedule.Next(time.Now())
 	if !task.End.IsZero() && next.After(task.End.Time) {
-		log.Printf("Задача %s завершена по дате окончания %s", task.Id, task.End.Format("02.01.2006 15:04"))
+		logRegistry.Info("Задача завершена по дате окончания",
+			"задача", task.Id, "название", task.Title, "окончание", task.End.Format("02.01.2006 15:04"))
 		r.registry.SetNextRun(task.Id, task.Title, string(task.Mode), nil)
 		return
 	}
@@ -218,10 +220,10 @@ func (r *TaskRegistry) persist() {
 	}
 	data, err := json.Marshal(all)
 	if err != nil {
-		log.Printf("Ошибка сериализации реестра задач: %v", err)
+		logRegistry.Error("Не удалось сериализовать реестр задач", "ошибка", err)
 		return
 	}
 	if err := os.WriteFile(tasksFileName, data, 0o644); err != nil {
-		log.Printf("Ошибка сохранения %s: %v", tasksFileName, err)
+		logRegistry.Error("Не удалось сохранить реестр задач", "файл", tasksFileName, "ошибка", err)
 	}
 }

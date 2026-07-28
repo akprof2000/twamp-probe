@@ -19,12 +19,13 @@ type ProbeToolConfig struct {
 
 // Config — настройки Go-пробы (подмножество appsettings.json C#-пробы).
 type Config struct {
-	ListenAddr         string // из Urls: "http://0.0.0.0:8443" → "0.0.0.0:8443"
-	ApiKey             string // Auth:ApiKey; пусто — аутентификация выключена
-	MaxParallel        int    // Probe:MaxParallel — размер пула воркеров
-	MaxPendingResults  int    // Probe:MaxPendingResults — лимит очереди результатов
-	PersistIntervalSec int    // Probe:PersistIntervalSec — период снимка очереди на диск
-	ServerTimeoutHours int    // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
+	ListenAddr         string    // из Urls: "http://0.0.0.0:8443" → "0.0.0.0:8443"
+	ApiKey             string    // Auth:ApiKey; пусто — аутентификация выключена
+	MaxParallel        int       // Probe:MaxParallel — размер пула воркеров
+	MaxPendingResults  int       // Probe:MaxPendingResults — лимит очереди результатов
+	PersistIntervalSec int       // Probe:PersistIntervalSec — период снимка очереди на диск
+	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
+	Log                LogConfig // секция Logging — журнал пробы
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
 	Twampy             ProbeToolConfig
@@ -50,9 +51,18 @@ func LoadConfig(path string) (*Config, error) {
 		MaxPendingResults:  num(raw, "Probe:MaxPendingResults", 100000),
 		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
-		Ping:               ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
-		Twamp:              ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
-		Twampy:             ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		Log: LogConfig{
+			Level:     str(raw, "Logging:Level", "Info"),
+			Dir:       str(raw, "Logging:Dir", "log"),
+			FileName:  str(raw, "Logging:FileName", "probe.log"),
+			MaxSizeMb: num(raw, "Logging:MaxSizeMb", 10),
+			MaxFiles:  num(raw, "Logging:MaxFiles", 20),
+			Console:   flag(raw, "Logging:Console", true),
+			Compress:  flag(raw, "Logging:Compress", true),
+		},
+		Ping:   ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
+		Twamp:  ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
+		Twampy: ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
 	}
 	return cfg, nil
 }
@@ -98,6 +108,23 @@ func num(raw map[string]any, path string, def int) int {
 	case string:
 		if n, err := strconv.Atoi(t); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+// flag достаёт логическое значение по пути «Секция:Ключ» (true/false или строка).
+func flag(raw map[string]any, path string, def bool) bool {
+	v, ok := dig(raw, path)
+	if !ok {
+		return def
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		if b, err := strconv.ParseBool(t); err == nil {
+			return b
 		}
 	}
 	return def

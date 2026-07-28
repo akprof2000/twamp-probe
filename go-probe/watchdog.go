@@ -9,7 +9,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"sync/atomic"
 	"time"
 )
@@ -41,10 +40,10 @@ func RunWatchdog(ctx context.Context, timeoutHours int, tracker *ContactTracker,
 	tasks *TaskRegistry, results *ResultStore) {
 
 	if timeoutHours <= 0 {
-		log.Println("Сторож связи с сервером выключен (Probe:ServerTimeoutHours = 0)")
+		logWatchdog.Info("Сторож связи выключен (Probe:ServerTimeoutHours = 0)")
 		return
 	}
-	log.Printf("Сторож связи: без запросов сервера дольше %d ч задачи будут остановлены", timeoutHours)
+	logWatchdog.Info("Сторож связи запущен", "порог_молчания_ч", timeoutHours)
 
 	timeout := time.Duration(timeoutHours) * time.Hour
 	var lastCleared time.Time
@@ -65,9 +64,9 @@ func RunWatchdog(ctx context.Context, timeoutHours int, tracker *ContactTracker,
 			stopped := tasks.ClearAll()
 			results.Clear()
 			lastCleared = time.Now()
-			log.Printf("Сервер не обращался к пробе с %s (дольше %d ч) — проба считает себя удалённой: "+
-				"остановлено задач %d, реестр и кэш результатов очищены",
-				last.Format("02.01.2006 15:04"), timeoutHours, stopped)
+			logWatchdog.Warn("Сервер молчит дольше порога — проба считает себя удалённой, всё очищено",
+				"последний_контакт", last.Format("02.01.2006 15:04"),
+				"порог_ч", timeoutHours, "остановлено_задач", stopped)
 		}
 	}
 }

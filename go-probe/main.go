@@ -12,11 +12,12 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,14 +31,44 @@ import (
 //	go build -ldflags "-X main.probeVersion=1.2.0-go"
 var probeVersion = "1.2.0-go-dev"
 
-func main() {
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	log.Printf("SPI TWamp Probe (Go) %s — запуск", probeVersion)
+// Логгеры компонентов: имя компонента попадает в каждую запись журнала,
+// поэтому по строке сразу видно, какая часть пробы её написала.
+var (
+	logMain       = Component("main")
+	logHTTP       = Component("http")
+	logDispatcher = Component("dispatcher")
+	logRegistry   = Component("registry")
+	logResults    = Component("results")
+	logRunner     = Component("runner")
+	logWatchdog   = Component("watchdog")
+)
 
+func main() {
+	// Конфигурация читается до настройки журнала (в ней его параметры),
+	// поэтому об ошибке на этом шаге сообщаем напрямую в stderr.
 	cfg, err := LoadConfig("appsettings.json")
 	if err != nil {
-		log.Fatalf("Ошибка конфигурации: %v", err)
+		fmt.Fprintln(os.Stderr, "Ошибка конфигурации:", err)
+		os.Exit(1)
 	}
+
+	closeLog, err := SetupLogging(cfg.Log)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Не удалось настроить журнал:", err)
+		os.Exit(1)
+	}
+	defer closeLog()
+
+	// Логгеры компонентов созданы до SetupLogging и держат прежний обработчик —
+	// пересоздаём их поверх настроенного журнала.
+	initComponentLoggers()
+
+	logMain.Info("Проба запускается",
+		"версия", probeVersion,
+		"адрес", cfg.ListenAddr,
+		"воркеров", cfg.MaxParallel,
+		"уровень_журнала", cfg.Log.Level,
+		"журнал", filepath.Join(cfg.Log.Dir, cfg.Log.FileName))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -59,18 +90,33 @@ func main() {
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.routes()}
 
 	go func() {
-		log.Printf("HTTP-сервер пробы слушает %s", cfg.ListenAddr)
+		logHTTP.Info("HTTP-сервер слушает", "адрес", cfg.ListenAddr,
+			"аутентификация", cfg.ApiKey != "")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Ошибка HTTP-сервера: %v", err)
+			logHTTP.Error("HTTP-сервер остановлен с ошибкой", "ошибка", err)
+			closeLog()
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("Остановка пробы…")
+	logMain.Info("Получен сигнал остановки — завершаем работу")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
 	results.Close() // финальный снимок недоставленных результатов
+	logMain.Info("Проба остановлена")
+}
+
+// initComponentLoggers пересоздаёт логгеры компонентов после настройки журнала.
+func initComponentLoggers() {
+	logMain = Component("main")
+	logHTTP = Component("http")
+	logDispatcher = Component("dispatcher")
+	logRegistry = Component("registry")
+	logResults = Component("results")
+	logRunner = Component("runner")
+	logWatchdog = Component("watchdog")
 }
 
 // apiServer — HTTP-обработчики эндпоинтов api/probeinterface.
@@ -128,7 +174,7 @@ func queryParam(r *http.Request, name string) string {
 // checkIn возвращает паспорт пробы: адреса, имя хоста, версию.
 func (a *apiServer) checkIn(w http.ResponseWriter, r *http.Request) {
 	requestInfo := queryParam(r, "requestInfo")
-	log.Printf("Получен CheckIn %s", requestInfo)
+	logHTTP.Info("CheckIn от сервера", "сервер", requestInfo, "версия_пробы", probeVersion)
 
 	ip, mac, ifaceName := firstInterface()
 	host, _ := os.Hostname()
@@ -150,7 +196,7 @@ func (a *apiServer) setJobs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Некорректное тело запроса: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Printf("Получено изменений задач: %d", len(jobs))
+	logHTTP.Info("SetJobs: получены изменения задач", "задач", len(jobs))
 	a.tasks.MergeJobs(jobs)
 	w.WriteHeader(http.StatusOK)
 }

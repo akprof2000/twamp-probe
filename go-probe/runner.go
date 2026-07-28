@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,7 +164,8 @@ func (r *ProbeRunner) executeOnce(
 		// Зонд не запустился (например, утилита не установлена) — ошибка обязана
 		// дойти до сервера как результат, иначе задача выглядит «молча пропавшей».
 		message := fmt.Sprintf("Не удалось запустить зонд «%s»: %v", execName, err)
-		log.Printf("Задача %s: %s", task.Id, message)
+		logRunner.Error("Зонд не запустился", "задача", task.Id, "название", task.Title,
+			"команда", execName, "ошибка", err)
 		r.registry.ReportOutcome(task.Id, OutcomeStartFailed, nil, message)
 		result.Outcome = string(OutcomeStartFailed)
 		result.ErrorConsole = message
