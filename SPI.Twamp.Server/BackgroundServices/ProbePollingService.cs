@@ -252,7 +252,12 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Фиксирует ошибку опроса пробы и обновляет её состояние для страницы статуса.</summary>
         private void MarkPollFailure(string probeUrl, Exception ex, long totalResults, int backoffSeconds)
         {
-            _logger.Warn(ex, "Ошибка опроса пробы {ProbeUrl}, повтор через {Delay} c", probeUrl, backoffSeconds);
+            // Недоступность пробы — рутина: в WARN пишем короткую причину без стека,
+            // полный стек оставляем на DEBUG для разбора нештатных случаев.
+            _logger.Warn("Ошибка опроса пробы {ProbeUrl}: {Reason}, повтор через {Delay} c",
+                probeUrl, ShortReason(ex), backoffSeconds);
+            _logger.Debug(ex, "Подробности ошибки опроса пробы {ProbeUrl}", probeUrl);
+
             ProbePollState? prev = _states.TryGetValue(probeUrl, out ProbePollState? p) ? p : null;
             bool becameFailing = prev is null || prev.BackoffSeconds == 0;
             _states[probeUrl] = new ProbePollState(prev?.LastSuccess, DateTime.Now, ex.Message, totalResults, backoffSeconds);
@@ -260,6 +265,21 @@ namespace SPI.Twamp.Server.BackgroundServices
             {
                 _changeNotifier.Notify(); // проба перестала отвечать — событие для интерфейса
             }
+        }
+
+        /// <summary>
+        /// Короткая причина ошибки: сообщение самого внутреннего исключения. Для сетевых
+        /// сбоев (Flurl оборачивает HttpRequestException → SocketException) это и есть суть,
+        /// а стек вызовов лишь засоряет журнал.
+        /// </summary>
+        private static string ShortReason(Exception ex)
+        {
+            Exception current = ex;
+            while (current.InnerException is not null)
+            {
+                current = current.InnerException;
+            }
+            return current.Message;
         }
 
         /// <summary>Ждёт backoff-паузу; возвращает <c>false</c>, если сервис остановлен во время ожидания.</summary>
@@ -309,7 +329,8 @@ namespace SPI.Twamp.Server.BackgroundServices
                 }
                 catch (Exception ex)
                 {
-                    _logger.Warn(ex, "Ошибка цикла сверки задач");
+                    _logger.Warn("Ошибка цикла сверки задач: {Reason}", ShortReason(ex));
+                    _logger.Debug(ex, "Подробности ошибки цикла сверки задач");
                 }
             }
         }
@@ -406,7 +427,9 @@ namespace SPI.Twamp.Server.BackgroundServices
             }
             catch (Exception ex)
             {
-                _logger.Warn(ex, "Не удалось синхронизировать задачи пробы {ProbeUrl}", requestInfo);
+                _logger.Warn("Не удалось синхронизировать задачи пробы {ProbeUrl}: {Reason}",
+                    requestInfo, ShortReason(ex));
+                _logger.Debug(ex, "Подробности ошибки синхронизации задач пробы {ProbeUrl}", requestInfo);
             }
         }
 
