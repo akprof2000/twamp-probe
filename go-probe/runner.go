@@ -131,9 +131,10 @@ func (r *ProbeRunner) executeOnce(
 	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
 
 	callLine := execName + " " + strings.Join(args, " ")
+	started := time.Now()
 	result := ActionData{
 		ResultId:    NewGuid(),
-		Creation:    CsTime{time.Now()},
+		Creation:    CsTime{started},
 		TaskId:      task.Id,
 		EndNode:     node,
 		IPAddress:   task.IpAddress,
@@ -164,8 +165,9 @@ func (r *ProbeRunner) executeOnce(
 		// Зонд не запустился (например, утилита не установлена) — ошибка обязана
 		// дойти до сервера как результат, иначе задача выглядит «молча пропавшей».
 		message := fmt.Sprintf("Не удалось запустить зонд «%s»: %v", execName, err)
-		logRunner.Error("Зонд не запустился", "задача", task.Id, "название", task.Title,
-			"команда", execName, "ошибка", err)
+		logRunner.Error("Задача: зонд не запустился",
+			"название", task.Title, "узел", node, "режим", task.Mode,
+			"команда", callLine, "ошибка", err, "задача", task.Id)
 		r.registry.ReportOutcome(task.Id, OutcomeStartFailed, nil, message)
 		result.Outcome = string(OutcomeStartFailed)
 		result.ErrorConsole = message
@@ -208,7 +210,39 @@ func (r *ProbeRunner) executeOnce(
 	result.Outcome = string(outcome)
 	result.Console = output
 	result.ErrorConsole = errText
+
+	logRun(task, node, outcome, exitCode, time.Since(started), summary)
 	return result
+}
+
+// logRun пишет итог одного прогона зонда: успех — Info, нештатный исход — Warn.
+// По записи видно, когда, какая задача и по какому узлу отработала и с каким результатом.
+func logRun(task *TaskInfo, node string, outcome RunOutcome, exitCode int, elapsed time.Duration, summary string) {
+	fields := []any{
+		"название", task.Title,
+		"узел", node,
+		"режим", task.Mode,
+		"исход", outcome,
+		"код", exitCode,
+		"длительность", elapsed.Round(time.Millisecond),
+		"задача", task.Id,
+	}
+	if outcome == OutcomeSuccess {
+		logRunner.Info("Задача выполнена", fields...)
+		return
+	}
+	// Для нештатного исхода добавляем краткую причину (первая строка ошибки).
+	logRunner.Warn("Задача завершилась нештатно", append(fields, "причина", firstLine(summary))...)
+}
+
+// firstLine возвращает первую непустую строку текста (краткая причина для лога).
+func firstLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // joinNonEmpty объединяет две строки через перевод строки, пропуская пустые.
