@@ -102,26 +102,6 @@ jobs:
 
           ls -lh ../publish/twamp-probe-go-*
 
-      # Rust-проба (эксперимент): один бинарник ~1 МБ без зависимостей и рантайма.
-      # Linux-вариант собирается статически (musl) — работает на любом дистрибутиве x86-64.
-      - name: Сборка Rust-пробы (linux-x64, тесты)
-        run: |
-          set -e
-          cd rust-probe
-          rustup target add x86_64-unknown-linux-musl
-          cargo test --release
-          PROBE_VERSION="${VERSION}-rust" cargo build --release --target x86_64-unknown-linux-musl
-
-          mkdir -p dist/twamp-probe-rust
-          cp target/x86_64-unknown-linux-musl/release/twamp-probe dist/twamp-probe-rust/
-          cp -r ../SPI.TWamp.Probe/twampy dist/twamp-probe-rust/twampy
-          rm -rf dist/twamp-probe-rust/twampy/__pycache__
-          cp deploy/appsettings.json dist/twamp-probe-rust/
-          cp README.md dist/twamp-probe-rust/README.txt
-          tar -C dist -czf "../publish/twamp-probe-rust-${VERSION}-linux-x64.tar.gz" twamp-probe-rust
-
-          ls -lh ../publish/twamp-probe-rust-*
-
       # Ручной запуск без тега: архивы доступны как артефакты workflow.
       - name: Артефакты (ручной запуск)
         if: github.ref_type != 'tag'
@@ -153,4 +133,3 @@ jobs:
             | `twamp-probe-*-selfcontained.tar.gz` | проба (C#), самодостаточная | нет; для режима TWampy — Python 3.8+ |
             | `twamp-probe-go-*-linux-x64.tar.gz` | **проба на Go** (Linux) — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
             | `twamp-probe-go-*-windows-x64.zip` | **проба на Go** (Windows) | нет; для TWampy — Python 3.8+ |
-            | `twamp-probe-rust-*-linux-x64.tar.gz` | **проба на Rust** (Linux, эксперимент) — один бинарник ~1 МБ | нет; для TWampy — Python 3.8+ |

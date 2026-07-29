@@ -29,7 +29,6 @@ type Config struct {
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
 	Twampy             ProbeToolConfig
-	TwampyEmbedded     bool // twampy:embedded — встроенный Go-отправитель без запуска python (эксперимент)
 }
 
 // LoadConfig читает appsettings.json рядом с исполняемым файлом.
@@ -61,23 +60,22 @@ func LoadConfig(path string) (*Config, error) {
 			Console:   flag(raw, "Logging:Console", true),
 			Compress:  flag(raw, "Logging:Compress", true),
 		},
-		Ping:           ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
-		Twamp:          ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
-		Twampy:         ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
-		TwampyEmbedded: flag(raw, "twampy:embedded", false),
+		Ping:   ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
+		Twamp:  ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
+		Twampy: ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
 	}
 	return cfg, nil
 }
 
 // resolveParallel возвращает число воркеров: явное значение (>0) — как есть;
-// 0 (или меньше) — автоподбор «ядра × 16» с потолком 10000 и полом 16. Зонды —
+// 0 (или меньше) — автоподбор «ядра × 10» с потолком 10000 и полом 16. Зонды —
 // внешние процессы, в основном ждущие I/O (особенно длинный TWAMP), поэтому
 // воркеров нужно много; потолок бережёт многоядерные машины.
 func resolveParallel(configured int) int {
 	if configured > 0 {
 		return configured
 	}
-	return min(max(runtime.NumCPU()*16, 16), 10000) // min/max — Go 1.21
+	return min(max(runtime.NumCPU()*10, 16), 10000) // min/max — Go 1.21
 }
 
 // parseUrls выделяет адрес прослушивания из строки Urls ASP.NET ("http://0.0.0.0:8443").

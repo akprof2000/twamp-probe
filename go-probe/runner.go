@@ -130,11 +130,6 @@ func orDefault(params []string, def string) []string {
 func (r *ProbeRunner) executeOnce(
 	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
 
-	// Эксперимент: встроенный Go-отправитель twampy без запуска python-процесса.
-	if task.Mode == ModeTWampy && r.cfg.TwampyEmbedded {
-		return r.executeEmbeddedTwampy(ctx, task, node, args)
-	}
-
 	callLine := execName + " " + strings.Join(args, " ")
 	started := time.Now()
 	result := ActionData{
@@ -205,61 +200,6 @@ func (r *ProbeRunner) executeOnce(
 		outcome = OutcomeExitCodeError
 	}
 
-	summary := errText
-	if outcome == OutcomeSuccess {
-		summary = lastLine(output)
-	}
-	r.registry.ReportOutcome(task.Id, outcome, &exitCode, summary)
-
-	result.ExitCode = &exitCode
-	result.Outcome = string(outcome)
-	result.Console = output
-	result.ErrorConsole = errText
-
-	logRun(task, node, outcome, exitCode, time.Since(started), summary)
-	return result
-}
-
-// executeEmbeddedTwampy выполняет замер встроенным Go-отправителем twampy (эксперимент):
-// без запуска внешнего процесса. Вывод и разбор совместимы с python-версией, поэтому
-// серверный парсер и отчёты не меняются. Индивидуальный таймаут задачи соблюдается.
-func (r *ProbeRunner) executeEmbeddedTwampy(ctx context.Context, task *TaskInfo, node string, args []string) ActionData {
-	callLine := "twampy(embedded) " + strings.Join(args, " ")
-	started := time.Now()
-	result := ActionData{
-		ResultId:    NewGuid(),
-		Creation:    CsTime{started},
-		TaskId:      task.Id,
-		EndNode:     node,
-		IPAddress:   task.IpAddress,
-		RequestInfo: task.RequestInfo,
-		Mode:        string(task.Mode),
-		CallLine:    callLine,
-	}
-
-	var deadline time.Time
-	if task.TimeoutSec > 0 {
-		deadline = started.Add(time.Duration(task.TimeoutSec) * time.Second)
-	}
-
-	output, errText := runEmbeddedTwampy(args, deadline)
-
-	// Отмена службы во время замера — считаем прерыванием по таймауту.
-	timedOut := ctx.Err() != nil || errText == errTimeout.Error() ||
-		strings.Contains(errText, errTimeout.Error())
-	if timedOut && output == "" {
-		errText = fmt.Sprintf("Задача прервана по таймауту %d c.", task.TimeoutSec)
-	}
-
-	outcome := OutcomeSuccess
-	switch {
-	case timedOut:
-		outcome = OutcomeTimedOut
-	case errText != "":
-		outcome = OutcomeExitCodeError
-	}
-
-	exitCode := 0
 	summary := errText
 	if outcome == OutcomeSuccess {
 		summary = lastLine(output)

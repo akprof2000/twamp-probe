@@ -13,8 +13,8 @@ func TestResolveParallel(t *testing.T) {
 	}{
 		{"явное 1024", 1024, 1024},
 		{"явное 50", 50, 50},
-		{"ноль → авто по числу ядер (пол 16, потолок 10000)", 0, min(max(runtime.NumCPU()*16, 16), 10000)},
-		{"отрицательное → авто", -1, min(max(runtime.NumCPU()*16, 16), 10000)},
+		{"ноль → авто по числу ядер (пол 16, потолок 10000)", 0, min(max(runtime.NumCPU()*10, 16), 10000)},
+		{"отрицательное → авто", -1, min(max(runtime.NumCPU()*10, 16), 10000)},
 	}
 	for _, c := range cases {
 		if got := resolveParallel(c.in); got != c.want {
