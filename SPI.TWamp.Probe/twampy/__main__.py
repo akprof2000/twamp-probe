@@ -295,12 +295,26 @@ class TwampySessionSender(UdpSession):
                 log.info("Sent to %s [sseq=%d]", self.remote_addr, idx)
 
                 idx = idx + 1
-                if schedule > t1:
-                    r, w, e = select.select([self.socket], [], [], schedule - t1)
 
             if t1 > endtime:
                 log.info("Receive timeout for last packet (don't wait anymore)")
                 self.running = False
+                break
+
+            # Все ответы получены во внутреннем цикле — выходим, не засыпая:
+            # иначе сессия ждала бы до endtime уже после завершения замера.
+            if not self.running:
+                break
+
+            # Единственная точка ожидания в цикле: спим на сокете до ближайшего
+            # события — до следующего слота отправки, а когда всё отправлено —
+            # до истечения времени ожидания ответов. Без этого цикл крутился
+            # вхолостую (ответ приходит раньше слота; после последней отправки —
+            # до 5 секунд подряд) и занимал ядро почти целиком.
+            deadline = schedule if idx < self.count else endtime
+            timeout = deadline - now()
+            if timeout > 0:
+                select.select([self.socket], [], [], timeout)
 
         self.stats.dump(idx)
 

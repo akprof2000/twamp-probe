@@ -53,7 +53,6 @@ fn session(opts: &Options, deadline: Option<Instant>) -> Result<String, SessionE
         SocketAddr::from(([0u8, 0, 0, 0], opts.local_port))
     };
     let socket = UdpSocket::bind(bind).map_err(|e| SessionError::Io(format!("не удалось открыть UDP-сокет: {e}")))?;
-    socket.set_nonblocking(true).ok();
 
     let mut stats = Stats::default();
     let mut buf = [0u8; 9216];
@@ -71,11 +70,12 @@ fn session(opts: &Options, deadline: Option<Instant>) -> Result<String, SessionE
         }
 
         // Забираем все уже пришедшие ответы (неблокирующе).
+        socket.set_nonblocking(true).ok();
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((n, _)) if n >= 36 => {
                     if handle_reply(&buf[..n], &mut stats) + 1 == opts.count {
-                        return Ok(stats.dump(idx));
+                        return Ok(stats.dump(idx)); // получены все ответы
                     }
                 }
                 _ => break,
@@ -88,23 +88,26 @@ fn session(opts: &Options, deadline: Option<Instant>) -> Result<String, SessionE
             send_packet(&socket, opts, idx, send_time, &mut rng)
                 .map_err(|e| SessionError::Io(format!("отправка пакета: {e}")))?;
             idx += 1;
-
-            // Ждём до следующего слота, но не дольше — прислушиваясь к ответам.
-            let wait = schedule - now();
-            if wait > 0.0 {
-                socket.set_read_timeout(Some(Duration::from_secs_f64(wait))).ok();
-                socket.set_nonblocking(false).ok();
-                if let Ok((n, _)) = socket.recv_from(&mut buf) {
-                    if n >= 36 && handle_reply(&buf[..n], &mut stats) + 1 == opts.count {
-                        return Ok(stats.dump(idx));
-                    }
-                }
-                socket.set_nonblocking(true).ok();
-            }
         }
 
         if send_time > end_time {
             return Ok(stats.dump(idx));
+        }
+
+        // Единственная точка ожидания в цикле: спим на сокете до ближайшего
+        // события — до следующего слота отправки, а когда всё отправлено, —
+        // до истечения времени ожидания ответов. Без этого цикл крутился бы
+        // вхолостую и занимал ядро почти целиком.
+        let wake_at = if idx < opts.count { schedule } else { end_time };
+        let wait = wake_at - now();
+        if wait > 0.0 {
+            socket.set_read_timeout(Some(Duration::from_secs_f64(wait))).ok();
+            socket.set_nonblocking(false).ok();
+            if let Ok((n, _)) = socket.recv_from(&mut buf) {
+                if n >= 36 && handle_reply(&buf[..n], &mut stats) + 1 == opts.count {
+                    return Ok(stats.dump(idx));
+                }
+            }
         }
     }
 }

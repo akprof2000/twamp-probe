@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp twampy ntp
+﻿// Ignore Spelling: SPI Twamp twampy ntp
 
 using System.Buffers.Binary;
 using System.Globalization;
@@ -101,41 +101,19 @@ namespace SPI.Twamp.Probe.Runners
                 // Забираем все уже пришедшие ответы (неблокирующе).
                 while (socket.Poll(0, SelectMode.SelectRead))
                 {
-                    double t4 = Now();
-                    int length;
-                    try
+                    if (!TryReceive(socket, recvBuffer, options, stats, out uint sseq))
                     {
-                        EndPoint from = new IPEndPoint(
-                            options.RemoteEndPoint.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0);
-                        length = socket.ReceiveFrom(recvBuffer, ref from);
+                        break;
                     }
-                    catch (SocketException)
-                    {
-                        break; // порт временно недоступен — попробуем в следующей итерации
-                    }
-
-                    if (length < 36)
-                    {
-                        continue; // короткий пакет — не ответ рефлектора
-                    }
-
-                    double t3 = NtpToSeconds(recvBuffer.AsSpan(4, 8));   // время отправки рефлектором
-                    double t2 = NtpToSeconds(recvBuffer.AsSpan(16, 8));  // время приёма рефлектором
-                    double t1 = NtpToSeconds(recvBuffer.AsSpan(28, 8));  // наше время отправки (эхо)
-
-                    double delayRt = Math.Max(0, 1000 * (t4 - t1 + t2 - t3));
-                    double delayOb = Math.Max(0, 1000 * (t2 - t1));
-                    double delayIb = Math.Max(0, 1000 * (t4 - t3));
-
-                    uint rseq = BinaryPrimitives.ReadUInt32BigEndian(recvBuffer.AsSpan(0, 4));
-                    uint sseq = BinaryPrimitives.ReadUInt32BigEndian(recvBuffer.AsSpan(24, 4));
-
-                    stats.Add(delayRt, delayOb, delayIb, rseq, sseq);
-
                     if (sseq + 1 == (uint)options.Count)
                     {
-                        running = false;
+                        running = false; // получены все ответы
+                        break;
                     }
+                }
+                if (!running)
+                {
+                    break;
                 }
 
                 double sendTime = Now();
@@ -144,24 +122,67 @@ namespace SPI.Twamp.Probe.Runners
                     schedule += options.IntervalMs / 1000.0;
                     SendPacket(socket, options, idx, sendTime);
                     idx++;
-
-                    if (schedule > sendTime)
-                    {
-                        int waitMs = (int)Math.Ceiling((schedule - sendTime) * 1000);
-                        if (waitMs > 0)
-                        {
-                            _ = socket.Poll(waitMs * 1000, SelectMode.SelectRead); // микросекунды
-                        }
-                    }
                 }
 
                 if (sendTime > endTime)
                 {
-                    running = false;
+                    break;
+                }
+
+                // Единственная точка ожидания в цикле: спим на сокете до ближайшего
+                // события — до следующего слота отправки, а когда всё отправлено, —
+                // до истечения времени ожидания ответов. Без этого цикл крутился бы
+                // вхолостую и занимал ядро почти целиком.
+                double wakeAt = idx < options.Count ? schedule : endTime;
+                double wait = wakeAt - Now();
+                if (wait > 0)
+                {
+                    // Poll принимает микросекунды; ограничиваем int.MaxValue.
+                    int waitMicroseconds = (int)Math.Min(wait * 1_000_000, int.MaxValue);
+                    _ = socket.Poll(waitMicroseconds, SelectMode.SelectRead);
                 }
             }
 
             return stats.Dump(idx);
+        }
+
+        /// <summary>
+        /// Читает один ответ рефлектора и добавляет его в статистику.
+        /// Возвращает <c>false</c>, если данных нет или пакет слишком короткий.
+        /// </summary>
+        private static bool TryReceive(Socket socket, byte[] buffer, SenderOptions options, TwampStatistics stats, out uint sseq)
+        {
+            sseq = 0;
+            int length;
+            try
+            {
+                EndPoint from = new IPEndPoint(
+                    options.RemoteEndPoint.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0);
+                length = socket.ReceiveFrom(buffer, ref from);
+            }
+            catch (SocketException)
+            {
+                return false; // порт временно недоступен — попробуем в следующей итерации
+            }
+
+            if (length < 36)
+            {
+                return false; // короткий пакет — не ответ рефлектора
+            }
+
+            double t4 = Now();
+            double t3 = NtpToSeconds(buffer.AsSpan(4, 8));   // время отправки рефлектором
+            double t2 = NtpToSeconds(buffer.AsSpan(16, 8));  // время приёма рефлектором
+            double t1 = NtpToSeconds(buffer.AsSpan(28, 8));  // наше время отправки (эхо)
+
+            double delayRt = Math.Max(0, 1000 * (t4 - t1 + t2 - t3));
+            double delayOb = Math.Max(0, 1000 * (t2 - t1));
+            double delayIb = Math.Max(0, 1000 * (t4 - t3));
+
+            uint rseq = BinaryPrimitives.ReadUInt32BigEndian(buffer.AsSpan(0, 4));
+            sseq = BinaryPrimitives.ReadUInt32BigEndian(buffer.AsSpan(24, 4));
+            stats.Add(delayRt, delayOb, delayIb, rseq, sseq);
+            return true;
         }
 
         /// <summary>Отправляет один тестовый пакет (формат TWAMP-Light sender).</summary>

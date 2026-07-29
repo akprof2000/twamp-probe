@@ -90,22 +90,8 @@ func twampySession(opts *twampyOptions, deadline time.Time) (string, error) {
 			if rerr != nil || n < 36 {
 				break
 			}
-			t4 := twNow()
-
-			t3 := ntpToSeconds(buf[4:12])  // время отправки рефлектором
-			t2 := ntpToSeconds(buf[16:24]) // время приёма рефлектором
-			t1 := ntpToSeconds(buf[28:36]) // наше время отправки (эхо)
-
-			delayRT := math.Max(0, 1000*(t4-t1+t2-t3))
-			delayOB := math.Max(0, 1000*(t2-t1))
-			delayIB := math.Max(0, 1000*(t4-t3))
-
-			rseq := binary.BigEndian.Uint32(buf[0:4])
-			sseq := binary.BigEndian.Uint32(buf[24:28])
-			stats.add(delayRT, delayOB, delayIB, rseq, sseq)
-
-			if sseq+1 == uint32(opts.count) {
-				return stats.dump(idx), nil
+			if handleReply(buf[:n], stats)+1 == uint32(opts.count) {
+				return stats.dump(idx), nil // получены все ответы
 			}
 		}
 
@@ -116,21 +102,27 @@ func twampySession(opts *twampyOptions, deadline time.Time) (string, error) {
 				return "", fmt.Errorf("отправка пакета: %w", err)
 			}
 			idx++
-
-			// Ждём до следующего слота, но не дольше — прислушиваясь к ответам.
-			if wait := schedule - twNow(); wait > 0 {
-				_ = conn.SetReadDeadline(time.Now().Add(time.Duration(wait * float64(time.Second))))
-				if n, _, rerr := conn.ReadFromUDP(buf); rerr == nil && n >= 36 {
-					handleReply(buf[:n], stats)
-					if binary.BigEndian.Uint32(buf[24:28])+1 == uint32(opts.count) {
-						return stats.dump(idx), nil
-					}
-				}
-			}
 		}
 
 		if sendTime > endTime {
 			return stats.dump(idx), nil
+		}
+
+		// Единственная точка ожидания в цикле: спим на сокете до ближайшего
+		// события — до следующего слота отправки, а когда всё отправлено, —
+		// до истечения времени ожидания ответов. Без этого цикл крутился бы
+		// вхолостую и занимал ядро почти целиком.
+		wakeAt := endTime
+		if idx < opts.count {
+			wakeAt = schedule
+		}
+		if wait := wakeAt - twNow(); wait > 0 {
+			_ = conn.SetReadDeadline(time.Now().Add(time.Duration(wait * float64(time.Second))))
+			if n, _, rerr := conn.ReadFromUDP(buf); rerr == nil && n >= 36 {
+				if handleReply(buf[:n], stats)+1 == uint32(opts.count) {
+					return stats.dump(idx), nil
+				}
+			}
 		}
 	}
 }
@@ -138,10 +130,11 @@ func twampySession(opts *twampyOptions, deadline time.Time) (string, error) {
 // errTimeout — сеанс прерван по внешнему таймауту задачи.
 var errTimeout = fmt.Errorf("замер прерван по таймауту")
 
-// handleReply разбирает один ответ рефлектора и добавляет его в статистику.
-func handleReply(data []byte, stats *twampStats) {
+// handleReply разбирает один ответ рефлектора, добавляет его в статистику
+// и возвращает номер пакета отправителя (sseq) — по нему видно, все ли ответы получены.
+func handleReply(data []byte, stats *twampStats) uint32 {
 	if len(data) < 36 {
-		return
+		return 0
 	}
 	t4 := twNow()
 	t3 := ntpToSeconds(data[4:12])
@@ -150,7 +143,9 @@ func handleReply(data []byte, stats *twampStats) {
 	delayRT := math.Max(0, 1000*(t4-t1+t2-t3))
 	delayOB := math.Max(0, 1000*(t2-t1))
 	delayIB := math.Max(0, 1000*(t4-t3))
-	stats.add(delayRT, delayOB, delayIB, binary.BigEndian.Uint32(data[0:4]), binary.BigEndian.Uint32(data[24:28]))
+	sseq := binary.BigEndian.Uint32(data[24:28])
+	stats.add(delayRT, delayOB, delayIB, binary.BigEndian.Uint32(data[0:4]), sseq)
+	return sseq
 }
 
 // sendTwampyPacket отправляет один тестовый пакет (формат TWAMP-Light sender).
