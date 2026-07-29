@@ -29,6 +29,7 @@ type Config struct {
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
 	Twampy             ProbeToolConfig
+	TwampyEmbedded     bool // twampy:embedded — встроенный Go-отправитель без запуска python (эксперимент)
 }
 
 // LoadConfig читает appsettings.json рядом с исполняемым файлом.
@@ -60,9 +61,10 @@ func LoadConfig(path string) (*Config, error) {
 			Console:   flag(raw, "Logging:Console", true),
 			Compress:  flag(raw, "Logging:Compress", true),
 		},
-		Ping:   ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
-		Twamp:  ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
-		Twampy: ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		Ping:           ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
+		Twamp:          ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
+		Twampy:         ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		TwampyEmbedded: flag(raw, "twampy:embedded", false),
 	}
 	return cfg, nil
 }
