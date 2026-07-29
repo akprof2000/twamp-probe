@@ -63,6 +63,12 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Последний результат каждой задачи (для колонки статуса в списке задач).</summary>
         private readonly ConcurrentDictionary<Guid, TaskLastResult> _lastResults = new();
 
+        /// <summary>Когда у пробы последний раз спрашивали её версию.</summary>
+        private readonly ConcurrentDictionary<string, DateTime> _versionChecked = new();
+
+        /// <summary>Как часто перечитывать версию пробы (она меняется только при обновлении пробы).</summary>
+        private static readonly TimeSpan VersionRefreshInterval = TimeSpan.FromMinutes(5);
+
         /// <summary>Токен жизненного цикла всех фоновых циклов.</summary>
         private readonly CancellationTokenSource _cts = new();
         private bool _disposed;
@@ -153,6 +159,7 @@ namespace SPI.Twamp.Server.BackgroundServices
             poller.Cts.Cancel();
             poller.Cts.Dispose();
             _ = _states.TryRemove(requestInfo, out _); // пробы больше нет на странице статуса
+            _ = _versionChecked.TryRemove(requestInfo, out _);
             _changeNotifier.Notify();
         }
 
@@ -245,6 +252,9 @@ namespace SPI.Twamp.Server.BackgroundServices
             _states[probeUrl] = new ProbePollState(DateTime.Now, null, null, totalResults, 0);
             if (wasFailing)
             {
+                // Связь восстановилась — вероятно, пробу перезапустили после обновления,
+                // поэтому версию перечитаем на ближайшей сверке, не дожидаясь срока.
+                _ = _versionChecked.TryRemove(probeUrl, out _);
                 _changeNotifier.Notify();
             }
         }
@@ -319,6 +329,7 @@ namespace SPI.Twamp.Server.BackgroundServices
                     foreach (Client client in allClients)
                     {
                         await ReconcileSafeAsync(client.RequestInfo, cancellationToken);
+                        await RefreshVersionAsync(client, cancellationToken);
                     }
 
                     await ProcessCleanupsAsync(cancellationToken);
@@ -411,6 +422,50 @@ namespace SPI.Twamp.Server.BackgroundServices
             catch (Exception)
             {
                 return false; // проба недоступна — попробуем на следующем тике
+            }
+        }
+
+        /// <summary>
+        /// Приводит сохранённую версию пробы к её текущей: после обновления пробы в списке
+        /// должна быть видна новая версия, а не та, что была записана при регистрации.
+        /// <para>
+        /// Версия меняется только при обновлении пробы, поэтому спрашиваем её редко
+        /// (<see cref="VersionRefreshInterval"/>). Сразу после восстановления связи проверка
+        /// делается вне очереди: обновление пробы — это её перезапуск, то есть обрыв опроса.
+        /// </para>
+        /// </summary>
+        private async Task RefreshVersionAsync(Client client, CancellationToken cancellationToken)
+        {
+            DateTime now = DateTime.Now;
+            if (_versionChecked.TryGetValue(client.RequestInfo, out DateTime last) &&
+                now - last < VersionRefreshInterval)
+            {
+                return;
+            }
+            _versionChecked[client.RequestInfo] = now;
+
+            try
+            {
+                Identify identify = await _probe.CheckInAsync(client.RequestInfo, cancellationToken);
+                if (string.IsNullOrEmpty(identify.Version) || identify.Version == client.Version)
+                {
+                    return; // версия не изменилась — записывать нечего
+                }
+
+                _logger.Info("Проба {ProbeUrl}: версия изменилась {Old} → {New}",
+                    client.RequestInfo, client.Version, identify.Version);
+                client.Version = identify.Version;
+                await _clients.UpdateAsync(client);
+                _changeNotifier.Notify(); // список проб в интерфейсе перечитает версию
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Проба недоступна — не беда: версию перечитаем на следующем тике.
+                _logger.Debug(ex, "Не удалось получить версию пробы {ProbeUrl}", client.RequestInfo);
             }
         }
 
