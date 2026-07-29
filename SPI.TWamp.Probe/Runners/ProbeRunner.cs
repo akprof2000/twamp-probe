@@ -58,7 +58,10 @@ namespace SPI.Twamp.Probe.Runners
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    ActionData result = await ExecuteOnceAsync(task, node, execute, arguments, cancellationToken);
+                    // Эксперимент: встроенный C#-отправитель twampy без запуска python-процесса.
+                    ActionData result = UseEmbeddedTwampy(task)
+                        ? await ExecuteEmbeddedTwampyAsync(task, node, arguments, cancellationToken)
+                        : await ExecuteOnceAsync(task, node, execute, arguments, cancellationToken);
                     // Результат сразу попадает в хранилище и становится доступен веб-интерфейсу.
                     _resultStore.Add(result);
                 }
@@ -125,6 +128,67 @@ namespace SPI.Twamp.Probe.Runners
         }
 
         /// <summary>Запускает дочерний процесс один раз и возвращает собранный результат замера.</summary>
+        /// <summary>Включён ли встроенный C#-отправитель twampy для этой задачи (флаг <c>twampy:embedded</c>).</summary>
+        private bool UseEmbeddedTwampy(TaskInfo task) =>
+            task.Mode == TaskMode.TWampy && _configuration["twampy:embedded"].ConvertTo(false);
+
+        /// <summary>
+        /// Выполняет замер встроенным C#-отправителем twampy (эксперимент): без запуска
+        /// внешнего процесса. Вывод и разбор совместимы с python-версией, поэтому серверный
+        /// парсер и отчёты не меняются. Индивидуальный таймаут задачи соблюдается.
+        /// </summary>
+        private async Task<ActionData> ExecuteEmbeddedTwampyAsync(
+            TaskInfo task, string node, string arguments, CancellationToken cancellationToken)
+        {
+            string callLine = $"twampy(embedded) {arguments}".Trim();
+
+            using CancellationTokenSource timeoutCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            TimeSpan timeout = GetTimeout(task);
+            if (timeout > TimeSpan.Zero)
+            {
+                timeoutCts.CancelAfter(timeout);
+            }
+
+            string output = "";
+            string error = "";
+            bool timedOut = false;
+            try
+            {
+                TwampySender.Result result = await TwampySender.RunAsync(arguments, timeoutCts.Token);
+                output = result.Output;
+                error = result.Error;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Сработал собственный таймаут задачи, а не остановка службы.
+                timedOut = true;
+                error = $"Задача прервана по таймауту {timeout.TotalSeconds:0.###} c.";
+            }
+
+            // Исход: успех, если получена таблица без пометки полной потери и без ошибки.
+            RunOutcome outcome = timedOut
+                ? RunOutcome.TimedOut
+                : string.IsNullOrEmpty(error) ? RunOutcome.Success : RunOutcome.ExitCodeError;
+
+            string? summary = outcome == RunOutcome.Success ? LastLine(output) : error;
+            _runRegistry.ReportOutcome(task.Id, outcome, timedOut ? null : 0, summary);
+
+            return new ActionData
+            {
+                CallLine = callLine,
+                Mode = task.Mode.ToString(),
+                ExitCode = timedOut ? null : 0,
+                Outcome = outcome.ToString(),
+                Console = output,
+                ErrorConsole = error,
+                EndNode = node,
+                IPAddress = task.IpAddress,
+                TaskId = task.Id,
+                RequestInfo = task.RequestInfo
+            };
+        }
+
         private async Task<ActionData> ExecuteOnceAsync(
             TaskInfo task, string node, string? execute, string arguments, CancellationToken cancellationToken)
         {
