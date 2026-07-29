@@ -36,7 +36,7 @@ namespace SPI.Twamp.Probe.Server
         private readonly ITaskRunRegistry _runRegistry;
 
         /// <summary>Коэффициент автоподбора числа воркеров: ядра × <see cref="AutoFactor"/>.</summary>
-        private const int AutoFactor = 10;
+        private const int AutoFactor = 64;
 
         /// <summary>Потолок автоподбора — верхний предел числа воркеров при авторасчёте.</summary>
         private const int AutoCap = 10000;
