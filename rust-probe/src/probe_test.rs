@@ -90,3 +90,43 @@ fn delete_flag_removes_task() {
     registry.merge_jobs(deleted);
     assert!(registry.known_task_ids().is_empty(), "задача с delete должна быть удалена");
 }
+
+/// Тело SetJobs в том виде, в каком его реально шлёт сервер: ключи PascalCase
+/// (Flurl/Newtonsoft по умолчанию), enum'ы числами, поля `ipAddress` нет вовсе,
+/// зато есть лишнее `DeletedAt`.
+const TASK_JSON_FROM_SERVER: &str = r#"[{"RequestInfo":"http://localhost:18445",
+"Id":"33333333-3333-3333-3333-333333333333","Title":"уже-на-сервере","Type":1,"Mode":2,
+"CronExpression":"*/5 * * * *","CronWithSeconds":false,"ContinueIfError":true,"Repeats":1,
+"Circles":1,"PauseSec":0,"TimeoutSec":60,"Start":"2026-07-29T16:00:00Z","End":"2027-07-29T23:59:00Z",
+"Create":"2026-07-29T16:00:00Z","Delete":false,"DeletedAt":null,"EndNode":"127.0.0.1:20000",
+"Parameters":{"all":"-c 10 -i 100"}}]"#;
+
+#[test]
+fn task_json_in_server_format_is_parsed() {
+    // Регрессия: раньше разбор падал с «missing field ipAddress» — serde требует
+    // точного совпадения имён и наличия всех полей, тогда как сервер шлёт PascalCase
+    // и не шлёт часть полей. Из-за этого проба не получала задачи вообще.
+    let jobs: Vec<TaskInfo> = serde_json::from_str(TASK_JSON_FROM_SERVER).expect("разбор тела от сервера");
+    let task = &jobs[0];
+    assert_eq!(task.id, "33333333-3333-3333-3333-333333333333");
+    assert_eq!(task.title, "уже-на-сервере");
+    assert_eq!(task.task_type, TaskType::Scheduler, "Type=1 — задача по расписанию");
+    assert_eq!(task.mode, TaskMode::TWampy, "Mode=2 — режим TWampy");
+    assert_eq!(task.end_node, "127.0.0.1:20000");
+    assert_eq!(task.timeout_sec, 60);
+    assert_eq!(task.request_info, "http://localhost:18445");
+    assert!(task.ip_address.is_empty(), "поля ipAddress сервер не шлёт — должно быть пустым");
+    assert_eq!(task.parameters.get("all").map(String::as_str), Some("-c 10 -i 100"));
+}
+
+#[test]
+fn task_in_server_format_gets_scheduled() {
+    // Задача из настоящего тела сервера обязана попасть в реестр и получить план запуска.
+    let jobs: Vec<TaskInfo> = serde_json::from_str(TASK_JSON_FROM_SERVER).unwrap();
+    let runs = Arc::new(RunRegistry::new());
+    let registry = TaskRegistry::new(Arc::clone(&runs));
+    registry.merge_jobs(jobs);
+
+    assert_eq!(registry.known_task_ids().len(), 1, "задача сервера должна попасть в реестр");
+    assert!(runs.all()[0].next_run.is_some(), "не запланирован следующий запуск");
+}

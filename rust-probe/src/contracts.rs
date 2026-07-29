@@ -222,40 +222,84 @@ impl<'de> Deserialize<'de> for TaskType {
 // --- Контракты ---
 
 /// Описание задачи зондирования, получаемое от сервера.
+///
+/// Совместимость с сервером требует двух послаблений (в Go они есть «из коробки»,
+/// в Rust их нужно задать явно):
+///   - **регистр имён**: задачи приходят через Flurl/Newtonsoft с ключами PascalCase
+///     (`"Title"`, `"CronExpression"`), а веб-интерфейс шлёт camelCase — принимаем оба
+///     варианта через `alias`;
+///   - **необязательность полей**: сервер шлёт не весь набор (например, `ipAddress`
+///     у него в задаче вообще нет), поэтому отсутствующие поля берут значения по
+///     умолчанию, а не роняют разбор. Лишние поля (`DeletedAt`) serde игнорирует сам.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct TaskInfo {
+    #[serde(alias = "IpAddress", alias = "IPAddress")]
     pub ip_address: String,
+    #[serde(alias = "Id")]
     pub id: String,
+    #[serde(alias = "Title")]
     pub title: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", alias = "Type")]
     pub task_type: TaskType,
+    #[serde(alias = "Mode")]
     pub mode: TaskMode,
+    #[serde(alias = "CronExpression")]
     pub cron_expression: String,
-    #[serde(default)]
+    #[serde(alias = "CronWithSeconds")]
     pub cron_with_seconds: bool,
-    #[serde(default)]
+    #[serde(alias = "ContinueIfError")]
     pub continue_if_error: bool,
-    #[serde(default)]
+    #[serde(alias = "Repeats")]
     pub repeats: i64,
-    #[serde(default)]
+    #[serde(alias = "Circles")]
     pub circles: i64,
-    #[serde(default)]
+    #[serde(alias = "PauseSec")]
     pub pause_sec: u64,
-    #[serde(default)]
+    #[serde(alias = "TimeoutSec")]
     pub timeout_sec: i64,
-    #[serde(default = "CsTime::zero")]
+    #[serde(alias = "Start")]
     pub start: CsTime,
-    #[serde(default = "CsTime::zero")]
+    #[serde(alias = "End")]
     pub end: CsTime,
-    #[serde(default = "CsTime::zero")]
+    #[serde(alias = "Create")]
     pub create: CsTime,
-    #[serde(default)]
+    #[serde(alias = "Delete")]
     pub delete: bool,
+    #[serde(alias = "EndNode")]
     pub end_node: String,
-    #[serde(default)]
+    #[serde(alias = "Parameters")]
     pub parameters: std::collections::HashMap<String, String>,
+    #[serde(alias = "RequestInfo")]
     pub request_info: String,
+}
+
+impl Default for TaskInfo {
+    /// Значения по умолчанию совпадают с C#-контрактом сервера: задача по расписанию,
+    /// режим TWamp, один повтор и один цикл.
+    fn default() -> Self {
+        TaskInfo {
+            ip_address: String::new(),
+            id: String::new(),
+            title: String::new(),
+            task_type: TaskType::Scheduler,
+            mode: TaskMode::TWamp,
+            cron_expression: String::new(),
+            cron_with_seconds: false,
+            continue_if_error: false,
+            repeats: 1,
+            circles: 1,
+            pause_sec: 0,
+            timeout_sec: 0,
+            start: CsTime::zero(),
+            end: CsTime::zero(),
+            create: CsTime::zero(),
+            delete: false,
+            end_node: String::new(),
+            parameters: std::collections::HashMap::new(),
+            request_info: String::new(),
+        }
+    }
 }
 
 /// Результат одного замера зонда, передаваемый серверу.

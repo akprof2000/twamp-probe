@@ -45,8 +45,10 @@ impl ProbeRunner {
     /// Проходит Circles × Repeats запусков зонда для одного узла.
     fn run_single_node(&self, task: &TaskInfo, node: &str) {
         let (exec, args, env) = self.build_command(task, node);
-        let circles = task.circles.max(1);
-        let repeats = task.repeats.max(1);
+        // Циклы и повторы берём как прислал сервер — так же, как C#/Go-пробы
+        // (значения по умолчанию проставляет разбор контракта).
+        let circles = task.circles;
+        let repeats = task.repeats;
 
         for circle in 0..circles {
             for _ in 0..repeats {
