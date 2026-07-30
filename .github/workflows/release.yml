@@ -55,12 +55,9 @@ jobs:
 
           # Маленькие сборки: без библиотек .NET, на хосте нужен установленный .NET 10 Runtime (ASP.NET Core).
           publish_one SPI.Twamp.Server/SPI.Twamp.Server.csproj twamp-server framework --self-contained false
-          publish_one SPI.TWamp.Probe/SPI.TWamp.Probe.csproj  twamp-probe  framework --self-contained false
 
           # Самодостаточные сборки: один исполняемый файл, .NET не требуется.
           publish_one SPI.Twamp.Server/SPI.Twamp.Server.csproj twamp-server selfcontained \
-            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          publish_one SPI.TWamp.Probe/SPI.TWamp.Probe.csproj  twamp-probe  selfcontained \
             --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
           ls -lh publish/*.tar.gz
@@ -129,7 +126,5 @@ jobs:
             |---|---|---|
             | `twamp-server-*-framework.tar.gz` | сервер, маленький | .NET 10 Runtime (ASP.NET Core) |
             | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный | нет — распаковал и запустил |
-            | `twamp-probe-*-framework.tar.gz` | проба (C#), маленькая | .NET 10 Runtime (ASP.NET Core) |
-            | `twamp-probe-*-selfcontained.tar.gz` | проба (C#), самодостаточная | нет; для режима TWampy — Python 3.8+ |
-            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба на Go** (Linux) — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
-            | `twamp-probe-go-*-windows-x64.zip` | **проба на Go** (Windows) | нет; для TWampy — Python 3.8+ |
+            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба (Go)** для Linux — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
+            | `twamp-probe-go-*-windows-x64.zip` | **проба (Go)** для Windows | нет; для TWampy — Python 3.8+ |

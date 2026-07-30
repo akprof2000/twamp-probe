@@ -82,12 +82,13 @@
 tar -xzf twamp-server-*-selfcontained.tar.gz -C /opt/twamp-server
 /opt/twamp-server/SPI.Twamp.Server
 
-# Проба (на измерительной площадке)
-tar -xzf twamp-probe-*-selfcontained.tar.gz -C /opt/twamp-probe
-/opt/twamp-probe/SPI.TWamp.Probe
+# Проба (на измерительной площадке) — один статический бинарник, .NET не нужен
+tar -xzf twamp-probe-go-*-linux-x64.tar.gz -C /opt/twamp-probe
+/opt/twamp-probe/twamp-probe
 ```
 
-`*-framework.tar.gz` — те же приложения в 15 раз меньше, но на хосте нужен .NET 10 Runtime (ASP.NET Core).
+`twamp-server-*-framework.tar.gz` — тот же сервер в 15 раз меньше, но на хосте нужен .NET 10 Runtime (ASP.NET Core).
+Проба поставляется только сборкой на Go: она не требует рантайма и одинаково работает на Linux и Windows.
 
 ### Вариант 2: сборка из исходников
 

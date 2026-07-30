@@ -34,8 +34,8 @@ CI: GitHub Actions ([.github/workflows/build.yml](../.github/workflows/build.yml
 |---|---|---|
 | `twamp-server-*-framework.tar.gz` | сервер, маленький (~7 МБ) | установленный .NET 10 Runtime (ASP.NET Core) |
 | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный (один исполняемый файл со всеми библиотеками) | нет — распаковал и запустил |
-| `twamp-probe-*-framework.tar.gz` | проба C#, маленькая | .NET 10 Runtime (ASP.NET Core) |
-| `twamp-probe-*-selfcontained.tar.gz` | проба, самодостаточная | нет; для режима TWampy — Python 3.8+ |
+| `twamp-probe-go-*-linux-x64.tar.gz` | **проба** (Go) для Linux — один статический бинарник ~6 МБ | нет; для режима TWampy — Python 3.8+ |
+| `twamp-probe-go-*-windows-x64.zip` | **проба** (Go) для Windows | нет; для режима TWampy — Python 3.8+ |
 
 Выпуск релиза:
 
