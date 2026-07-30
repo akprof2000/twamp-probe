@@ -48,11 +48,12 @@ type TaskRegistry struct {
 	tasks      map[string]*scheduledTask
 	dispatcher Enqueuer
 	registry   *RunRegistry
+	cancels    *RunCancelRegistry // чтобы оборвать выполнение удалённой задачи
 }
 
 // NewTaskRegistry создаёт пустой реестр.
-func NewTaskRegistry(dispatcher Enqueuer, registry *RunRegistry) *TaskRegistry {
-	return &TaskRegistry{tasks: map[string]*scheduledTask{}, dispatcher: dispatcher, registry: registry}
+func NewTaskRegistry(dispatcher Enqueuer, registry *RunRegistry, cancels *RunCancelRegistry) *TaskRegistry {
+	return &TaskRegistry{tasks: map[string]*scheduledTask{}, dispatcher: dispatcher, registry: registry, cancels: cancels}
 }
 
 // Load восстанавливает реестр из TaskInfo.json после перезапуска.
@@ -86,10 +87,22 @@ func (r *TaskRegistry) MergeJobs(jobs []TaskInfo) {
 
 // mergeOne применяет одну задачу; вызывается под mu. Возвращает «реестр изменился».
 func (r *TaskRegistry) mergeOne(item *TaskInfo) bool {
+	// Пришло удаление — прежде всего обрываем то, что уже выполняется.
+	// Снять расписание мало: зонд вроде «twping -c 300» живёт минутами и иначе
+	// домерял бы по несуществующей задаче. Делаем это для любой задачи, даже
+	// если её нет в реестре: разовые (Repeater) там не хранятся вовсе.
+	stopped := 0
+	if item.Delete {
+		stopped = r.cancels.CancelTask(item.Id)
+	}
+
 	// Разовые задачи выполняем немедленно и в реестре не храним.
 	if item.Type == TypeRepeater {
 		if !item.Delete {
 			r.dispatcher.Enqueue(item)
+		} else if stopped > 0 {
+			logRegistry.Info("Разовая задача удалена — выполнение прервано",
+				"задача", item.Id, "название", item.Title, "оборвано_запусков", stopped)
 		}
 		return false
 	}
@@ -98,6 +111,7 @@ func (r *TaskRegistry) mergeOne(item *TaskInfo) bool {
 	if item.Delete {
 		entry, ok := r.tasks[item.Id]
 		if !ok {
+			// В реестре её уже нет, но выполнение мы прервали — это главное.
 			return false
 		}
 		if entry.timer != nil {
@@ -105,7 +119,8 @@ func (r *TaskRegistry) mergeOne(item *TaskInfo) bool {
 		}
 		delete(r.tasks, item.Id)
 		r.registry.Remove(item.Id)
-		logRegistry.Info("Задача удалена", "задача", item.Id, "название", item.Title)
+		logRegistry.Info("Задача удалена", "задача", item.Id, "название", item.Title,
+			"оборвано_запусков", stopped)
 		return true
 	}
 
@@ -209,6 +224,10 @@ func (r *TaskRegistry) ClearAll() int {
 		r.registry.Remove(id)
 	}
 	_ = os.Remove(tasksFileName)
+	// Заодно обрываем всё, что выполняется прямо сейчас.
+	if stopped := r.cancels.CancelAll(); stopped > 0 {
+		logRegistry.Info("Оборваны выполняющиеся запуски", "запусков", stopped)
+	}
 	return count
 }
 

@@ -22,7 +22,8 @@ namespace SPI.Twamp.Probe.Runners
     /// </para>
     /// </summary>
     public sealed class ProbeRunner(
-        Logger logger, IConfiguration configuration, IResultStore resultStore, ITaskRunRegistry runRegistry) : IProbeRunner
+        Logger logger, IConfiguration configuration, IResultStore resultStore,
+        ITaskRunRegistry runRegistry, Server.RunCancelRegistry cancels) : IProbeRunner
     {
         /// <summary>Разделители списка узлов в поле <see cref="TaskInfo.EndNode"/>.</summary>
         private static readonly char[] NodeSeparators = [';', ','];
@@ -31,6 +32,7 @@ namespace SPI.Twamp.Probe.Runners
         private readonly IConfiguration _configuration = configuration;
         private readonly IResultStore _resultStore = resultStore;
         private readonly ITaskRunRegistry _runRegistry = runRegistry;
+        private readonly Server.RunCancelRegistry _cancels = cancels;
 
         /// <inheritdoc/>
         public async Task RunForNodesAsync(TaskInfo task, CancellationToken cancellationToken)
@@ -59,6 +61,11 @@ namespace SPI.Twamp.Probe.Runners
                     cancellationToken.ThrowIfCancellationRequested();
 
                     ActionData result = await ExecuteOnceAsync(task, node, execute, arguments, cancellationToken);
+                    if (result.Cancelled)
+                    {
+                        return; // задачу удалили — прекращаем циклы, результат не отправляем
+                    }
+
                     // Результат сразу попадает в хранилище и становится доступен веб-интерфейсу.
                     _resultStore.Add(result);
                 }
@@ -183,11 +190,17 @@ namespace SPI.Twamp.Probe.Runners
             Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-            // Индивидуальный таймаут задачи: связанный токен отменяется либо при
-            // остановке сервиса (cancellationToken), либо по истечении времени задачи.
+            // Отмена «по удалению задачи» — отдельным источником, чтобы отличить её
+            // от таймаута и от остановки службы.
             bool timedOut = false;
+            bool cancelledByDelete = false;
+            using CancellationTokenSource deleteCts = new();
+            using IDisposable tracked = _cancels.Track(task.Id, deleteCts);
+
+            // Индивидуальный таймаут задачи: связанный токен отменяется при остановке
+            // сервиса, по истечении времени задачи либо при удалении задачи.
             using CancellationTokenSource timeoutCts =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deleteCts.Token);
 
             TimeSpan timeout = GetTimeout(task);
             if (timeout > TimeSpan.Zero)
@@ -201,9 +214,34 @@ namespace SPI.Twamp.Probe.Runners
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                // Отменил не сервис, а собственный таймаут задачи — завершаем процесс силой.
-                timedOut = true;
+                // Отменил не сервис: либо задачу удалили, либо истёк её таймаут —
+                // в обоих случаях процесс зонда завершаем силой.
+                cancelledByDelete = deleteCts.IsCancellationRequested;
+                timedOut = !cancelledByDelete;
                 KillProcess(process, task, node, timeout);
+            }
+
+            if (cancelledByDelete)
+            {
+                // Задачи больше нет — результат никому не нужен: не отправляем его серверу,
+                // иначе в отчёте появится обрывок замера по уже удалённой задаче.
+                const string note = "Задача удалена — выполнение прервано";
+                _logger.Warn("Задача {Guid} ({Title}) удалена — выполнение на узле {Node} прервано",
+                    task.Id, task.Title, node);
+                _runRegistry.ReportOutcome(task.Id, RunOutcome.NotStarted, null, note);
+
+                return new ActionData
+                {
+                    CallLine = $"{execute} {arguments}",
+                    Mode = task.Mode.ToString(),
+                    Outcome = nameof(RunOutcome.NotStarted),
+                    ErrorConsole = note,
+                    EndNode = node,
+                    IPAddress = task.IpAddress,
+                    TaskId = task.Id,
+                    RequestInfo = task.RequestInfo,
+                    Cancelled = true
+                };
             }
 
             // После Kill потоки вывода закрываются, поэтому чтение корректно завершится

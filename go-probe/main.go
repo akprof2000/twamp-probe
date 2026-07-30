@@ -76,9 +76,10 @@ func main() {
 	results := NewResultStore(cfg.MaxPendingResults, cfg.PersistIntervalSec)
 	results.Load()
 	runReg := NewRunRegistry()
-	runner := NewProbeRunner(cfg, results, runReg)
+	cancels := NewRunCancelRegistry()
+	runner := NewProbeRunner(cfg, results, runReg, cancels)
 	dispatcher := NewDispatcher(ctx, cfg.MaxParallel, runner, runReg)
-	tasks := NewTaskRegistry(dispatcher, runReg)
+	tasks := NewTaskRegistry(dispatcher, runReg, cancels)
 	tasks.Load()
 
 	// Сторож связи: молчание сервера дольше Probe:ServerTimeoutHours означает,

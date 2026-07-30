@@ -22,7 +22,7 @@ func newTestRegistry(t *testing.T) (*TaskRegistry, *fakeEnqueuer) {
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 
 	sink := &fakeEnqueuer{}
-	return NewTaskRegistry(sink, NewRunRegistry()), sink
+	return NewTaskRegistry(sink, NewRunRegistry(), NewRunCancelRegistry()), sink
 }
 
 func schedulerTask(id string) TaskInfo {

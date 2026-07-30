@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 namespace SPI.Twamp.Probe.Contracts
 {
@@ -63,5 +63,14 @@ namespace SPI.Twamp.Probe.Contracts
         /// Вывод ошибок процесса зонда.
         /// </summary>
         public string ErrorConsole { get; set; } = "";
+
+        /// <summary>
+        /// Служебный признак: запуск оборван, потому что задачу удалили.
+        /// Серверу не передаётся — результата по удалённой задаче быть не должно.
+        /// </summary>
+        [Newtonsoft.Json.JsonIgnore]
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool Cancelled { get; set; }
+
     }
 }

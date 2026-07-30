@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using NLog;
 using SPI.Twamp.Probe.Abstractions;
@@ -42,7 +42,7 @@ namespace SPI.Twamp.Tests
         /// <summary>Создаёт Worker с фейками и реальным реестром статусов.</summary>
         private static Worker CreateWorker(FakeDispatcher? dispatcher = null) =>
             new(LogManager.GetLogger("test"), dispatcher ?? new FakeDispatcher(),
-                new FakeResultStore(), new TaskRunRegistry());
+                new FakeResultStore(), new TaskRunRegistry(), new RunCancelRegistry());
 
         [Fact(DisplayName = "Новая задача по расписанию попадает в реестр")]
         public async Task Merge_AddsScheduler()

@@ -180,6 +180,10 @@ type ActionData struct {
 	Outcome      string `json:"outcome"`
 	Console      string `json:"console"`
 	ErrorConsole string `json:"errorConsole"`
+
+	// Cancelled — служебный признак: запуск оборван, потому что задачу удалили.
+	// Серверу не передаётся (json:"-"): результата по удалённой задаче быть не должно.
+	Cancelled bool `json:"-"`
 }
 
 // Identify — идентификационные данные пробы (ответ на CheckIn).

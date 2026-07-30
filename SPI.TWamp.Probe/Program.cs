@@ -76,6 +76,8 @@ try
     // Хранилище результатов, реестр статусов и исполнитель зондов — синглтоны.
     _ = builder.Services.AddSingleton<IResultStore, ResultStore>();
     _ = builder.Services.AddSingleton<ITaskRunRegistry, TaskRunRegistry>();
+    // Реестр активных запусков: через него удаление задачи обрывает работающий зонд.
+    _ = builder.Services.AddSingleton<RunCancelRegistry>();
     _ = builder.Services.AddSingleton<IProbeRunner, ProbeRunner>();
 
     // Диспетчер зондов: пул воркеров ограниченного размера. Регистрируем его хостед-сервисом

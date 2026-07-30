@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using Newtonsoft.Json;
 using NLog;
@@ -25,7 +25,8 @@ namespace SPI.Twamp.Probe.Server
     /// </para>
     /// </summary>
     public sealed class Worker(
-        Logger logger, IProbeDispatcher dispatcher, IResultStore resultStore, ITaskRunRegistry runRegistry)
+        Logger logger, IProbeDispatcher dispatcher, IResultStore resultStore,
+        ITaskRunRegistry runRegistry, RunCancelRegistry cancels)
         : IHostedService, IDisposable
     {
         /// <summary>Файл с сохранённым реестром задач по расписанию.</summary>
@@ -35,6 +36,7 @@ namespace SPI.Twamp.Probe.Server
         private readonly IProbeDispatcher _dispatcher = dispatcher;
         private readonly IResultStore _resultStore = resultStore;
         private readonly ITaskRunRegistry _runRegistry = runRegistry;
+        private readonly RunCancelRegistry _cancels = cancels;
 
         /// <summary>Реестр задач по расписанию (единственный вид задач, хранимый между запусками).</summary>
         private readonly List<TaskInfo> _tasks = [];
@@ -128,6 +130,13 @@ namespace SPI.Twamp.Probe.Server
                 }
                 _tasks.Clear();
 
+                // Заодно обрываем всё, что выполняется прямо сейчас.
+                int stopped = _cancels.CancelAll();
+                if (stopped > 0)
+                {
+                    _logger.Info("Оборваны выполняющиеся запуски: {Count}", stopped);
+                }
+
                 if (File.Exists(TasksFileName))
                 {
                     File.Delete(TasksFileName);
@@ -146,6 +155,12 @@ namespace SPI.Twamp.Probe.Server
         /// </summary>
         private async Task<bool> MergeOneAsync(TaskInfo item)
         {
+            // Пришло удаление — прежде всего обрываем то, что уже выполняется.
+            // Снять расписание мало: зонд вроде «twping -c 300» живёт минутами и иначе
+            // домерял бы по несуществующей задаче. Делаем это для любой задачи, даже
+            // если её нет в реестре: разовые (Repeater) там не хранятся вовсе.
+            int stopped = item.Delete ? _cancels.CancelTask(item.Id) : 0;
+
             // Разовые задачи выполняем немедленно и в реестре не храним.
             if (item.Type == TaskType.Repeater)
             {
@@ -154,12 +169,20 @@ namespace SPI.Twamp.Probe.Server
                     _dispatcher.Enqueue(item);
                     _logger.Debug("Разовая задача {Id} поставлена в очередь", item.Id);
                 }
+                else if (stopped > 0)
+                {
+                    _logger.Info("Разовая задача {Id} удалена — прервано запусков: {Count}", item.Id, stopped);
+                }
                 return false;
             }
 
             // Задача по расписанию, помеченная на удаление.
             if (item.Delete)
             {
+                if (stopped > 0)
+                {
+                    _logger.Info("Задача {Id} удалена — прервано запусков: {Count}", item.Id, stopped);
+                }
                 return RemoveScheduler(item.Id);
             }
 

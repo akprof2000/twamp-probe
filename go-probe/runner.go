@@ -22,17 +22,18 @@ type ProbeRunner struct {
 	cfg      *Config
 	results  *ResultStore
 	registry *RunRegistry
-	baseDir  string // каталог приложения — для PYTHONPATH вендоренного twampy
+	cancels  *RunCancelRegistry // активные запуски — чтобы оборвать удалённую задачу
+	baseDir  string             // каталог приложения — для PYTHONPATH вендоренного twampy
 }
 
 // NewProbeRunner создаёт исполнитель.
-func NewProbeRunner(cfg *Config, results *ResultStore, registry *RunRegistry) *ProbeRunner {
+func NewProbeRunner(cfg *Config, results *ResultStore, registry *RunRegistry, cancels *RunCancelRegistry) *ProbeRunner {
 	exe, err := os.Executable()
 	base := "."
 	if err == nil {
 		base = filepath.Dir(exe)
 	}
-	return &ProbeRunner{cfg: cfg, results: results, registry: registry, baseDir: base}
+	return &ProbeRunner{cfg: cfg, results: results, registry: registry, cancels: cancels, baseDir: base}
 }
 
 // RunForNodes выполняет все циклы и повторы зонда для каждого узла задачи параллельно.
@@ -73,6 +74,9 @@ func (r *ProbeRunner) runSingleNode(ctx context.Context, task *TaskInfo, node st
 				return
 			}
 			result := r.executeOnce(ctx, task, node, execName, args, env)
+			if result.Cancelled {
+				return // задачу удалили — прекращаем циклы, результат не отправляем
+			}
 			r.results.Add(result)
 		}
 		// Пауза между циклами (кроме последнего).
@@ -143,13 +147,20 @@ func (r *ProbeRunner) executeOnce(
 		CallLine:    callLine,
 	}
 
-	// Индивидуальный таймаут задачи: по истечении процесс завершается принудительно.
-	runCtx := ctx
+	// Контекст запуска отменяем всегда: по индивидуальному таймауту задачи и по
+	// команде извне (задачу удалили на сервере) — тогда процесс зонда завершается
+	// принудительно, не дожидаясь конца замера.
+	var runCtx context.Context
 	var cancel context.CancelFunc
 	if task.TimeoutSec > 0 {
 		runCtx, cancel = context.WithTimeout(ctx, time.Duration(task.TimeoutSec)*time.Second)
-		defer cancel()
+	} else {
+		runCtx, cancel = context.WithCancel(ctx)
 	}
+	defer cancel()
+
+	untrack := r.cancels.Track(task.Id, cancel)
+	defer untrack()
 
 	cmd := exec.CommandContext(runCtx, execName, args...)
 	if env != nil {
@@ -176,7 +187,22 @@ func (r *ProbeRunner) executeOnce(
 
 	waitErr := cmd.Wait()
 	timedOut := runCtx.Err() == context.DeadlineExceeded
+	// Отмена именно этого запуска (задачу удалили), а не остановка всей пробы.
+	cancelled := runCtx.Err() == context.Canceled && ctx.Err() == nil
 	exitCode := cmd.ProcessState.ExitCode()
+
+	if cancelled {
+		// Задачи больше нет — результат никому не нужен: не отправляем его серверу,
+		// иначе в отчёте появится обрывок замера по уже удалённой задаче.
+		logRunner.Warn("Задача удалена — выполнение прервано",
+			"название", task.Title, "узел", node, "режим", task.Mode,
+			"длительность", time.Since(started).Round(time.Millisecond), "задача", task.Id)
+		r.registry.ReportOutcome(task.Id, OutcomeNotStarted, nil, "Задача удалена — выполнение прервано")
+		result.Outcome = string(OutcomeNotStarted)
+		result.ErrorConsole = "Задача удалена — выполнение прервано"
+		result.Cancelled = true
+		return result
+	}
 
 	output := stdout.String()
 	errText := stderr.String()
