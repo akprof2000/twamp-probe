@@ -68,14 +68,14 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 // resolveParallel возвращает число воркеров: явное значение (>0) — как есть;
-// 0 (или меньше) — автоподбор «ядра × 64» с потолком 10000 и полом 16. Зонды —
+// 0 (или меньше) — автоподбор «ядра × 256» с потолком 100000 и полом 16. Зонды —
 // внешние процессы, в основном ждущие I/O (особенно длинный TWAMP), поэтому
 // воркеров нужно много; потолок бережёт многоядерные машины.
 func resolveParallel(configured int) int {
 	if configured > 0 {
 		return configured
 	}
-	return min(max(runtime.NumCPU()*64, 16), 10000) // min/max — Go 1.21
+	return min(max(runtime.NumCPU()*256, 16), 100000) // min/max — Go 1.21
 }
 
 // parseUrls выделяет адрес прослушивания из строки Urls ASP.NET ("http://0.0.0.0:8443").

@@ -96,10 +96,10 @@ func (r *ProbeRunner) buildCommand(task *TaskInfo, node string) (string, []strin
 		return r.cfg.Ping.Name, append([]string{node}, orDefault(params, r.cfg.Ping.Default)...), nil
 
 	case ModeTWampy:
-		// nokia/twampy: «python -m twampy sender <far-end> :0 [опции]» — узел первым,
+		// nokia/twampy: «python -m twampy sender <far-end> [опции]» — узел первым,
 		// локальный порт эфемерный, чтобы тысячи отправителей не конфликтовали.
 		// PYTHONPATH указывает на каталог приложения с вендоренным пакетом twampy.
-		args := append([]string{"-m", "twampy", "sender", node, ":0"}, orDefault(params, r.cfg.Twampy.Default)...)
+		args := append([]string{"-m", "twampy", "sender", node}, orDefault(params, r.cfg.Twampy.Default)...)
 		env := append(os.Environ(), "PYTHONPATH="+r.baseDir+string(os.PathListSeparator)+os.Getenv("PYTHONPATH"))
 		return r.cfg.Twampy.Name, args, env
 

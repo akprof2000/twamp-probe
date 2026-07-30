@@ -17,14 +17,14 @@ namespace SPI.Twamp.Tests
         public void Explicit_UsedAsIs(int configured, int cores, int expected) =>
             Assert.Equal(expected, ProbeDispatcher.ResolveWorkerCount(configured, cores));
 
-        [Theory(DisplayName = "0 — автоподбор ядра × 64 с потолком 10000 и полом 16")]
-        [InlineData(0, 8, 512)]        // 8 × 64 = 512
-        [InlineData(0, 16, 1024)]      // 16 × 64 = 1024
-        [InlineData(0, 128, 8192)]     // 128 × 64 = 8192 (в пределах потолка)
-        [InlineData(0, 156, 9984)]     // 156 × 64 = 9984 (у самого потолка)
-        [InlineData(0, 200, 10000)]    // 200 × 64 = 12800 → потолок 10000
-        [InlineData(0, 1, 64)]         // 1 × 64 = 64
-        [InlineData(-5, 4, 256)]       // отрицательное трактуется как авто
+        [Theory(DisplayName = "0 — автоподбор ядра × 256 с потолком 100000 и полом 16")]
+        [InlineData(0, 8, 2048)]       // 8 × 256 = 2048
+        [InlineData(0, 16, 4096)]      // 16 × 256 = 4096
+        [InlineData(0, 128, 32768)]    // 128 × 256 = 32768 (в пределах потолка)
+        [InlineData(0, 390, 99840)]    // 390 × 256 = 99840 (у самого потолка)
+        [InlineData(0, 500, 100000)]   // 500 × 256 = 128000 → потолок 100000
+        [InlineData(0, 1, 256)]        // 1 × 256 = 256
+        [InlineData(-5, 4, 1024)]      // отрицательное трактуется как авто
         public void Auto_ByFormulaWithBounds(int configured, int cores, int expected) =>
             Assert.Equal(expected, ProbeDispatcher.ResolveWorkerCount(configured, cores));
     }
