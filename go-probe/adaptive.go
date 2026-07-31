@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -29,9 +30,14 @@ type AdaptiveLimiter struct {
 	closed   bool // служба останавливается — ожидающих больше не держим
 
 	// Состояние разгона. Пока памяти хватает, предел растёт удвоением («медленный
-	// старт»); после первого упора в память рост становится осторожным, линейным.
+	// старт»); после первого упора в память рост становится осторожным.
 	hitPressure bool
 	cooldown    int // сколько проверок не растём после сжатия — память освобождается не сразу
+
+	// Сколько памяти было свободно, когда предел меняли в прошлый раз. По разнице
+	// видно, во сколько обошёлся этот шаг, — на этом и строится решение о следующем.
+	freeAtChange uint64
+	hasBaseline  bool
 }
 
 // NewAdaptiveLimiter создаёт ограничитель, начинающий с малого предела.
@@ -80,15 +86,30 @@ func (l *AdaptiveLimiter) Release() {
 	l.cond.Signal()
 }
 
-// SetLimit меняет текущий предел (в границах пола и потолка).
-// Возвращает установленное значение.
-func (l *AdaptiveLimiter) SetLimit(value int) int {
+// SetLimit меняет текущий предел (в границах пола и потолка) и запоминает,
+// сколько памяти было свободно в этот момент — чтобы на следующей проверке
+// увидеть, во сколько обошёлся шаг. Возвращает установленное значение.
+func (l *AdaptiveLimiter) SetLimit(value int, freeBytes uint64) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	l.limit = min(max(value, l.minLimit), l.maxLimit)
+	l.freeAtChange = freeBytes
+	l.hasBaseline = freeBytes > 0
 	l.cond.Broadcast() // предел мог вырасти — будим ожидающих
 	return l.limit
+}
+
+// consumption сообщает, сколько памяти ушло с прошлого изменения предела:
+// (съедено, было свободно, есть ли с чем сравнивать).
+func (l *AdaptiveLimiter) consumption(freeNow uint64) (uint64, uint64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if !l.hasBaseline || freeNow >= l.freeAtChange {
+		return 0, l.freeAtChange, false // памяти не убавилось — считать нечего
+	}
+	return l.freeAtChange - freeNow, l.freeAtChange, true
 }
 
 // Limit возвращает текущий предел.
@@ -134,13 +155,14 @@ func (l *AdaptiveLimiter) coolingDown() bool {
 }
 
 // growthTarget возвращает следующий предел и название режима роста.
-// До первого упора в память разгоняемся удвоением, после — прибавляем по шагу.
-func (l *AdaptiveLimiter) growthTarget(current, step int) (int, string) {
+// До первого упора в память разгоняемся удвоением; после — прибавляем четверть,
+// чтобы не прыгнуть обратно в тот же потолок памяти.
+func (l *AdaptiveLimiter) growthTarget(current int) (int, string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.hitPressure {
-		return current + step, "плавный"
+		return current + max(current/4, 1), "плавный"
 	}
 	return current * 2, "разгон"
 }
@@ -150,8 +172,8 @@ const pressureCooldownTicks = 2
 
 // MemoryGuardConfig — пороги подстройки предела по занятости памяти.
 type MemoryGuardConfig struct {
-	HighPercent float64       // выше этого — сжимаем предел
-	LowPercent  float64       // ниже этого — возвращаем предел
+	HighPercent float64       // выше этой занятости — аварийное сжатие
+	LowPercent  float64       // ниже этой занятости — можно разгоняться
 	Interval    time.Duration // как часто смотреть на память
 }
 
@@ -166,10 +188,8 @@ func RunMemoryGuard(ctx context.Context, limiter *AdaptiveLimiter, cfg MemoryGua
 	logMain.Info("Слежение за памятью запущено",
 		"порог_сжатия_%", cfg.HighPercent, "порог_роста_%", cfg.LowPercent,
 		"период_с", int(cfg.Interval.Seconds()),
-		"предел", limiter.Limit(), "минимум", limiter.minLimit)
+		"предел", limiter.Limit(), "минимум", limiter.minLimit, "потолок", limiter.maxLimit)
 
-	// Шаг роста — десятая часть потолка: возвращаемся плавно, за ~10 проверок.
-	step := max(limiter.maxLimit/10, 1)
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
 
@@ -179,69 +199,97 @@ func RunMemoryGuard(ctx context.Context, limiter *AdaptiveLimiter, cfg MemoryGua
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			used, err := memoryUsedPercent()
+			status, err := memoryStatus()
 			if err != nil {
-				// Сообщаем один раз: если память не читается, лимит просто не трогаем.
+				// Сообщаем один раз: если память не читается, предел просто не трогаем.
 				if failures == 0 {
-					logMain.Warn("Не удалось прочитать занятость памяти — предел запусков не подстраивается",
+					logMain.Warn("Не удалось прочитать состояние памяти — предел запусков не подстраивается",
 						"ошибка", err)
 				}
 				failures++
 				continue
 			}
 			failures = 0
-			adjustLimit(limiter, cfg, used, step)
+			adjustLimit(limiter, cfg, status)
 		}
 	}
 }
 
-// adjustLimit подстраивает предел под текущую занятость памяти и пишет в журнал,
-// если предел изменился. Вынесено отдельно — так поведение проверяется тестами.
+// adjustLimit подстраивает предел под состояние памяти и пишет в журнал при изменении.
 //
-// Схема — «медленный старт» с последующим осторожным ростом (как управление окном
-// в TCP): пока памяти вдоволь и упора ещё не было, предел удваивается; после первого
-// упора в память рост идёт шагами, а сжатие всегда резкое. Так проба нащупывает
-// безопасную величину, вместо того чтобы разом запустить тысячи процессов.
-func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, used float64, step int) {
+// Решение принимается не по одной лишь занятости, а по тому, **сколько памяти съел
+// предыдущий шаг**. Пороги занятости срабатывают слишком поздно: при 64 ГБ всего и
+// 16 ГБ свободных занято лишь 75% — формально «есть запас», а следующее удвоение
+// уже не влезет. Поэтому: если прошлый шаг съел больше половины того, что было
+// свободно, — предел уменьшается вдвое, не дожидаясь порога.
+func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, status MemoryStatus) {
 	before := limiter.Limit()
+	consumed, freeBefore, measured := limiter.consumption(status.AvailableBytes)
 
 	switch {
-	case used >= cfg.HighPercent:
-		// Памяти нет: режем предел на четверть, чтобы освободить её быстрее,
-		// чем система начнёт отказывать в запуске процессов.
-		after := limiter.SetLimit(before * 3 / 4)
+	// 1. Аварийный порог: памяти почти нет — режем вдвое немедленно.
+	case status.UsedPercent >= cfg.HighPercent:
+		after := limiter.SetLimit(before/2, status.AvailableBytes)
 		limiter.markPressure()
-
 		if after != before {
-			logMain.Warn("Памяти мало — предел одновременных запусков снижен",
-				"память_%", roundPercent(used), "порог_%", cfg.HighPercent,
+			logMain.Warn("Памяти мало — предел одновременных запусков снижен вдвое",
+				"память_%", roundPercent(status.UsedPercent), "порог_%", cfg.HighPercent,
+				"свободно", humanBytes(status.AvailableBytes),
 				"было", before, "стало", after,
 				"выполняется", limiter.InFlight(), "потолок", limiter.maxLimit)
 		} else if before == limiter.minLimit {
 			logMain.Warn("Памяти мало, но предел уже на минимуме",
-				"память_%", roundPercent(used), "предел", before)
+				"память_%", roundPercent(status.UsedPercent),
+				"свободно", humanBytes(status.AvailableBytes), "предел", before)
 		}
 
-	case used <= cfg.LowPercent:
-		// Память свободна. Но сразу после сжатия не растём: процессы завершаются
-		// не мгновенно, и память освобождается с задержкой — иначе начнём качаться.
+	// 2. Прошлый шаг съел больше половины свободной памяти — следующий раз вдвое меньше.
+	//    Это и есть защита от «ещё одно удвоение — и всё упадёт».
+	case measured && consumed*2 > freeBefore:
+		after := limiter.SetLimit(before/2, status.AvailableBytes)
+		limiter.markPressure()
+		if after != before {
+			logMain.Warn("Прошлый шаг съел больше половины свободной памяти — предел снижен вдвое",
+				"съедено", humanBytes(consumed), "было_свободно", humanBytes(freeBefore),
+				"осталось", humanBytes(status.AvailableBytes),
+				"было", before, "стало", after,
+				"выполняется", limiter.InFlight(), "потолок", limiter.maxLimit)
+		}
+
+	// 3. Памяти вдоволь и прошлый шаг обошёлся дёшево — наращиваем.
+	case status.UsedPercent <= cfg.LowPercent:
 		if limiter.coolingDown() {
-			return
+			return // после сжатия ждём, пока освободятся процессы
 		}
-
-		next, phase := limiter.growthTarget(before, step)
-		after := limiter.SetLimit(next)
+		target, mode := limiter.growthTarget(before)
+		after := limiter.SetLimit(target, status.AvailableBytes)
 		if after != before {
 			logMain.Info("Памяти достаточно — предел одновременных запусков повышен",
-				"память_%", roundPercent(used), "порог_%", cfg.LowPercent,
-				"было", before, "стало", after, "режим", phase,
+				"режим", mode, "память_%", roundPercent(status.UsedPercent),
+				"свободно", humanBytes(status.AvailableBytes),
+				"съедено_прошлым_шагом", humanBytes(consumed),
+				"было", before, "стало", after,
 				"выполняется", limiter.InFlight(), "потолок", limiter.maxLimit)
 		}
 	}
-	// Между порогами предел не трогаем — иначе он дёргался бы туда-сюда.
+	// Между порогами и при умеренном расходе предел держим — иначе он дёргался бы.
 }
 
 // roundPercent округляет процент до одного знака — журнал не должен пестреть хвостами.
 func roundPercent(value float64) float64 {
 	return float64(int(value*10+0.5)) / 10
+}
+
+// humanBytes переводит байты в удобные для чтения единицы.
+func humanBytes(value uint64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d Б", value)
+	}
+	div, exp := uint64(unit), 0
+	for n := value / unit; n >= unit && exp < 3; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %s", float64(value)/float64(div), [...]string{"КБ", "МБ", "ГБ", "ТБ"}[exp])
 }

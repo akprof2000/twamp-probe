@@ -17,9 +17,25 @@ import (
 
 // memoryUsedPercent возвращает долю занятой памяти в процентах (0..100).
 func memoryUsedPercent() (float64, error) {
+	st, err := memoryStatus()
+	if err != nil {
+		return 0, err
+	}
+	return st.UsedPercent, nil
+}
+
+// MemoryStatus — снимок состояния памяти.
+type MemoryStatus struct {
+	UsedPercent    float64 // занято, проценты
+	AvailableBytes uint64  // доступно под новые процессы
+	TotalBytes     uint64  // всего физической памяти
+}
+
+// memoryStatus читает состояние памяти целиком.
+func memoryStatus() (MemoryStatus, error) {
 	file, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0, fmt.Errorf("не удалось открыть /proc/meminfo: %w", err)
+		return MemoryStatus{}, fmt.Errorf("не удалось открыть /proc/meminfo: %w", err)
 	}
 	defer file.Close()
 
@@ -42,13 +58,18 @@ func memoryUsedPercent() (float64, error) {
 	}
 
 	if total <= 0 {
-		return 0, fmt.Errorf("в /proc/meminfo нет MemTotal")
+		return MemoryStatus{}, fmt.Errorf("в /proc/meminfo нет MemTotal")
 	}
 	// На очень старых ядрах (до 3.14) MemAvailable отсутствует — считать нечего.
 	if available <= 0 {
-		return 0, fmt.Errorf("в /proc/meminfo нет MemAvailable")
+		return MemoryStatus{}, fmt.Errorf("в /proc/meminfo нет MemAvailable")
 	}
-	return (1 - available/total) * 100, nil
+
+	return MemoryStatus{
+		UsedPercent:    (1 - available/total) * 100,
+		AvailableBytes: uint64(available) * 1024, // /proc/meminfo отдаёт килобайты
+		TotalBytes:     uint64(total) * 1024,
+	}, nil
 }
 
 // parseMeminfoKB разбирает значение вида «  16384000 kB» в число килобайт.

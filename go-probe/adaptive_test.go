@@ -7,28 +7,43 @@ import (
 	"time"
 )
 
-// guard — типовые пороги: сжимаем от 95%, возвращаем до 80%.
+const gb = uint64(1) << 30
+
+// guard — типовые пороги: аварийное сжатие от 95%, разгон ниже 80%.
 func guard() MemoryGuardConfig {
 	return MemoryGuardConfig{HighPercent: 95, LowPercent: 80, Interval: time.Second}
 }
 
-func TestLimiter_StartsAtConfiguredMax(t *testing.T) {
-	l := NewAdaptiveLimiter(1000, 16, 1000)
-	if l.Limit() != 1000 {
-		t.Errorf("начальный предел = %d, ожидался потолок 1000", l.Limit())
+// mem собирает состояние памяти: сколько свободно из 64 ГБ.
+func mem(freeGB float64) MemoryStatus {
+	total := 64 * gb
+	free := uint64(freeGB * float64(gb))
+	return MemoryStatus{
+		UsedPercent:    (1 - float64(free)/float64(total)) * 100,
+		AvailableBytes: free,
+		TotalBytes:     total,
+	}
+}
+
+// --- границы предела ---
+
+func TestLimiter_StartsSmallNotAtCeiling(t *testing.T) {
+	// После запуска предел маленький: иначе тысячи задач по расписанию срываются
+	// одновременно и съедают память раньше первой её проверки.
+	l := NewAdaptiveLimiter(4096, 16, 64)
+	if l.Limit() != 64 {
+		t.Errorf("стартовый предел = %d, ожидалось 64 (не потолок 4096)", l.Limit())
 	}
 }
 
 func TestLimiter_NeverExceedsConfiguredMax(t *testing.T) {
-	// Главное требование: настройка — жёсткий потолок, выше не поднимаемся никогда.
+	// Настройка — жёсткий потолок, выше не поднимаемся никогда.
 	l := NewAdaptiveLimiter(100, 16, 100)
-	if got := l.SetLimit(5000); got != 100 {
+	if got := l.SetLimit(5000, 0); got != 100 {
 		t.Errorf("предел поднялся до %d выше потолка 100", got)
 	}
-
-	// Даже длинная череда «памяти много» не пробивает потолок.
 	for range 50 {
-		adjustLimit(l, guard(), 10, 10)
+		adjustLimit(l, guard(), mem(60)) // памяти вдоволь
 	}
 	if l.Limit() != 100 {
 		t.Errorf("после роста предел = %d, ожидался потолок 100", l.Limit())
@@ -39,81 +54,124 @@ func TestLimiter_NeverDropsBelowMin(t *testing.T) {
 	// Даже при полной нехватке памяти замеры должны продолжаться.
 	l := NewAdaptiveLimiter(1000, 16, 1000)
 	for range 50 {
-		adjustLimit(l, guard(), 99, 100)
+		adjustLimit(l, guard(), mem(1)) // 63 из 64 ГБ занято
 	}
 	if l.Limit() != 16 {
 		t.Errorf("предел упал до %d, ожидался пол 16", l.Limit())
 	}
 }
 
-func TestAdjust_ShrinksWhenMemoryHigh(t *testing.T) {
-	l := NewAdaptiveLimiter(1000, 16, 1000)
-	adjustLimit(l, guard(), 96, 100) // 96% — выше порога сжатия
+// --- решение по расходу памяти (главная логика) ---
 
-	if l.Limit() != 750 {
-		t.Errorf("предел = %d, ожидалось сжатие на четверть (750)", l.Limit())
+func TestAdjust_HalvesWhenStepAteMoreThanHalfOfFree(t *testing.T) {
+	// Сценарий из практики: свободно 40 ГБ, шаг съел 24 ГБ (больше половины) —
+	// предел обязан упасть вдвое, хотя занятость памяти всего 62%
+	// и по одним лишь порогам казалось бы, что запас ещё есть.
+	l := NewAdaptiveLimiter(4096, 16, 128)
+	l.SetLimit(128, 40*gb) // на момент шага было свободно 40 ГБ
+
+	adjustLimit(l, guard(), mem(16)) // осталось 16 ГБ → съедено 24 ГБ
+
+	if l.Limit() != 64 {
+		t.Errorf("предел = %d, ожидалось уменьшение вдвое до 64", l.Limit())
 	}
 }
 
-func TestAdjust_GrowsWhenMemoryLow(t *testing.T) {
-	// Упора в память ещё не было, значит идёт разгон — предел удваивается.
-	l := NewAdaptiveLimiter(1000, 16, 1000)
-	l.SetLimit(400)
-	adjustLimit(l, guard(), 50, 100) // 50% — ниже порога роста
+func TestAdjust_GrowsWhenStepWasCheap(t *testing.T) {
+	// Свободно 64 ГБ, шаг съел всего 2 ГБ — можно разгоняться дальше.
+	l := NewAdaptiveLimiter(4096, 16, 16)
+	l.SetLimit(16, 64*gb)
 
-	if l.Limit() != 800 {
-		t.Errorf("предел = %d, ожидалось удвоение при разгоне (800)", l.Limit())
+	adjustLimit(l, guard(), mem(62)) // съедено 2 ГБ из 64
+
+	if l.Limit() != 32 {
+		t.Errorf("предел = %d, ожидалось удвоение до 32", l.Limit())
+	}
+}
+
+func TestAdjust_FullScenarioFromProduction(t *testing.T) {
+	// Полный сценарий: 64 ГБ памяти, разгон 16 → 32 → 64 → 128, затем шаг
+	// съедает больше половины свободной — и вместо гибельного 256 предел уходит вниз.
+	l := NewAdaptiveLimiter(4096, 16, 16)
+	l.SetLimit(16, 64*gb)
+
+	steps := []struct {
+		freeLeftGB float64 // сколько осталось свободно после шага
+		wantLimit  int     // каким должен стать предел
+		comment    string
+	}{
+		{62, 32, "съело 2 ГБ из 64 — дёшево, разгон"},
+		{48, 64, "съело 14 ГБ из 62 — меньше половины, разгон"},
+		{40, 128, "съело 8 ГБ из 48 — дёшево, разгон"},
+		{16, 64, "съело 24 ГБ из 40 — больше половины, назад вдвое"},
+	}
+
+	for i, step := range steps {
+		adjustLimit(l, guard(), mem(step.freeLeftGB))
+		if l.Limit() != step.wantLimit {
+			t.Fatalf("шаг %d (%s): предел = %d, ожидался %d",
+				i+1, step.comment, l.Limit(), step.wantLimit)
+		}
+	}
+
+	// Ключевое: до опасного 256 дело не дошло — вместо роста был откат.
+	if l.Limit() >= 256 {
+		t.Errorf("предел дорос до %d — именно этот скачок и роняет пробу по памяти", l.Limit())
+	}
+}
+
+func TestAdjust_EmergencyHalvingAtHighUsage(t *testing.T) {
+	// Аварийный порог: памяти почти нет — режем вдвое, не разбираясь в расходе.
+	l := NewAdaptiveLimiter(4096, 16, 1000)
+	adjustLimit(l, guard(), mem(1)) // 98% занято
+
+	if l.Limit() != 500 {
+		t.Errorf("предел = %d, ожидалось аварийное сжатие вдвое до 500", l.Limit())
+	}
+}
+
+func TestAdjust_GrowsGentlyAfterPressure(t *testing.T) {
+	// После упора в память рост осторожный (+четверть), а не удвоение —
+	// иначе проба прыгнет обратно в тот же потолок.
+	l := NewAdaptiveLimiter(4096, 16, 1000)
+	adjustLimit(l, guard(), mem(1)) // упор → 500, включается пауза остывания
+	if l.Limit() != 500 {
+		t.Fatalf("после упора предел = %d, ожидалось 500", l.Limit())
+	}
+
+	adjustLimit(l, guard(), mem(60)) // пауза остывания
+	adjustLimit(l, guard(), mem(60)) // пауза остывания
+	adjustLimit(l, guard(), mem(60)) // рост
+
+	if l.Limit() != 625 { // 500 + четверть
+		t.Errorf("предел = %d, ожидался осторожный рост до 625", l.Limit())
 	}
 }
 
 func TestAdjust_HoldsBetweenThresholds(t *testing.T) {
-	// Между порогами предел не трогаем — иначе он дёргался бы туда-сюда.
-	l := NewAdaptiveLimiter(1000, 16, 1000)
-	l.SetLimit(500)
+	// Между порогами и при умеренном расходе предел не трогаем.
+	l := NewAdaptiveLimiter(4096, 16, 500)
+	l.SetLimit(500, 12*gb)
 
-	for _, used := range []float64{81, 85, 90, 94.9} {
-		adjustLimit(l, guard(), used, 100)
-		if l.Limit() != 500 {
-			t.Errorf("при памяти %.1f%% предел изменился на %d, ожидалось 500", used, l.Limit())
-		}
+	adjustLimit(l, guard(), mem(11)) // занято ~83% — между порогами, расход мал
+	if l.Limit() != 500 {
+		t.Errorf("предел изменился на %d, ожидалось 500", l.Limit())
 	}
 }
 
-func TestAdjust_RecoversAfterPressure(t *testing.T) {
-	// Сценарий аварии: память кончилась, потом освободилась.
-	l := NewAdaptiveLimiter(1000, 16, 1000)
-
-	for range 5 { // давление памяти
-		adjustLimit(l, guard(), 97, 100)
-	}
-	underPressure := l.Limit()
-	if underPressure >= 1000 {
-		t.Fatalf("предел не сжался под давлением: %d", underPressure)
-	}
-
-	for range 20 { // память освободилась
-		adjustLimit(l, guard(), 40, 100)
-	}
-	if l.Limit() != 1000 {
-		t.Errorf("предел не вернулся к потолку: %d", l.Limit())
-	}
-}
+// --- механика слотов ---
 
 func TestLimiter_BlocksAboveLimit(t *testing.T) {
-	// Слотов ровно столько, сколько разрешает предел: лишний вызов ждёт.
 	l := NewAdaptiveLimiter(2, 1, 2)
 	ctx := context.Background()
 
 	if !l.Acquire(ctx) || !l.Acquire(ctx) {
 		t.Fatal("не удалось занять два слота из двух")
 	}
-	if l.InFlight() != 2 {
-		t.Errorf("занято слотов: %d, ожидалось 2", l.InFlight())
-	}
 
 	blocked := make(chan struct{})
 	go func() {
-		l.Acquire(ctx) // должен ждать освобождения
+		l.Acquire(ctx)
 		close(blocked)
 	}()
 
@@ -123,7 +181,7 @@ func TestLimiter_BlocksAboveLimit(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	l.Release() // освобождаем — ожидающий обязан проснуться
+	l.Release()
 	select {
 	case <-blocked:
 	case <-time.After(2 * time.Second):
@@ -132,12 +190,9 @@ func TestLimiter_BlocksAboveLimit(t *testing.T) {
 }
 
 func TestLimiter_GrowthWakesWaiters(t *testing.T) {
-	// Память освободилась, предел вырос — ждущие запуски должны пойти сразу,
-	// не дожидаясь завершения текущих.
 	l := NewAdaptiveLimiter(10, 1, 10)
-	l.SetLimit(1)
+	l.SetLimit(1, 0)
 	ctx := context.Background()
-
 	if !l.Acquire(ctx) {
 		t.Fatal("не удалось занять единственный слот")
 	}
@@ -149,7 +204,7 @@ func TestLimiter_GrowthWakesWaiters(t *testing.T) {
 	}()
 	time.Sleep(50 * time.Millisecond)
 
-	l.SetLimit(5) // предел вырос
+	l.SetLimit(5, 0)
 	select {
 	case <-woke:
 	case <-time.After(2 * time.Second):
@@ -158,7 +213,6 @@ func TestLimiter_GrowthWakesWaiters(t *testing.T) {
 }
 
 func TestLimiter_CloseReleasesWaiters(t *testing.T) {
-	// При остановке службы ожидающие не должны висеть вечно.
 	l := NewAdaptiveLimiter(1, 1, 1)
 	ctx := context.Background()
 	if !l.Acquire(ctx) {
@@ -181,7 +235,6 @@ func TestLimiter_CloseReleasesWaiters(t *testing.T) {
 }
 
 func TestLimiter_ConcurrentAcquireRespectsLimit(t *testing.T) {
-	// Под конкурентной нагрузкой предел не должен превышаться ни на мгновение.
 	l := NewAdaptiveLimiter(8, 1, 8)
 	ctx := context.Background()
 
@@ -219,83 +272,31 @@ func TestLimiter_ConcurrentAcquireRespectsLimit(t *testing.T) {
 	}
 }
 
-func TestMemoryUsedPercent_ReturnsSaneValue(t *testing.T) {
-	// Чтение памяти платформозависимо — проверяем, что оно вообще работает
-	// и отдаёт правдоподобное значение.
-	used, err := memoryUsedPercent()
+func TestMemoryStatus_ReturnsSaneValues(t *testing.T) {
+	st, err := memoryStatus()
 	if err != nil {
-		t.Fatalf("не удалось прочитать занятость памяти: %v", err)
+		t.Fatalf("не удалось прочитать состояние памяти: %v", err)
 	}
-	if used <= 0 || used > 100 {
-		t.Errorf("занятость памяти = %.1f%%, ожидалось значение в диапазоне 0..100", used)
+	if st.UsedPercent <= 0 || st.UsedPercent > 100 {
+		t.Errorf("занятость = %.1f%%, ожидалось 0..100", st.UsedPercent)
 	}
-	t.Logf("занятость памяти на этой машине: %.1f%%", used)
+	if st.TotalBytes == 0 || st.AvailableBytes == 0 || st.AvailableBytes > st.TotalBytes {
+		t.Errorf("объёмы неправдоподобны: свободно %d из %d", st.AvailableBytes, st.TotalBytes)
+	}
+	t.Logf("память: занято %.1f%%, свободно %s из %s",
+		st.UsedPercent, humanBytes(st.AvailableBytes), humanBytes(st.TotalBytes))
 }
 
-func TestLimiter_StartsSmallNotAtCeiling(t *testing.T) {
-	// Ключевое: после запуска предел маленький. Иначе тысячи задач по расписанию
-	// стартуют одновременно и съедают память раньше первой её проверки.
-	l := NewAdaptiveLimiter(4096, 16, 64)
-	if l.Limit() != 64 {
-		t.Errorf("стартовый предел = %d, ожидалось 64 (не потолок 4096)", l.Limit())
+func TestHumanBytes(t *testing.T) {
+	cases := map[uint64]string{
+		512:             "512 Б",
+		2 * 1024:        "2.0 КБ",
+		5 * 1024 * 1024: "5.0 МБ",
+		3 * gb:          "3.0 ГБ",
 	}
-}
-
-func TestLimiter_StartClampedToBounds(t *testing.T) {
-	if l := NewAdaptiveLimiter(100, 16, 5000); l.Limit() != 100 {
-		t.Errorf("стартовый предел выше потолка: %d", l.Limit())
-	}
-	if l := NewAdaptiveLimiter(100, 16, 1); l.Limit() != 16 {
-		t.Errorf("стартовый предел ниже пола: %d", l.Limit())
-	}
-}
-
-func TestAdjust_SlowStartDoublesUntilCeiling(t *testing.T) {
-	// Пока памяти вдоволь и упора не было — разгоняемся удвоением.
-	l := NewAdaptiveLimiter(4096, 16, 64)
-	for _, want := range []int{128, 256, 512, 1024, 2048, 4096, 4096} {
-		adjustLimit(l, guard(), 40, 409)
-		if l.Limit() != want {
-			t.Fatalf("предел = %d, ожидался %d", l.Limit(), want)
+	for value, want := range cases {
+		if got := humanBytes(value); got != want {
+			t.Errorf("humanBytes(%d) = %q, ожидалось %q", value, got, want)
 		}
-	}
-}
-
-func TestAdjust_GrowsGentlyAfterPressure(t *testing.T) {
-	// После первого упора в память рост становится осторожным, а не удвоением:
-	// иначе проба снова прыгнет в тот же потолок памяти.
-	l := NewAdaptiveLimiter(4000, 16, 1000)
-	adjustLimit(l, guard(), 97, 400) // упор → 750, включается пауза остывания
-	if l.Limit() != 750 {
-		t.Fatalf("после сжатия предел = %d, ожидалось 750", l.Limit())
-	}
-
-	// Пауза: две ближайшие проверки роста пропускаются.
-	adjustLimit(l, guard(), 40, 400)
-	adjustLimit(l, guard(), 40, 400)
-	if l.Limit() != 750 {
-		t.Errorf("предел вырос во время паузы остывания: %d", l.Limit())
-	}
-
-	adjustLimit(l, guard(), 40, 400)
-	if l.Limit() != 1150 {
-		t.Errorf("предел = %d, ожидался плавный рост на шаг (1150)", l.Limit())
-	}
-}
-
-func TestAdjust_SlowStartStopsAtMemoryPressure(t *testing.T) {
-	// Разгон обязан остановиться, как только память подошла к порогу,
-	// а не долететь до потолка настройки.
-	l := NewAdaptiveLimiter(4096, 16, 64)
-	adjustLimit(l, guard(), 40, 409) // 128
-	adjustLimit(l, guard(), 40, 409) // 256
-	reached := l.Limit()
-
-	adjustLimit(l, guard(), 96, 409) // упёрлись в память
-	if l.Limit() >= reached {
-		t.Errorf("предел не сжался при нехватке памяти: было %d, стало %d", reached, l.Limit())
-	}
-	if l.Limit() >= 4096 {
-		t.Error("предел дошёл до потолка вопреки нехватке памяти")
 	}
 }

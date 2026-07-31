@@ -4,19 +4,33 @@ package main
 
 import (
 	"context"
+	"sync"
 )
+
+// Executor — исполнитель задачи. Диспетчеру нужен ровно один метод, поэтому он
+// зависит от интерфейса, а не от конкретного ProbeRunner: так поведение очереди
+// проверяется тестами без запуска настоящих процессов зондов.
+type Executor interface {
+	RunForNodes(ctx context.Context, task *TaskInfo)
+}
 
 // Dispatcher — очередь задач и пул воркеров с ограниченной параллельностью.
 type Dispatcher struct {
 	queue    chan *TaskInfo
-	runner   *ProbeRunner
+	runner   Executor
 	registry *RunRegistry
 	limiter  *AdaptiveLimiter // фактический предел: сжимается, когда кончается память
 	ctx      context.Context
+
+	// Задачи, которые сейчас в очереди или выполняются. Нужен, чтобы не ставить
+	// задачу повторно, пока не завершился её предыдущий запуск: замер вроде
+	// «twping -c 300» живёт минутами, а расписание может сработать раньше — иначе
+	// запуски копятся и съедают память.
+	active sync.Map // ключ — идентификатор задачи
 }
 
 // NewDispatcher создаёт диспетчер и поднимает пул воркеров.
-func NewDispatcher(ctx context.Context, workers int, runner *ProbeRunner, registry *RunRegistry,
+func NewDispatcher(ctx context.Context, workers int, runner Executor, registry *RunRegistry,
 	limiter *AdaptiveLimiter) *Dispatcher {
 
 	d := &Dispatcher{
@@ -35,10 +49,19 @@ func NewDispatcher(ctx context.Context, workers int, runner *ProbeRunner, regist
 }
 
 // Enqueue ставит задачу в очередь на выполнение (не блокируя отправителя).
+// Если предыдущий запуск этой задачи ещё не завершился, новый пропускается:
+// накапливать параллельные замеры одной задачи бессмысленно и опасно для памяти.
 func (d *Dispatcher) Enqueue(task *TaskInfo) {
+	if _, busy := d.active.LoadOrStore(task.Id, struct{}{}); busy {
+		logDispatcher.Warn("Предыдущий запуск ещё не завершён — задача пропущена",
+			"задача", task.Id, "название", task.Title, "узел", task.EndNode)
+		return
+	}
+
 	select {
 	case d.queue <- task:
 	default:
+		d.active.Delete(task.Id) // в очередь не попала — держать пометку незачем
 		logDispatcher.Error("Очередь переполнена — задача пропущена",
 			"задача", task.Id, "название", task.Title, "ёмкость", cap(d.queue))
 	}
@@ -61,7 +84,9 @@ func (d *Dispatcher) workerLoop() {
 			d.registry.MarkStarted(task)
 			d.runner.RunForNodes(d.ctx, task)
 			d.registry.MarkFinished(task.Id)
+
 			d.limiter.Release()
+			d.active.Delete(task.Id) // задача свободна — следующее срабатывание пройдёт
 		}
 	}
 }
