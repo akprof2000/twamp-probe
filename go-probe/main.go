@@ -78,8 +78,9 @@ func main() {
 	runReg := NewRunRegistry()
 	cancels := NewRunCancelRegistry()
 	runner := NewProbeRunner(cfg, results, runReg, cancels)
-	// Предел одновременных запусков: настройка задаёт потолок, память — фактическое значение.
-	limiter := NewAdaptiveLimiter(cfg.MaxParallel, cfg.MinParallel)
+	// Предел одновременных запусков: настройка задаёт потолок, память — фактическое
+	// значение. Стартуем с малого и разгоняемся, а не запускаем всё разом.
+	limiter := NewAdaptiveLimiter(cfg.MaxParallel, cfg.MinParallel, cfg.StartParallel)
 	defer limiter.Close()
 	go RunMemoryGuard(ctx, limiter, MemoryGuardConfig{
 		HighPercent: cfg.MemoryHighPercent,

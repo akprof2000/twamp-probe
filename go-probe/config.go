@@ -26,6 +26,7 @@ type Config struct {
 	PersistIntervalSec int       // Probe:PersistIntervalSec — период снимка очереди на диск
 	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
 	MinParallel        int       // Probe:MinParallel — ниже этого предел не опускается даже при нехватке памяти
+	StartParallel      int       // Probe:StartParallel — с какого предела начинаем разгон после запуска
 	MemoryHighPercent  float64   // Probe:MemoryHighPercent — выше этой занятости памяти предел сжимается
 	MemoryLowPercent   float64   // Probe:MemoryLowPercent — ниже этой занятости предел возвращается
 	MemoryCheckSec     int       // Probe:MemoryCheckSec — период проверки памяти (0 — слежение выключено)
@@ -56,6 +57,7 @@ func LoadConfig(path string) (*Config, error) {
 		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
 		MinParallel:        num(raw, "Probe:MinParallel", 16),
+		StartParallel:      num(raw, "Probe:StartParallel", 64),
 		MemoryHighPercent:  float64(num(raw, "Probe:MemoryHighPercent", 95)),
 		MemoryLowPercent:   float64(num(raw, "Probe:MemoryLowPercent", 80)),
 		MemoryCheckSec:     num(raw, "Probe:MemoryCheckSec", 5),
