@@ -63,6 +63,17 @@ func main() {
 	// пересоздаём их поверх настроенного журнала.
 	initComponentLoggers()
 
+	// Потолок из настроек — это пожелание, а физическую границу задаёт ОС: каждый
+	// идущий замер держит дочерний процесс и поток, ожидающий его завершения.
+	// Превысить лимит ядра нельзя — Go в этом случае падает с fatal error, и
+	// перехватить это невозможно. Поэтому потолок урезаем заранее.
+	if limit, reason := systemRunCap(); limit > 0 && limit < cfg.MaxParallel {
+		logMain.Warn("Потолок одновременных запусков снижен под лимиты системы",
+			"было", cfg.MaxParallel, "стало", limit, "ограничение", reason,
+			"подсказка", "каждый зонд занимает процесс и поток ОС")
+		cfg.MaxParallel = limit
+	}
+
 	logMain.Info("Проба запускается",
 		"версия", probeVersion,
 		"адрес", cfg.ListenAddr,
@@ -116,9 +127,42 @@ func main() {
 	logMain.Info("Получен сигнал остановки — завершаем работу")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = server.Shutdown(shutdownCtx)
+	_ = server.Shutdown(shutdownCtx) // новых задач с сервера больше не принимаем
+
+	// Зонды — это отдельные процессы. Если просто выйти, они осиротеют и
+	// продолжат работать: замер «twping -c 300» живёт минутами, и после
+	// перезапуска службы такие процессы копятся, занимая память и порты.
+	// Поэтому обрываем их явно и дожидаемся, пока ядро их снимет.
+	limiter.Close() // ожидающие воркеры расходятся, новые запуски не стартуют
+	if stopped := cancels.CancelAll(); stopped > 0 {
+		logMain.Info("Прерываем запущенные зонды", "запусков", stopped)
+	}
+	waitForRuns(limiter, shutdownWait)
+
 	results.Close() // финальный снимок недоставленных результатов
 	logMain.Info("Проба остановлена")
+}
+
+// shutdownWait — сколько ждать завершения зондов при остановке пробы.
+const shutdownWait = 10 * time.Second
+
+// waitForRuns дожидается, пока прерванные зонды действительно завершатся.
+// Сигнал послан мгновенно, но снятие процессов ядром занимает время, и выйти
+// раньше — значит снова оставить сирот.
+func waitForRuns(limiter *AdaptiveLimiter, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for {
+		left := limiter.InFlight()
+		if left == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			logMain.Warn("Часть зондов не завершилась за отведённое время",
+				"осталось", left, "ждали", timeout)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // initComponentLoggers пересоздаёт логгеры компонентов после настройки журнала.

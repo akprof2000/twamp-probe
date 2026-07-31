@@ -57,6 +57,12 @@ systemd (автозапуск)
   WorkingDirectory=/opt/twamp-probe-go
   ExecStart=/opt/twamp-probe-go/twamp-probe
   Restart=always
+  # Важно при тысячах задач: один идущий замер занимает и процесс зонда,
+  # и поток пробы, ждущий его завершения. Оба считаются в LimitNPROC.
+  # Штатные 4096 в CentOS/RHEL упираются в потолок на 2048 замерах —
+  # проба сама снизит предел, но так она работает вполсилы.
+  LimitNPROC=65535
+  LimitNOFILE=1048576
 
   [Install]
   WantedBy=multi-user.target

@@ -1303,6 +1303,12 @@
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._lastResults">
             <summary>Последний результат каждой задачи (для колонки статуса в списке задач).</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._versionChecked">
+            <summary>Когда у пробы последний раз спрашивали её версию.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService.VersionRefreshInterval">
+            <summary>Как часто перечитывать версию пробы (она меняется только при обновлении пробы).</summary>
+        </member>
         <member name="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService._cts">
             <summary>Токен жизненного цикла всех фоновых циклов.</summary>
         </member>
@@ -1345,6 +1351,13 @@
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.MarkPollFailure(System.String,System.Exception,System.Int64,System.Int32)">
             <summary>Фиксирует ошибку опроса пробы и обновляет её состояние для страницы статуса.</summary>
         </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ShortReason(System.Exception)">
+            <summary>
+            Короткая причина ошибки: сообщение самого внутреннего исключения. Для сетевых
+            сбоев (Flurl оборачивает HttpRequestException → SocketException) это и есть суть,
+            а стек вызовов лишь засоряет журнал.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.DelayBackoffAsync(System.Int32,System.Threading.CancellationToken)">
             <summary>Ждёт backoff-паузу; возвращает <c>false</c>, если сервис остановлен во время ожидания.</summary>
         </member>
@@ -1366,6 +1379,17 @@
             <summary>
             Пытается снять с пробы все её задания (известные и самой пробе, и серверу).
             Возвращает <c>false</c>, если проба недоступна.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.RefreshVersionAsync(SPI.Twamp.Server.Contracts.Client,System.Threading.CancellationToken)">
+            <summary>
+            Приводит сохранённую версию пробы к её текущей: после обновления пробы в списке
+            должна быть видна новая версия, а не та, что была записана при регистрации.
+            <para>
+            Версия меняется только при обновлении пробы, поэтому спрашиваем её редко
+            (<see cref="F:SPI.Twamp.Server.BackgroundServices.ProbePollingService.VersionRefreshInterval"/>). Сразу после восстановления связи проверка
+            делается вне очереди: обновление пробы — это её перезапуск, то есть обрыв опроса.
+            </para>
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ReconcileSafeAsync(System.String,System.Threading.CancellationToken)">

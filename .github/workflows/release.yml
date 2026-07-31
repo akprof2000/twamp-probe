@@ -1,4 +1,9 @@
-# Сборка релизов по тегу v* (или вручную): четыре архива для Linux x64 —
+# Сборка релизов. Запускается тремя способами:
+#   * поднята <Version> в Directory.Build.props и запушена в main — версия
+#     выпускается автоматически, тег v<версия> создаётся сам (обычный путь);
+#   * пуш тега v* — то же самое, если тег ставят руками;
+#   * вручную (workflow_dispatch) — только артефакты, без релиза.
+# Собираются четыре архива для Linux x64 —
 # сервер и проба, каждый в двух вариантах:
 #   * framework — маленький дистрибутив, требует установленного .NET Runtime на хосте;
 #   * selfcontained — самодостаточный (один исполняемый файл со всеми библиотеками
@@ -10,6 +15,13 @@ name: release
 on:
   push:
     tags: [ "v*" ]
+    # Релиз выпускается и просто по изменению версии в main: поднял <Version>
+    # в Directory.Build.props, запушил — архивы собрались, тег создался сам.
+    # Отдельным workflow это сделать нельзя: тег, созданный штатным GITHUB_TOKEN,
+    # не запускает другие workflow (защита GitHub от рекурсии), поэтому выпуск
+    # версии и сборка живут в одном месте.
+    branches: [ main ]
+    paths: [ "Directory.Build.props" ]
   workflow_dispatch:
 
 permissions:
@@ -34,15 +46,36 @@ jobs:
       - name: Публикация 4 вариантов (linux-x64)
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME#v}"
-          [ "${GITHUB_REF_TYPE}" = "tag" ] || VERSION="manual-${GITHUB_SHA::8}"
+          # Откуда версия и выпускать ли релиз:
+          #   * запуск по тегу v1.2.3      — версия из тега, релиз выпускаем;
+          #   * push в main с новой версией — версия из Directory.Build.props,
+          #     релиз выпускаем и создаём тег (если такого тега ещё нет);
+          #   * ручной запуск              — предрелизная версия, только артефакты.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            RELEASE=1
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)
+            [ -n "$VERSION" ] || { echo "::error::в Directory.Build.props нет <Version>"; exit 1; }
+            RELEASE=1
+            # Версия уже выпущена — значит правили файл, а не поднимали версию.
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+              echo "Версия $VERSION уже выпущена — собираем только артефакты"
+              RELEASE=0
+              VERSION="manual-${GITHUB_SHA::8}"
+            fi
+          else
+            VERSION="manual-${GITHUB_SHA::8}"
+            RELEASE=0
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
 
           # Версия для .NET-сборок: из тега (например 1.2.0); для ручного запуска —
           # предрелизная 0.0.1-<sha>. Прошивается в AssemblyVersion — сервер видит её
           # в списке проб, и по ней легко найти отставшие после раскатки.
           NETVER="$VERSION"
-          [ "${GITHUB_REF_TYPE}" = "tag" ] || NETVER="0.0.1-${GITHUB_SHA::8}"
+          [ "$RELEASE" = "1" ] || NETVER="0.0.1-${GITHUB_SHA::8}"
           echo "NETVER=$NETVER" >> "$GITHUB_ENV"
 
           publish_one () {
@@ -120,9 +153,9 @@ jobs:
 
           ls -lh ../publish/twamp-probe-go-*
 
-      # Ручной запуск без тега: архивы доступны как артефакты workflow.
-      - name: Артефакты (ручной запуск)
-        if: github.ref_type != 'tag'
+      # Запуск без выпуска версии: архивы доступны как артефакты workflow.
+      - name: Артефакты (без выпуска релиза)
+        if: env.RELEASE != '1'
         uses: actions/upload-artifact@v4
         with:
           name: twamp-${{ env.VERSION }}
@@ -131,11 +164,13 @@ jobs:
             publish/*.zip
           retention-days: 14
 
-      # Запуск по тегу: создаётся GitHub Release с четырьмя архивами.
+      # Выпуск версии: создаётся GitHub Release с четырьмя архивами. При запуске
+      # по изменению версии в main тег v<версия> создаётся здесь же.
       - name: GitHub Release
-        if: github.ref_type == 'tag'
+        if: env.RELEASE == '1'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
           files: |
             publish/*.tar.gz
             publish/*.zip

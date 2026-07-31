@@ -271,6 +271,12 @@
             Вывод ошибок процесса зонда.
             </summary>
         </member>
+        <member name="P:SPI.Twamp.Probe.Contracts.ActionData.Cancelled">
+            <summary>
+            Служебный признак: запуск оборван, потому что задачу удалили.
+            Серверу не передаётся — результата по удалённой задаче быть не должно.
+            </summary>
+        </member>
         <member name="T:SPI.Twamp.Probe.Contracts.Identify">
             <summary>
             Идентификационные данные пробы (ответ на CheckIn).
@@ -614,7 +620,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
+        <member name="M:SPI.Twamp.Probe.Runners.ProbeRunner.#ctor(NLog.Logger,Microsoft.Extensions.Configuration.IConfiguration,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry,SPI.Twamp.Probe.Server.RunCancelRegistry)">
             <summary>
             Выполняет внешний зонд (системный ping или утилита TWamp) для узлов задачи.
             <para>
@@ -818,6 +824,55 @@
             результаты последних секунд при штатной остановке) и освобождает примитивы.
             </summary>
         </member>
+        <member name="T:SPI.Twamp.Probe.Server.RunCancelRegistry">
+            <summary>
+            Реестр активных запусков зондов: позволяет оборвать выполнение задачи прямо
+            в процессе, а не ждать её естественного завершения.
+            <para>
+            Зачем: задача вроде <c>twping -c 300 -i 1</c> живёт минутами. Если её удалили
+            на сервере, недостаточно снять расписание — уже запущенный процесс зонда надо
+            завершить принудительно, иначе он продолжит мерить и занимать ресурсы ещё
+            несколько минут после удаления.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.RunCancelRegistry._active">
+            <summary>Активные запуски: задача → (номер запуска → источник отмены).</summary>
+        </member>
+        <member name="F:SPI.Twamp.Probe.Server.RunCancelRegistry._nextId">
+            <summary>Счётчик номеров запусков.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.RunCancelRegistry.Track(System.Guid,System.Threading.CancellationTokenSource)">
+            <summary>
+            Регистрирует запуск задачи. Возвращаемый объект снимает запуск с учёта
+            при освобождении — исполнителю достаточно обернуть его в <c>using</c>.
+            </summary>
+            <param name="taskId">Идентификатор задачи.</param>
+            <param name="cts">Источник отмены этого запуска.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.RunCancelRegistry.CancelTask(System.Guid)">
+            <summary>Обрывает все активные запуски задачи. Возвращает, сколько оборвано.</summary>
+            <param name="taskId">Идентификатор задачи.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.RunCancelRegistry.CancelAll">
+            <summary>
+            Обрывает все активные запуски (проба считает себя удалённой).
+            Возвращает, сколько запусков оборвано.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.RunCancelRegistry.ActiveRuns(System.Guid)">
+            <summary>Число активных запусков задачи (для тестов и диагностики).</summary>
+            <param name="taskId">Идентификатор задачи.</param>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.RunCancelRegistry.TryCancel(System.Threading.CancellationTokenSource)">
+            <summary>Отменяет запуск, не падая на уже завершённом (гонка с концом замера).</summary>
+        </member>
+        <member name="T:SPI.Twamp.Probe.Server.RunCancelRegistry.Untracker">
+            <summary>Снятие запуска с учёта по завершении.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Probe.Server.RunCancelRegistry.Untracker.#ctor(SPI.Twamp.Probe.Server.RunCancelRegistry,System.Guid,System.Int64)">
+            <summary>Снятие запуска с учёта по завершении.</summary>
+        </member>
         <member name="T:SPI.Twamp.Probe.Server.ServerContactTracker">
             <summary>
             Трекер последнего обращения сервера к пробе. Отметку ставит middleware
@@ -916,7 +971,7 @@
             </para>
             </summary>
         </member>
-        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry)">
+        <member name="M:SPI.Twamp.Probe.Server.Worker.#ctor(NLog.Logger,SPI.Twamp.Probe.Abstractions.IProbeDispatcher,SPI.Twamp.Probe.Abstractions.IResultStore,SPI.Twamp.Probe.Abstractions.ITaskRunRegistry,SPI.Twamp.Probe.Server.RunCancelRegistry)">
             <summary>
             Фоновый сервис-оркестратор. Хранит реестр задач по расписанию, регистрирует под
             них исполнителей и применяет инкрементальные изменения, приходящие от сервера.
