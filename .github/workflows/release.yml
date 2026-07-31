@@ -145,6 +145,9 @@ jobs:
           assemble dist/twamp-probe-go twamp-probe appsettings.json
           # Зонд TWamp — рядом с пробой: настройка twamp:name по умолчанию как раз «./twping».
           install -m 0755 twping dist/twamp-probe-go/twping
+          # Готовая установка на CentOS/RHEL с лимитами под тысячи замеров.
+          install -m 0755 deploy/install-centos.sh dist/twamp-probe-go/
+          install -m 0644 deploy/twamp-probe.service deploy/99-twamp-probe.conf dist/twamp-probe-go/
           tar -C dist -czf "../publish/twamp-probe-go-${VERSION}-linux-x64.tar.gz" twamp-probe-go
 
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go-win/twamp-probe.exe .

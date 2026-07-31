@@ -18,22 +18,54 @@ api/probeinterface, тот же формат JSON, та же механика д
   twping             — зонд TWAMP из пакета perfSONAR (el7, работает с CentOS 7)
   appsettings.json   — конфигурация (тот же формат, что у C#-пробы)
   twampy/            — вендоренный nokia/twampy для режима TWampy
+  install-centos.sh  — установка на CentOS/RHEL со всеми настройками
+  twamp-probe.service— юнит systemd с поднятыми лимитами
+  99-twamp-probe.conf— настройки ядра (кладётся в /etc/sysctl.d/)
   README-DEPLOY.txt  — этот файл
 
-Установка на CentOS / любой Linux
----------------------------------
-1. Скопируйте папку целиком на машину, например в /opt/twamp-probe-go:
-     scp -r twamp-probe-go root@host:/opt/
+Установка на CentOS / RHEL (рекомендуемая)
+-----------------------------------------
+1. Скопируйте папку на машину и запустите установщик от root:
+     scp -r twamp-probe-go root@host:/tmp/
+     ssh root@host 'cd /tmp/twamp-probe-go && ./install-centos.sh'
 
-2. Дайте права на выполнение:
-     chmod +x /opt/twamp-probe-go/twamp-probe
+   Он положит пробу в /opt/twamp-probe-go, применит настройки ядра,
+   поставит службу systemd с поднятыми лимитами и покажет, какой потолок
+   одновременных замеров получился. Повторный запуск безопасен:
+   ваш appsettings.json не затирается.
 
-3. Запустите (порт по умолчанию 8443 — root не нужен):
+2. На сервере: «Статус проб» → «Опросить пробу» (http://адрес:8443) →
+   «Подтвердить». Дальше всё как с обычной пробой.
+
+Установка вручную (любой Linux)
+-------------------------------
+1. Скопируйте папку, например в /opt/twamp-probe-go, и дайте права:
+     chmod +x /opt/twamp-probe-go/twamp-probe /opt/twamp-probe-go/twping
+
+2. Запустите (порт по умолчанию 8443 — root не нужен):
      cd /opt/twamp-probe-go && ./twamp-probe
    Порт меняется в appsettings.json ("Urls").
 
-4. На сервере: «Статус проб» → «Опросить пробу» (http://адрес:8443) →
-   «Подтвердить». Дальше всё как с обычной пробой.
+Почему важны лимиты (и что будет без них)
+-----------------------------------------
+Один идущий замер стоит ядру ДВУХ учётных единиц: процесса зонда (twping,
+python -m twampy, ping) и потока пробы, который ждёт его завершения.
+Проверено: на 1500 запущенных зондов у пробы 1523 потока.
+
+Обе единицы считаются в ulimit -u, а в CentOS/RHEL он по умолчанию равен
+4096 (файл /etc/security/limits.d/20-nproc.conf) — это граница ровно в 2048
+одновременных замеров. За ней ядро отказывает в создании потока, и для Go
+это fatal error: перехватить нельзя, служба умирает целиком.
+
+Проба защищается сама — вычисляет безопасный потолок из фактических лимитов
+и пишет при старте:
+
+  WARN Потолок одновременных запусков снижен под лимиты системы
+       было=8192 стало=1638 ограничение="лимит процессов и потоков ..."
+
+То есть без настройки она не упадёт, но будет работать вполсилы.
+install-centos.sh поднимает лимиты, и потолок доходит до максимума в 8000
+замеров (выше начинается жёсткий предел Go в 10000 потоков).
 
 Режимы зондирования
 -------------------
@@ -45,29 +77,18 @@ api/probeinterface, тот же формат JSON, та же механика д
   TWampy  — нужен только Python 3.8+ в PATH; пакет twampy уже в папке,
             PYTHONPATH проба выставляет сама.
 
-systemd (автозапуск)
---------------------
-/etc/systemd/system/twamp-probe.service:
+systemd вручную (если не пользуетесь install-centos.sh)
+------------------------------------------------------
+Готовый юнит лежит рядом — twamp-probe.service; в нём уже прописаны лимиты:
 
-  [Unit]
-  Description=SPI TWamp Probe (Go)
-  After=network-online.target
-
-  [Service]
-  WorkingDirectory=/opt/twamp-probe-go
-  ExecStart=/opt/twamp-probe-go/twamp-probe
-  Restart=always
-  # Важно при тысячах задач: один идущий замер занимает и процесс зонда,
-  # и поток пробы, ждущий его завершения. Оба считаются в LimitNPROC.
-  # Штатные 4096 в CentOS/RHEL упираются в потолок на 2048 замерах —
-  # проба сама снизит предел, но так она работает вполсилы.
-  LimitNPROC=65535
-  LimitNOFILE=1048576
-
-  [Install]
-  WantedBy=multi-user.target
-
+  cp twamp-probe.service /etc/systemd/system/
+  cp 99-twamp-probe.conf /etc/sysctl.d/ && sysctl --system
   systemctl daemon-reload && systemctl enable --now twamp-probe
+
+Ключевые строки юнита — LimitNPROC=65535 и LimitNOFILE=1048576.
+Проверить, что лимиты применились:
+
+  grep -E 'Max processes|Max open files' /proc/$(systemctl show -p MainPID --value twamp-probe)/limits
 
 Файлы, создаваемые при работе
 -----------------------------
