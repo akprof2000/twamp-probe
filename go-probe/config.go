@@ -23,6 +23,7 @@ type Config struct {
 	ApiKey             string    // Auth:ApiKey; пусто — аутентификация выключена
 	MaxParallel        int       // Probe:MaxParallel — размер пула воркеров
 	MaxPendingResults  int       // Probe:MaxPendingResults — лимит очереди результатов
+	QueueCapacity      int       // Probe:QueueCapacity — ёмкость очереди задач диспетчера
 	PersistIntervalSec int       // Probe:PersistIntervalSec — период снимка очереди на диск
 	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
 	MinParallel        int       // Probe:MinParallel — ниже этого предел не опускается даже при нехватке памяти
@@ -54,6 +55,7 @@ func LoadConfig(path string) (*Config, error) {
 		ApiKey:             str(raw, "Auth:ApiKey", ""),
 		MaxParallel:        resolveParallel(num(raw, "Probe:MaxParallel", 0)),
 		MaxPendingResults:  num(raw, "Probe:MaxPendingResults", 100000),
+		QueueCapacity:      num(raw, "Probe:QueueCapacity", 100000),
 		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
 		MinParallel:        num(raw, "Probe:MinParallel", 16),

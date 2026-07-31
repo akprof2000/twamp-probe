@@ -20,7 +20,7 @@ func (r *blockingRunner) RunForNodes(ctx context.Context, task *TaskInfo) {
 // newTestDispatcher собирает диспетчер с заглушкой исполнителя.
 func newTestDispatcher(ctx context.Context, runner Executor, workers int) *Dispatcher {
 	limiter := NewAdaptiveLimiter(workers, 1, workers)
-	return NewDispatcher(ctx, workers, runner, NewRunRegistry(), limiter)
+	return NewDispatcher(ctx, workers, 1000, runner, NewRunRegistry(), limiter)
 }
 
 func TestDispatcher_SkipsTaskWhilePreviousRunIsAlive(t *testing.T) {

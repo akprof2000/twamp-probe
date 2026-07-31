@@ -32,7 +32,11 @@ type AdaptiveLimiter struct {
 	// Состояние разгона. Пока памяти хватает, предел растёт удвоением («медленный
 	// старт»); после первого упора в память рост становится осторожным.
 	hitPressure bool
-	cooldown    int // сколько проверок не растём после сжатия — память освобождается не сразу
+
+	// Ожидание освоения пачки: после каждого изменения предела ждём, пока
+	// запуски развернутся и потребление памяти перестанет заметно расти.
+	settling    bool
+	settleTicks int
 
 	// База для замера: сколько было свободно и сколько зондов работало на прошлой
 	// проверке. Память тратят не пределы, а запущенные процессы, поэтому расход
@@ -46,7 +50,8 @@ type AdaptiveLimiter struct {
 
 // memoryStep — что произошло с памятью и с числом зондов между двумя проверками.
 type memoryStep struct {
-	consumed   uint64 // сколько памяти убыло
+	consumed   uint64 // сколько памяти убыло при выросшем числе зондов
+	freeDrop   uint64 // убыль свободной памяти за шаг — независимо от числа зондов
 	freeBefore uint64 // сколько было свободно на прошлой проверке
 	added      int    // на сколько выросло число работающих зондов
 	measured   bool   // был ли реальный прирост зондов, то есть есть ли что мерить
@@ -123,11 +128,14 @@ func (l *AdaptiveLimiter) observe(freeNow uint64, runsNow int) memoryStep {
 	if !l.hasBaseline {
 		return step
 	}
+	if freeNow < l.freeAtCheck {
+		step.freeDrop = l.freeAtCheck - freeNow
+	}
 	step.added = runsNow - l.runsAtCheck
-	if step.added <= 0 || freeNow >= l.freeAtCheck {
+	if step.added <= 0 || step.freeDrop == 0 {
 		return step // зондов не прибавилось (или память не убыла) — мерить нечего
 	}
-	step.consumed = l.freeAtCheck - freeNow
+	step.consumed = step.freeDrop
 	step.measured = true
 	return step
 }
@@ -185,24 +193,49 @@ func (l *AdaptiveLimiter) Close() {
 	l.cond.Broadcast()
 }
 
-// markPressure запоминает, что мы упёрлись в память: дальше растём осторожно,
-// и первые проверки после сжатия пропускаем — память освобождается не сразу.
+// markPressure запоминает, что мы упёрлись в память: дальше растём осторожно.
 func (l *AdaptiveLimiter) markPressure() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.hitPressure = true
-	l.cooldown = pressureCooldownTicks
 }
 
-// coolingDown сообщает, идёт ли пауза после сжатия (и списывает одну проверку).
-func (l *AdaptiveLimiter) coolingDown() bool {
+// beginSettling помечает, что предел только что изменился: пока новая пачка
+// не запустится целиком и память не перестанет убывать, решений не принимаем.
+func (l *AdaptiveLimiter) beginSettling() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.cooldown <= 0 {
-		return false
+	l.settling = true
+	l.settleTicks = 0
+}
+
+// settled сообщает, освоилась ли предыдущая пачка запусков.
+//
+// Пачка не запускается мгновенно: процессы поднимаются постепенно, и память
+// они отбирают с задержкой. Менять предел, пока это происходит, — значит
+// принимать решение по недосчитанному расходу: проба увидела бы «дёшево» и
+// удвоилась ещё раз, а настоящая цена предыдущего шага пришла бы уже после.
+// Поэтому ждём двух признаков: зонды перестали прибавляться и потребление
+// памяти выросло незначительно. Пока потребление заметно растёт — ждём ещё шаг.
+func (l *AdaptiveLimiter) settled(step memoryStep) (bool, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if !l.settling {
+		return true, 0
 	}
-	l.cooldown--
-	return true
+	l.settleTicks++
+
+	stillStarting := step.added > 0
+	stillEating := step.freeDrop*settleShare > step.freeBefore
+	if stillStarting || stillEating {
+		return false, l.settleTicks
+	}
+
+	ticks := l.settleTicks
+	l.settling = false
+	l.settleTicks = 0
+	return true, ticks
 }
 
 // growthTarget возвращает следующий предел и название режима роста.
@@ -218,8 +251,10 @@ func (l *AdaptiveLimiter) growthTarget(current int) (int, string) {
 	return current * 2, "разгон"
 }
 
-// pressureCooldownTicks — сколько проверок памяти пропустить после сжатия предела.
-const pressureCooldownTicks = 2
+// settleShare — что считать «незначительным» ростом потребления: убыль свободной
+// памяти меньше 1/16 от неё самой (около 6%). Больше — пачка ещё отбирает память,
+// и следующее решение принимать рано.
+const settleShare = 16
 
 // MemoryGuardConfig — пороги подстройки предела по занятости памяти.
 type MemoryGuardConfig struct {
@@ -291,9 +326,11 @@ func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, status MemoryS
 
 	switch {
 	// 1. Аварийный порог: памяти почти нет — режем вдвое немедленно.
+	//    Ожидание освоения сюда не распространяется: это защита, она срочная.
 	case status.UsedPercent >= cfg.HighPercent:
 		after := limiter.SetLimit(before / 2)
 		limiter.markPressure()
+		limiter.beginSettling()
 		if after != before {
 			logMain.Warn("Памяти мало — предел одновременных запусков снижен вдвое",
 				"память_%", roundPercent(status.UsedPercent), "порог_%", cfg.HighPercent,
@@ -311,6 +348,7 @@ func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, status MemoryS
 	case step.measured && step.consumed*2 > step.freeBefore:
 		after := limiter.SetLimit(before / 2)
 		limiter.markPressure()
+		limiter.beginSettling()
 		if after != before {
 			logMain.Warn("Запущенные зонды съели больше половины свободной памяти — предел снижен вдвое",
 				"съедено", humanBytes(step.consumed), "было_свободно", humanBytes(step.freeBefore),
@@ -325,8 +363,15 @@ func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, status MemoryS
 		if runs < before {
 			return // предел не выбран: свободные слоты есть, расти незачем
 		}
-		if limiter.coolingDown() {
-			return // после сжатия ждём, пока освободятся процессы
+		// Пачка предыдущего шага должна освоиться: пока зонды ещё запускаются
+		// или память заметно убывает, расход посчитан не полностью.
+		ready, waited := limiter.settled(step)
+		if !ready {
+			logMain.Debug("Ждём освоения предыдущей пачки запусков",
+				"шагов_ждём", waited, "предел", before, "выполняется", runs,
+				"новых_зондов", step.added, "убыло_памяти", humanBytes(step.freeDrop),
+				"свободно", humanBytes(status.AvailableBytes))
+			return
 		}
 		target, mode := limiter.growthTarget(before)
 		target, capped := affordableTarget(before, target, limiter.CostPerRun(), status.AvailableBytes)
@@ -334,9 +379,10 @@ func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, status MemoryS
 			return // по измеренной цене зонда прибавка не влезает в свободную память
 		}
 		after := limiter.SetLimit(target)
+		limiter.beginSettling() // новой пачке снова дадим освоиться
 		if after != before {
-			logMain.Info("Предел выбран, памяти достаточно — предел одновременных запусков повышен",
-				"режим", mode, "ограничен_памятью", capped,
+			logMain.Info("Предыдущая пачка освоилась, памяти достаточно — предел повышен",
+				"режим", mode, "ограничен_памятью", capped, "ждали_шагов", waited,
 				"память_%", roundPercent(status.UsedPercent),
 				"свободно", humanBytes(status.AvailableBytes),
 				"цена_зонда", humanBytes(limiter.CostPerRun()),

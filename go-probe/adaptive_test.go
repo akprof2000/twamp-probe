@@ -137,41 +137,114 @@ func TestAdjust_HalvesWhenRunningProbesAteMoreThanHalfOfFree(t *testing.T) {
 }
 
 func TestAdjust_FullScenarioFromProduction(t *testing.T) {
-	// Полный сценарий на 64 ГБ: зонды реально запускаются и упираются в предел,
-	// проба разгоняется, а на прожорливом шаге откатывается — вместо того чтобы
-	// шагнуть в значение, которое роняет систему по памяти.
+	// Честная симуляция вместо заранее заданных чисел: 64 ГБ памяти, каждый
+	// зонд стоит 0.25 ГБ, задач всегда больше предела. Проба обязана разогнаться
+	// и остановиться сама, не доведя систему до нехватки памяти.
+	const totalGB, costGB = 64.0, 0.25
 	l := NewAdaptiveLimiter(4096, 16, 16)
 
-	steps := []struct {
-		freeLeftGB float64
-		comment    string
-	}{
-		{64, "старт: база замера"},
-		{62, "съело 2 ГБ — дёшево, разгон"},
-		{48, "съело 14 ГБ из 62 — меньше половины, разгон"},
-		{40, "съело 8 ГБ из 48 — дёшево, разгон"},
-	}
+	minFree, grew := totalGB, 0
+	for range 60 {
+		saturate(l) // все слоты заняты работающими зондами
+		free := totalGB - float64(l.InFlight())*costGB
+		minFree = min(minFree, free)
 
-	peak := 0
-	for _, step := range steps {
-		saturate(l) // зонды действительно заняли все слоты
-		adjustLimit(l, guard(), mem(step.freeLeftGB))
-		if l.Limit() <= peak {
-			t.Fatalf("%s: предел %d не вырос (пик %d)", step.comment, l.Limit(), peak)
+		before := l.Limit()
+		adjustLimit(l, guard(), mem(free))
+		if l.Limit() > before {
+			grew++
 		}
-		peak = l.Limit()
 	}
 
-	// Прожорливый шаг: свободные 40 ГБ схлопнулись до 16.
-	saturate(l)
-	adjustLimit(l, guard(), mem(16))
-
-	if l.Limit() >= peak {
-		t.Errorf("предел = %d, ожидался откат ниже пика %d — именно этот скачок роняет пробу по памяти",
-			l.Limit(), peak)
+	// Физический потолок — 256 зондов (64 ГБ / 0.25 ГБ), и проба обязана
+	// остановиться заметно раньше, оставив системе запас.
+	if l.InFlight() > 256 {
+		t.Errorf("запущено %d зондов при физическом пределе 256 — память бы кончилась", l.InFlight())
+	}
+	// Разгон обязан остановиться сам по порогу MemoryLowPercent (80%), не доводя
+	// до аварийного порога 95%: запас свободного должен остаться заметным.
+	if minFree < totalGB*0.05 {
+		t.Errorf("свободной памяти оставалось %.1f ГБ — проба дошла до нехватки", minFree)
+	}
+	if l.Limit() <= 16 {
+		t.Errorf("предел = %d, разгон не состоялся", l.Limit())
+	}
+	if grew < 2 {
+		t.Errorf("предел повышался %d раз — разгон практически не работает", grew)
 	}
 	if cost := l.CostPerRun(); cost == 0 {
 		t.Error("цена зонда не измерена, хотя зонды запускались")
+	}
+	t.Logf("итог: предел %d, работает %d зондов, минимум свободного %.1f ГБ, цена зонда %s",
+		l.Limit(), l.InFlight(), minFree, humanBytes(l.CostPerRun()))
+}
+
+func TestAdjust_WaitsWhileBatchIsStillStarting(t *testing.T) {
+	// После повышения предела пачка запускается не мгновенно. Пока зонды
+	// продолжают прибавляться, решение принимать рано: расход посчитан
+	// не полностью, и проба удвоилась бы «на дешёвом» шаге ещё раз.
+	l := NewAdaptiveLimiter(4096, 16, 16)
+	saturate(l)
+	adjustLimit(l, guard(), mem(64)) // 16 → 32, дальше ждём освоения
+	if l.Limit() != 32 {
+		t.Fatalf("предел = %d, ожидалось 32", l.Limit())
+	}
+
+	// Зонды поднимаются постепенно: слоты занимаются по одному.
+	for range 3 {
+		l.Acquire(context.Background())
+		adjustLimit(l, guard(), mem(63))
+		if l.Limit() != 32 {
+			t.Fatalf("предел = %d — повышен, пока пачка ещё запускается", l.Limit())
+		}
+	}
+}
+
+func TestAdjust_WaitsWhileMemoryIsStillBeingEaten(t *testing.T) {
+	// Зонды уже все запущены, но потребление продолжает заметно расти —
+	// процессы отбирают память с задержкой. Ждём ещё шаг.
+	l := NewAdaptiveLimiter(4096, 16, 16)
+	saturate(l)
+	adjustLimit(l, guard(), mem(64)) // 16 → 32
+	saturate(l)                      // пачка запустилась целиком
+
+	free := 60.0
+	for range 3 {
+		free -= 10 // каждый шаг память заметно убывает
+		adjustLimit(l, guard(), mem(free))
+		if l.Limit() != 32 {
+			t.Fatalf("предел = %d — повышен, пока потребление ещё растёт", l.Limit())
+		}
+	}
+}
+
+func TestAdjust_GrowsOnceConsumptionSettles(t *testing.T) {
+	// Как только зонды перестали прибавляться и потребление выросло
+	// незначительно — можно делать следующий шаг.
+	l := NewAdaptiveLimiter(4096, 16, 16)
+	saturate(l)
+	adjustLimit(l, guard(), mem(64)) // 16 → 32
+	saturate(l)
+	adjustLimit(l, guard(), mem(62)) // пачка запустилась, память ещё убывала
+
+	adjustLimit(l, guard(), mem(61.9)) // убыль незначительна — освоились
+
+	if l.Limit() != 64 {
+		t.Errorf("предел = %d, ожидался следующий шаг до 64", l.Limit())
+	}
+}
+
+func TestAdjust_EmergencyHalvingIgnoresSettling(t *testing.T) {
+	// Ожидание освоения не должно мешать защите: памяти почти нет — режем сразу.
+	l := NewAdaptiveLimiter(4096, 16, 1000)
+	saturate(l)
+	adjustLimit(l, guard(), mem(60)) // предел изменился → идёт ожидание
+
+	before := l.Limit()
+	adjustLimit(l, guard(), mem(1)) // 98% занято
+
+	if l.Limit() != before/2 {
+		t.Errorf("предел = %d, ожидалось аварийное сжатие до %d", l.Limit(), before/2)
 	}
 }
 

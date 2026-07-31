@@ -67,6 +67,8 @@ func main() {
 		"версия", probeVersion,
 		"адрес", cfg.ListenAddr,
 		"воркеров", cfg.MaxParallel,
+		"очередь_задач", cfg.QueueCapacity,
+		"очередь_результатов", cfg.MaxPendingResults,
 		"уровень_журнала", cfg.Log.Level,
 		"журнал", filepath.Join(cfg.Log.Dir, cfg.Log.FileName))
 
@@ -88,7 +90,7 @@ func main() {
 		Interval:    time.Duration(cfg.MemoryCheckSec) * time.Second,
 	})
 
-	dispatcher := NewDispatcher(ctx, cfg.MaxParallel, runner, runReg, limiter)
+	dispatcher := NewDispatcher(ctx, cfg.MaxParallel, cfg.QueueCapacity, runner, runReg, limiter)
 	tasks := NewTaskRegistry(dispatcher, runReg, cancels)
 	tasks.Load()
 

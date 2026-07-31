@@ -30,12 +30,17 @@ type Dispatcher struct {
 }
 
 // NewDispatcher создаёт диспетчер и поднимает пул воркеров.
-func NewDispatcher(ctx context.Context, workers int, runner Executor, registry *RunRegistry,
-	limiter *AdaptiveLimiter) *Dispatcher {
+// queueCapacity — ёмкость очереди задач (Probe:QueueCapacity); это не та же
+// величина, что лимит очереди результатов (Probe:MaxPendingResults).
+func NewDispatcher(ctx context.Context, workers, queueCapacity int, runner Executor,
+	registry *RunRegistry, limiter *AdaptiveLimiter) *Dispatcher {
 
+	if queueCapacity < 1 {
+		queueCapacity = 1
+	}
 	d := &Dispatcher{
 		// Ёмкость с запасом на массовую заливку: постановка задач не блокирует приём HTTP.
-		queue:    make(chan *TaskInfo, 100_000),
+		queue:    make(chan *TaskInfo, queueCapacity),
 		runner:   runner,
 		registry: registry,
 		limiter:  limiter,
@@ -44,7 +49,8 @@ func NewDispatcher(ctx context.Context, workers int, runner Executor, registry *
 	for range workers { // range по числу — Go 1.22
 		go d.workerLoop()
 	}
-	logDispatcher.Info("Пул воркеров запущен", "воркеров", workers, "ёмкость_очереди", cap(d.queue))
+	logDispatcher.Info("Пул воркеров запущен",
+		"воркеров", workers, "ёмкость_очереди_задач", cap(d.queue))
 	return d
 }
 
@@ -63,7 +69,7 @@ func (d *Dispatcher) Enqueue(task *TaskInfo) {
 	default:
 		d.active.Delete(task.Id) // в очередь не попала — держать пометку незачем
 		logDispatcher.Error("Очередь переполнена — задача пропущена",
-			"задача", task.Id, "название", task.Title, "ёмкость", cap(d.queue))
+			"задача", task.Id, "название", task.Title, "ёмкость_очереди_задач", cap(d.queue))
 	}
 }
 
