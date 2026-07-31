@@ -34,10 +34,22 @@ type AdaptiveLimiter struct {
 	hitPressure bool
 	cooldown    int // сколько проверок не растём после сжатия — память освобождается не сразу
 
-	// Сколько памяти было свободно, когда предел меняли в прошлый раз. По разнице
-	// видно, во сколько обошёлся этот шаг, — на этом и строится решение о следующем.
-	freeAtChange uint64
-	hasBaseline  bool
+	// База для замера: сколько было свободно и сколько зондов работало на прошлой
+	// проверке. Память тратят не пределы, а запущенные процессы, поэтому расход
+	// считается на прирост именно работающих зондов.
+	freeAtCheck uint64
+	runsAtCheck int
+	hasBaseline bool
+
+	costPerRun uint64 // измеренная цена одного зонда в памяти (0 — ещё не знаем)
+}
+
+// memoryStep — что произошло с памятью и с числом зондов между двумя проверками.
+type memoryStep struct {
+	consumed   uint64 // сколько памяти убыло
+	freeBefore uint64 // сколько было свободно на прошлой проверке
+	added      int    // на сколько выросло число работающих зондов
+	measured   bool   // был ли реальный прирост зондов, то есть есть ли что мерить
 }
 
 // NewAdaptiveLimiter создаёт ограничитель, начинающий с малого предела.
@@ -86,30 +98,69 @@ func (l *AdaptiveLimiter) Release() {
 	l.cond.Signal()
 }
 
-// SetLimit меняет текущий предел (в границах пола и потолка) и запоминает,
-// сколько памяти было свободно в этот момент — чтобы на следующей проверке
-// увидеть, во сколько обошёлся шаг. Возвращает установленное значение.
-func (l *AdaptiveLimiter) SetLimit(value int, freeBytes uint64) int {
+// SetLimit меняет текущий предел (в границах пола и потолка).
+// Возвращает установленное значение.
+func (l *AdaptiveLimiter) SetLimit(value int) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	l.limit = min(max(value, l.minLimit), l.maxLimit)
-	l.freeAtChange = freeBytes
-	l.hasBaseline = freeBytes > 0
 	l.cond.Broadcast() // предел мог вырасти — будим ожидающих
 	return l.limit
 }
 
-// consumption сообщает, сколько памяти ушло с прошлого изменения предела:
-// (съедено, было свободно, есть ли с чем сравнивать).
-func (l *AdaptiveLimiter) consumption(freeNow uint64) (uint64, uint64, bool) {
+// observe сравнивает текущее состояние с прошлой проверкой.
+//
+// Мерить расход имеет смысл только по **реально запущенным зондам**: если за
+// интервал не прибавилось ни одного процесса, изменение свободной памяти к нам
+// отношения не имеет (это соседние службы, кеш ядра), и делать по нему выводы
+// о пределе нельзя.
+func (l *AdaptiveLimiter) observe(freeNow uint64, runsNow int) memoryStep {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if !l.hasBaseline || freeNow >= l.freeAtChange {
-		return 0, l.freeAtChange, false // памяти не убавилось — считать нечего
+	step := memoryStep{freeBefore: l.freeAtCheck}
+	if !l.hasBaseline {
+		return step
 	}
-	return l.freeAtChange - freeNow, l.freeAtChange, true
+	step.added = runsNow - l.runsAtCheck
+	if step.added <= 0 || freeNow >= l.freeAtCheck {
+		return step // зондов не прибавилось (или память не убыла) — мерить нечего
+	}
+	step.consumed = l.freeAtCheck - freeNow
+	step.measured = true
+	return step
+}
+
+// rebase запоминает состояние текущей проверки как базу для следующей.
+func (l *AdaptiveLimiter) rebase(freeNow uint64, runsNow int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.freeAtCheck = freeNow
+	l.runsAtCheck = runsNow
+	l.hasBaseline = freeNow > 0
+}
+
+// noteCost уточняет цену одного зонда, сглаживая замер: разовый выброс
+// (сборка мусора, соседняя служба) не должен ломать прогноз.
+func (l *AdaptiveLimiter) noteCost(cost uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if cost == 0 {
+		return
+	}
+	if l.costPerRun == 0 {
+		l.costPerRun = cost
+		return
+	}
+	l.costPerRun = (l.costPerRun*3 + cost) / 4
+}
+
+// CostPerRun возвращает измеренную цену одного зонда (0 — ещё не измерена).
+func (l *AdaptiveLimiter) CostPerRun() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.costPerRun
 }
 
 // Limit возвращает текущий предел.
@@ -217,62 +268,100 @@ func RunMemoryGuard(ctx context.Context, limiter *AdaptiveLimiter, cfg MemoryGua
 
 // adjustLimit подстраивает предел под состояние памяти и пишет в журнал при изменении.
 //
-// Решение принимается не по одной лишь занятости, а по тому, **сколько памяти съел
-// предыдущий шаг**. Пороги занятости срабатывают слишком поздно: при 64 ГБ всего и
-// 16 ГБ свободных занято лишь 75% — формально «есть запас», а следующее удвоение
-// уже не влезет. Поэтому: если прошлый шаг съел больше половины того, что было
-// свободно, — предел уменьшается вдвое, не дожидаясь порога.
+// Всё решение строится вокруг **реально запущенных зондов**, а не вокруг самого
+// числа-предела. Предел — это лишь разрешение; память тратят процессы. Поэтому:
+//
+//   - расход считается на прирост работающих зондов и даёт цену одного зонда;
+//   - предел повышается, только когда он **выбран до конца** (зонды упираются в
+//     него и ждут слот). Поднимать предел, под которым работает три задачи из
+//     сотни, бессмысленно: нагрузки это не добавит, а замер расхода испортит —
+//     память в этот момент меняют посторонние службы, и проба «разгонялась» бы
+//     вхолостую до значения, которое при первой же настоящей пачке её и уронит;
+//   - величина роста ограничена тем, что физически влезает в свободную память
+//     по измеренной цене зонда.
 func adjustLimit(limiter *AdaptiveLimiter, cfg MemoryGuardConfig, status MemoryStatus) {
 	before := limiter.Limit()
-	consumed, freeBefore, measured := limiter.consumption(status.AvailableBytes)
+	runs := limiter.InFlight()
+	step := limiter.observe(status.AvailableBytes, runs)
+	defer limiter.rebase(status.AvailableBytes, runs)
+
+	if step.measured {
+		limiter.noteCost(step.consumed / uint64(step.added))
+	}
 
 	switch {
 	// 1. Аварийный порог: памяти почти нет — режем вдвое немедленно.
 	case status.UsedPercent >= cfg.HighPercent:
-		after := limiter.SetLimit(before/2, status.AvailableBytes)
+		after := limiter.SetLimit(before / 2)
 		limiter.markPressure()
 		if after != before {
 			logMain.Warn("Памяти мало — предел одновременных запусков снижен вдвое",
 				"память_%", roundPercent(status.UsedPercent), "порог_%", cfg.HighPercent,
 				"свободно", humanBytes(status.AvailableBytes),
 				"было", before, "стало", after,
-				"выполняется", limiter.InFlight(), "потолок", limiter.maxLimit)
+				"выполняется", runs, "потолок", limiter.maxLimit)
 		} else if before == limiter.minLimit {
 			logMain.Warn("Памяти мало, но предел уже на минимуме",
 				"память_%", roundPercent(status.UsedPercent),
 				"свободно", humanBytes(status.AvailableBytes), "предел", before)
 		}
 
-	// 2. Прошлый шаг съел больше половины свободной памяти — следующий раз вдвое меньше.
+	// 2. Запущенные зонды съели больше половины свободной памяти — следующий раз вдвое меньше.
 	//    Это и есть защита от «ещё одно удвоение — и всё упадёт».
-	case measured && consumed*2 > freeBefore:
-		after := limiter.SetLimit(before/2, status.AvailableBytes)
+	case step.measured && step.consumed*2 > step.freeBefore:
+		after := limiter.SetLimit(before / 2)
 		limiter.markPressure()
 		if after != before {
-			logMain.Warn("Прошлый шаг съел больше половины свободной памяти — предел снижен вдвое",
-				"съедено", humanBytes(consumed), "было_свободно", humanBytes(freeBefore),
+			logMain.Warn("Запущенные зонды съели больше половины свободной памяти — предел снижен вдвое",
+				"съедено", humanBytes(step.consumed), "было_свободно", humanBytes(step.freeBefore),
 				"осталось", humanBytes(status.AvailableBytes),
+				"новых_зондов", step.added, "цена_зонда", humanBytes(limiter.CostPerRun()),
 				"было", before, "стало", after,
-				"выполняется", limiter.InFlight(), "потолок", limiter.maxLimit)
+				"выполняется", runs, "потолок", limiter.maxLimit)
 		}
 
-	// 3. Памяти вдоволь и прошлый шаг обошёлся дёшево — наращиваем.
+	// 3. Памяти вдоволь — растём, но только если предел действительно выбран.
 	case status.UsedPercent <= cfg.LowPercent:
+		if runs < before {
+			return // предел не выбран: свободные слоты есть, расти незачем
+		}
 		if limiter.coolingDown() {
 			return // после сжатия ждём, пока освободятся процессы
 		}
 		target, mode := limiter.growthTarget(before)
-		after := limiter.SetLimit(target, status.AvailableBytes)
+		target, capped := affordableTarget(before, target, limiter.CostPerRun(), status.AvailableBytes)
+		if target <= before {
+			return // по измеренной цене зонда прибавка не влезает в свободную память
+		}
+		after := limiter.SetLimit(target)
 		if after != before {
-			logMain.Info("Памяти достаточно — предел одновременных запусков повышен",
-				"режим", mode, "память_%", roundPercent(status.UsedPercent),
+			logMain.Info("Предел выбран, памяти достаточно — предел одновременных запусков повышен",
+				"режим", mode, "ограничен_памятью", capped,
+				"память_%", roundPercent(status.UsedPercent),
 				"свободно", humanBytes(status.AvailableBytes),
-				"съедено_прошлым_шагом", humanBytes(consumed),
+				"цена_зонда", humanBytes(limiter.CostPerRun()),
 				"было", before, "стало", after,
-				"выполняется", limiter.InFlight(), "потолок", limiter.maxLimit)
+				"выполняется", runs, "потолок", limiter.maxLimit)
 		}
 	}
 	// Между порогами и при умеренном расходе предел держим — иначе он дёргался бы.
+}
+
+// affordableTarget урезает желаемый предел до того, что влезает в свободную память.
+//
+// Тратим на прибавку не больше половины свободного: вторая половина — запас на
+// сам замер (память освобождается с задержкой) и на соседние службы. Пока цена
+// зонда не измерена, доверяем желаемому значению — иначе проба не сдвинется
+// с места и мерить будет нечего.
+func affordableTarget(before, wanted int, costPerRun, freeBytes uint64) (int, bool) {
+	if costPerRun == 0 || wanted <= before {
+		return wanted, false
+	}
+	room := int(freeBytes / 2 / costPerRun)
+	if before+room >= wanted {
+		return wanted, false
+	}
+	return before + room, true
 }
 
 // roundPercent округляет процент до одного знака — журнал не должен пестреть хвостами.
