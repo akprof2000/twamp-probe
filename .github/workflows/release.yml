@@ -71,6 +71,25 @@ jobs:
       # Go-проба: один статический бинарник ~6 МБ без зависимостей. Linux-вариант
       # работает на любом дистрибутиве x86-64 (CentOS 7+, Rocky, Alma, Ubuntu…),
       # Windows-вариант — на Windows 10+/Server. Итого в релизе 6 архивов.
+      # twping для режима TWamp кладём прямо в linux-пакет пробы, чтобы на хосте
+      # ничего не доустанавливать. Берём готовый бинарник из релиза perfSONAR для
+      # el7 (CentOS 7): он собран под glibc 2.14 и тянет только libm, libc и libcap —
+      # то есть работает и на CentOS 7, и на любом дистрибутиве новее.
+      - name: twping из релизного пакета perfSONAR (el7/CentOS 7)
+        run: |
+          set -e
+          RPM=twamp-client-5.0.8-1.el7.x86_64.rpm
+          curl -fsSL --retry 3 -o "$RPM" \
+            "http://software.internet2.edu/rpms/el7/x86_64/main/RPMS/$RPM"
+          command -v rpm2cpio >/dev/null || sudo apt-get install -y -qq rpm
+          rpm2cpio "$RPM" | cpio -idm ./usr/bin/twping
+          install -m 0755 usr/bin/twping go-probe/twping
+
+          # Страховка: пакет должен остаться совместимым с CentOS 7 (glibc 2.17).
+          need=$(readelf -V go-probe/twping | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+          echo "twping требует не выше $need"
+          [ "$need" = "GLIBC_2.14" ] || { echo "::error::twping требует $need — новее, чем glibc в CentOS 7"; exit 1; }
+
       - name: Сборка Go-пробы (linux-x64 + windows-x64, тесты)
         run: |
           set -e
@@ -91,6 +110,8 @@ jobs:
 
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go/twamp-probe .
           assemble dist/twamp-probe-go twamp-probe appsettings.json
+          # Зонд TWamp — рядом с пробой: настройка twamp:name по умолчанию как раз «./twping».
+          install -m 0755 twping dist/twamp-probe-go/twping
           tar -C dist -czf "../publish/twamp-probe-go-${VERSION}-linux-x64.tar.gz" twamp-probe-go
 
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go-win/twamp-probe.exe .

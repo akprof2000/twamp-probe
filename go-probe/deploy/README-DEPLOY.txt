@@ -15,6 +15,7 @@ api/probeinterface, тот же формат JSON, та же механика д
 Состав папки
 ------------
   twamp-probe        — исполняемый файл (Linux x86-64, статический)
+  twping             — зонд TWAMP из пакета perfSONAR (el7, работает с CentOS 7)
   appsettings.json   — конфигурация (тот же формат, что у C#-пробы)
   twampy/            — вендоренный nokia/twampy для режима TWampy
   README-DEPLOY.txt  — этот файл
@@ -37,8 +38,10 @@ api/probeinterface, тот же формат JSON, та же механика д
 Режимы зондирования
 -------------------
   WinPing — системный ping (аргументы по умолчанию "-c 2" — Linux-синтаксис);
-  TWamp   — утилита twping (perfsonar), положите её рядом или поправьте
-            "twamp:name" в appsettings.json;
+  TWamp   — утилита twping: уже лежит в папке (linux-пакет), ставить ничего
+            не нужно. Это бинарник из релизного пакета perfSONAR для el7,
+            поэтому работает начиная с CentOS 7. Свою версию можно подставить
+            через "twamp:name" в appsettings.json;
   TWampy  — нужен только Python 3.8+ в PATH; пакет twampy уже в папке,
             PYTHONPATH проба выставляет сама.
 

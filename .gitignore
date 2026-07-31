@@ -420,3 +420,6 @@ FodyWeavers.xsd
 # LiteDB runtime databases
 *.db
 *-log.db
+
+# twping скачивается в CI из пакета perfSONAR — в репозитории не хранится
+go-probe/twping
