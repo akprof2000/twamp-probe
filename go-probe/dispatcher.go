@@ -11,16 +11,20 @@ type Dispatcher struct {
 	queue    chan *TaskInfo
 	runner   *ProbeRunner
 	registry *RunRegistry
+	limiter  *AdaptiveLimiter // фактический предел: сжимается, когда кончается память
 	ctx      context.Context
 }
 
 // NewDispatcher создаёт диспетчер и поднимает пул воркеров.
-func NewDispatcher(ctx context.Context, workers int, runner *ProbeRunner, registry *RunRegistry) *Dispatcher {
+func NewDispatcher(ctx context.Context, workers int, runner *ProbeRunner, registry *RunRegistry,
+	limiter *AdaptiveLimiter) *Dispatcher {
+
 	d := &Dispatcher{
 		// Ёмкость с запасом на массовую заливку: постановка задач не блокирует приём HTTP.
 		queue:    make(chan *TaskInfo, 100_000),
 		runner:   runner,
 		registry: registry,
+		limiter:  limiter,
 		ctx:      ctx,
 	}
 	for range workers { // range по числу — Go 1.22
@@ -47,10 +51,17 @@ func (d *Dispatcher) workerLoop() {
 		case <-d.ctx.Done():
 			return
 		case task := <-d.queue:
+			// Слот ограничителя: под давлением памяти часть воркеров ждёт здесь,
+			// вместо того чтобы плодить процессы, которые ОС всё равно не запустит.
+			if !d.limiter.Acquire(d.ctx) {
+				return // служба останавливается
+			}
+
 			// Фиксируем начало и конец выполнения — это видно в TaskStatus.
 			d.registry.MarkStarted(task)
 			d.runner.RunForNodes(d.ctx, task)
 			d.registry.MarkFinished(task.Id)
+			d.limiter.Release()
 		}
 	}
 }

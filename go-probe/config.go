@@ -25,6 +25,10 @@ type Config struct {
 	MaxPendingResults  int       // Probe:MaxPendingResults — лимит очереди результатов
 	PersistIntervalSec int       // Probe:PersistIntervalSec — период снимка очереди на диск
 	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
+	MinParallel        int       // Probe:MinParallel — ниже этого предел не опускается даже при нехватке памяти
+	MemoryHighPercent  float64   // Probe:MemoryHighPercent — выше этой занятости памяти предел сжимается
+	MemoryLowPercent   float64   // Probe:MemoryLowPercent — ниже этой занятости предел возвращается
+	MemoryCheckSec     int       // Probe:MemoryCheckSec — период проверки памяти (0 — слежение выключено)
 	Log                LogConfig // секция Logging — журнал пробы
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
@@ -51,6 +55,10 @@ func LoadConfig(path string) (*Config, error) {
 		MaxPendingResults:  num(raw, "Probe:MaxPendingResults", 100000),
 		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
+		MinParallel:        num(raw, "Probe:MinParallel", 16),
+		MemoryHighPercent:  float64(num(raw, "Probe:MemoryHighPercent", 95)),
+		MemoryLowPercent:   float64(num(raw, "Probe:MemoryLowPercent", 80)),
+		MemoryCheckSec:     num(raw, "Probe:MemoryCheckSec", 5),
 		Log: LogConfig{
 			Level:     str(raw, "Logging:Level", "Info"),
 			Dir:       str(raw, "Logging:Dir", "log"),
