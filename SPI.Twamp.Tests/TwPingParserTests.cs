@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp twping
+﻿// Ignore Spelling: SPI Twamp twping
 
 using SPI.Twamp.Server.Parser;
 using Xunit;
@@ -24,6 +24,79 @@ namespace SPI.Twamp.Tests
             two-way jitter = 0.8 ms
             send hops = 7
             """;
+
+        /// <summary>
+        /// Вывод клиента twping-go, снятый с настоящего замера против twampd
+        /// из perfSONAR. Подписи русские — как их печатает этот клиент.
+        /// </summary>
+        private const string SampleBlockGo = """
+            --- статистика twping от [127.0.0.1]:43873 к [127.0.0.1]:8960 ---
+            SID:	7f000001ee1854f631ea1405d4f25363
+            первый:	2026-08-01T11:20:23.210
+            последний:	2026-08-01T11:20:24.373
+            отправлено 100, потеряно 0 (0.000%), дубликатов при отправке 0, при отражении 0
+            время кругового обхода мин/медиана/макс = 0.124/0.35/0.677 мс, (погрешность=0.322 мс)
+            время до отражателя мин/медиана/макс = 0.0787/0.15/0.399 мс, (погрешность=0.161 мс)
+            время от отражателя мин/медиана/макс = 0.0458/0.15/0.407 мс, (погрешность=0.161 мс)
+            время обработки на отражателе мин/макс = 0.003/0.055 мс
+            джиттер (двусторонний) = 0.2 мс (P95-P50)
+            джиттер (до отражателя) = 0.1 мс (P95-P50)
+            джиттер (от отражателя) = 0.2 мс (P95-P50)
+            число хопов (до отражателя) = 0 (неизменно)
+            число хопов (от отражателя) = 0 (неизменно)
+            """;
+
+        [Fact(DisplayName = "Разбирается вывод twping-go: подписи русские, величины те же")]
+        public void Parse_GoClientBlock()
+        {
+            Guid id = Guid.NewGuid();
+            TwPingStats stats = TwPingParser.Parse(SampleBlockGo, null, id);
+
+            // Без поддержки русских подписей статистика вышла бы пустой, и замер
+            // не попал бы ни в отчёт, ни в графики — при том что сам он удался.
+            Assert.Equal("127.0.0.1", stats.FromHost);
+            Assert.Equal(43873, stats.FromPort);
+            Assert.Equal("127.0.0.1", stats.ToHost);
+            Assert.Equal(8960, stats.ToPort);
+            Assert.Equal("7f000001ee1854f631ea1405d4f25363", stats.Sid);
+
+            Assert.Equal(100, stats.Sent);
+            Assert.Equal(0, stats.Lost);
+            Assert.Equal(0.0, stats.LossPercent);
+
+            Assert.Equal(0.124, stats.RttMin);
+            Assert.Equal(0.35, stats.RttMedian);
+            Assert.Equal(0.677, stats.RttMax);
+
+            Assert.Equal(0.0787, stats.SendMin);
+            Assert.Equal(0.0458, stats.ReflectMin);
+            Assert.Equal(0.003, stats.ReflectProcMin);
+            Assert.Equal(0.055, stats.ReflectProcMax);
+
+            Assert.Equal(0.2, stats.TwoWayJitter);
+            Assert.Equal(0.1, stats.SendJitter);
+            Assert.Equal(0, stats.SendHops);
+        }
+
+        [Fact(DisplayName = "Оба вида вывода дают одинаковый набор заполненных полей")]
+        public void Parse_BothClients_SameFields()
+        {
+            TwPingStats en = TwPingParser.Parse(SampleBlock, null, Guid.NewGuid());
+            TwPingStats ru = TwPingParser.Parse(SampleBlockGo, null, Guid.NewGuid());
+
+            // Сравниваем не значения (замеры разные), а то, что разбор дошёл до
+            // всех величин: пустое поле означает, что подпись не распознана.
+            Assert.NotEqual(0, en.Sent);
+            Assert.NotEqual(0, ru.Sent);
+            Assert.NotEqual(0.0, en.RttMedian);
+            Assert.NotEqual(0.0, ru.RttMedian);
+            Assert.NotEqual(0.0, en.SendMin);
+            Assert.NotEqual(0.0, ru.SendMin);
+            Assert.NotEqual(0.0, en.ReflectMin);
+            Assert.NotEqual(0.0, ru.ReflectMin);
+            Assert.False(string.IsNullOrEmpty(en.Sid));
+            Assert.False(string.IsNullOrEmpty(ru.Sid));
+        }
 
         [Fact(DisplayName = "Блок twping разбирается: адреса, потери, RTT")]
         public void Parse_Block()

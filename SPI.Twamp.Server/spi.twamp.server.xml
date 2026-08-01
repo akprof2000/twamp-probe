@@ -3015,6 +3015,13 @@
             и формирование CSV-отчёта.
             </summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Parser.TwPingParser.First(System.Text.RegularExpressions.Match,System.Int32[])">
+            <summary>
+            Возвращает значение первой непустой группы из перечисленных.
+            Нужен, когда шаблон описывает две подписи одной величины (английскую
+            и русскую) и заполняется только одна ветвь.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.Parse(System.String,System.String,System.Nullable{System.Guid})">
             <summary>
             Разбирает один блок вывода twping в объект статистики.
@@ -3092,10 +3099,12 @@
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExHeader">
             <remarks>
             Pattern:<br/>
-            <code>from\\s+\\[([^\\]]+)\\]:(\\d+)\\s+to\\s+\\[([^\\]]+)\\]:(\\d+)</code><br/>
+            <code>(?:from|от)\\s+\\[([^\\]]+)\\]:(\\d+)\\s+(?:to|к)\\s+\\[([^\\]]+)\\]:(\\d+)</code><br/>
             Explanation:<br/>
             <code>
-            ○ Match the string "from".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "from".<br/>
+                ○ Match the string "от".<br/>
             ○ Match a whitespace character atomically at least once.<br/>
             ○ Match '['.<br/>
             ○ 1st capture group.<br/>
@@ -3104,7 +3113,9 @@
             ○ 2nd capture group.<br/>
                 ○ Match a Unicode digit atomically at least once.<br/>
             ○ Match a whitespace character atomically at least once.<br/>
-            ○ Match the string "to".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "to".<br/>
+                ○ Match 'к'.<br/>
             ○ Match a whitespace character atomically at least once.<br/>
             ○ Match '['.<br/>
             ○ 3rd capture group.<br/>
@@ -3118,21 +3129,34 @@
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExSendLoss">
             <remarks>
             Pattern:<br/>
-            <code>(\\d+)\\s+sent,\\s+(\\d+)\\s+lost\\s+\\(([\\d\\.]+)%\\)</code><br/>
+            <code>(?:(\\d+)\\s+sent,\\s+(\\d+)\\s+lost|отправлено\\s+(\\d+),\\s+потеряно\\s+(\\d+))\\s+\\(([\\d\\.]+)%\\)</code><br/>
             Explanation:<br/>
             <code>
-            ○ 1st capture group.<br/>
-                ○ Match a Unicode digit atomically at least once.<br/>
-            ○ Match a whitespace character atomically at least once.<br/>
-            ○ Match the string "sent,".<br/>
-            ○ Match a whitespace character atomically at least once.<br/>
-            ○ 2nd capture group.<br/>
-                ○ Match a Unicode digit atomically at least once.<br/>
-            ○ Match a whitespace character atomically at least once.<br/>
-            ○ Match the string "lost".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match a sequence of expressions.<br/>
+                    ○ 1st capture group.<br/>
+                        ○ Match a Unicode digit atomically at least once.<br/>
+                    ○ Match a whitespace character atomically at least once.<br/>
+                    ○ Match the string "sent,".<br/>
+                    ○ Match a whitespace character atomically at least once.<br/>
+                    ○ 2nd capture group.<br/>
+                        ○ Match a Unicode digit atomically at least once.<br/>
+                    ○ Match a whitespace character atomically at least once.<br/>
+                    ○ Match the string "lost".<br/>
+                ○ Match a sequence of expressions.<br/>
+                    ○ Match the string "отправлено".<br/>
+                    ○ Match a whitespace character atomically at least once.<br/>
+                    ○ 3rd capture group.<br/>
+                        ○ Match a Unicode digit atomically at least once.<br/>
+                    ○ Match ','.<br/>
+                    ○ Match a whitespace character atomically at least once.<br/>
+                    ○ Match the string "потеряно".<br/>
+                    ○ Match a whitespace character atomically at least once.<br/>
+                    ○ 4th capture group.<br/>
+                        ○ Match a Unicode digit atomically at least once.<br/>
             ○ Match a whitespace character atomically at least once.<br/>
             ○ Match '('.<br/>
-            ○ 3rd capture group.<br/>
+            ○ 5th capture group.<br/>
                 ○ Match a character in the set [.\d] atomically at least once.<br/>
             ○ Match the string "%)".<br/>
             </code>
@@ -3141,80 +3165,95 @@
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExDateTime">
             <remarks>
             Pattern:<br/>
-            <code>reflect time min/median/max = ([\\-\\d\\.]+)/([\\-\\d\\.]+)/([\\-\\d\\.]+)</code><br/>
+            <code>(?:reflect time min/median/max|время от отражателя мин/медиана/макс) = ([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)</code><br/>
             Explanation:<br/>
             <code>
-            ○ Match the string "reflect time min/median/max = ".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "reflect time min/median/max".<br/>
+                ○ Match the string "время от отражателя мин/медиана/макс".<br/>
+            ○ Match the string " = ".<br/>
             ○ 1st capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 2nd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 3rd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             </code>
             </remarks>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExReflector">
             <remarks>
             Pattern:<br/>
-            <code>reflector processing time min/max = ([\\-\\d\\.]+)/([\\-\\d\\.]+)</code><br/>
+            <code>(?:reflector processing time min/max|время обработки на отражателе мин/макс) = ([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)</code><br/>
             Explanation:<br/>
             <code>
-            ○ Match the string "reflector processing time min/max = ".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "reflector processing time min/max".<br/>
+                ○ Match the string "время обработки на отражателе мин/макс".<br/>
+            ○ Match the string " = ".<br/>
             ○ 1st capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 2nd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             </code>
             </remarks>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExRtt">
             <remarks>
             Pattern:<br/>
-            <code>round-trip time min/median/max = ([\\-\\d\\.]+)/([\\-\\d\\.]+)/([\\-\\d\\.]+)</code><br/>
+            <code>(?:round-trip time min/median/max|время кругового обхода мин/медиана/макс) = ([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)</code><br/>
             Explanation:<br/>
             <code>
-            ○ Match the string "round-trip time min/median/max = ".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "round-trip time min/median/max".<br/>
+                ○ Match the string "время кругового обхода мин/медиана/макс".<br/>
+            ○ Match the string " = ".<br/>
             ○ 1st capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 2nd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 3rd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             </code>
             </remarks>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExSendTime">
             <remarks>
             Pattern:<br/>
-            <code>send time min/median/max = ([\\-\\d\\.]+)/([\\-\\d\\.]+)/([\\-\\d\\.]+)</code><br/>
+            <code>(?:send time min/median/max|время до отражателя мин/медиана/макс) = ([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)/([\\-\\d\\.eE\\+]+)</code><br/>
             Explanation:<br/>
             <code>
-            ○ Match the string "send time min/median/max = ".<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "send time min/median/max".<br/>
+                ○ Match the string "время до отражателя мин/медиана/макс".<br/>
+            ○ Match the string " = ".<br/>
             ○ 1st capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 2nd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             ○ Match '/'.<br/>
             ○ 3rd capture group.<br/>
-                ○ Match a character in the set [\-.\d] atomically at least once.<br/>
+                ○ Match a character in the set [+\-.Ee\d] atomically at least once.<br/>
             </code>
             </remarks>
         </member>
         <member name="M:SPI.Twamp.Server.Parser.TwPingParser.RegExMultiLine">
             <remarks>
             Pattern:<br/>
-            <code>(?=--- twping statistics)</code><br/>
+            <code>(?=--- (?:twping statistics|статистика twping))</code><br/>
             Explanation:<br/>
             <code>
             ○ Zero-width positive lookahead.<br/>
-                ○ Match the string "--- twping statistics".<br/>
+                ○ Match the string "--- ".<br/>
+                ○ Match with 2 alternative expressions, atomically.<br/>
+                    ○ Match the string "twping statistics".<br/>
+                    ○ Match the string "статистика twping".<br/>
             </code>
             </remarks>
         </member>
@@ -3809,11 +3848,11 @@
         <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_hasTimeout">
             <summary>Whether <see cref="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout"/> is non-infinite.</summary>
         </member>
-        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfAnyDigit(System.ReadOnlySpan{System.Char})">
-            <summary>Finds the next index of any character that matches a Unicode digit.</summary>
-        </member>
         <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfNonAsciiOrAny_41799F39AE16B3E92547BD6B358D2338224C43CFA2794046FDDF3D47BBB7B4C5(System.ReadOnlySpan{System.Char})">
             <summary>Finds the next index of any character that matches a character in the set [\d\p{L}].</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfNonAsciiOrAny_4442251E6C3A7253EC240544E88AE19B44D375D55991B454A3E156F9667DA595(System.ReadOnlySpan{System.Char})">
+            <summary>Finds the next index of any character that matches a character in the set [\u043E\d].</summary>
         </member>
         <member name="M:System.Text.RegularExpressions.Generated.Utilities.IndexOfNonAsciiOrAny_827A6FFEB792B88B7D0333A27915E34D7CF5233262CB29EF9249DC54FCFBFAD6(System.ReadOnlySpan{System.Char})">
             <summary>Finds the next index of any character that matches a character in the set [\-.\d].</summary>
@@ -3839,23 +3878,8 @@
         <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_ascii_FFFFFFFFFF9F00FCFFFFFFFFFFFFFFFF">
             <summary>Supports searching for characters in or not in "\0\u0001\u0002\u0003\u0004\u0005\u0006\a\b\t\n\v\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&amp;'()*+,/:;&lt;=&gt;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f".</summary>
         </member>
-        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_1DBE47D394C6C90BC3A7EE801D9FFBBAE4B3C42472D4AF965D65D1A07DE76060">
-            <summary>Supports searching for the string "send time min/median/max = ".</summary>
-        </member>
-        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_55A16278F1FF344A6186BD683832A91E4C5C4A623F1AC7E189FA2E52FC02F27A">
-            <summary>Supports searching for the string "round-trip time min/median/max = ".</summary>
-        </member>
-        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_6C2647D05A84D90AB200106DE428D0CC2790D4D3F3999409D4991B6521C03217">
-            <summary>Supports searching for the string "reflector processing time min/max = ".</summary>
-        </member>
-        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_8C4B4493A2403CAE7473B93BDFEAFB45D431DB0DBB724F3DCDC6E1AB626A91BC">
-            <summary>Supports searching for the string "--- twping statistics".</summary>
-        </member>
-        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_C3B25B6B4BC5045BDB723D298ABBD726E5F0E11B5444A72D9A79103DFEEA8254">
-            <summary>Supports searching for the string "reflect time min/median/max = ".</summary>
-        </member>
-        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_from_Ordinal">
-            <summary>Supports searching for the string "from".</summary>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfString_640F136582DF1EF5522A0CC43AA40BC7980CFB6CC25BB5F5C8CC905454A790D2">
+            <summary>Supports searching for the string "--- ".</summary>
         </member>
         <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type)">
             <summary>

@@ -11,6 +11,24 @@ namespace SPI.Twamp.Server.Parser
     /// </summary>
     public static partial class TwPingParser
     {
+        /// <summary>
+        /// Возвращает значение первой непустой группы из перечисленных.
+        /// Нужен, когда шаблон описывает две подписи одной величины (английскую
+        /// и русскую) и заполняется только одна ветвь.
+        /// </summary>
+        private static string First(Match match, params int[] groups)
+        {
+            foreach (int g in groups)
+            {
+                if (match.Groups[g].Success && match.Groups[g].Value.Length > 0)
+                {
+                    return match.Groups[g].Value;
+                }
+            }
+
+            return string.Empty;
+        }
+
         private static string? Extract(string text, string pattern)
         {
             Match m = Regex.Match(text, pattern, RegexOptions.Multiline);
@@ -69,12 +87,12 @@ namespace SPI.Twamp.Server.Parser
         /// <summary>Время первого/последнего пакета и счётчики отправлено/потеряно/процент потерь.</summary>
         private static void ParseSession(string text, TwPingStats stats, CultureInfo culture)
         {
-            if (DateTime.TryParse(Extract(text, @"first:\s*([0-9T:\.\-]+)"), culture, DateTimeStyles.None, out DateTime first))
+            if (DateTime.TryParse(Extract(text, @"(?:first|первый):\s*([0-9T:\.\-]+)"), culture, DateTimeStyles.None, out DateTime first))
             {
                 stats.First = first;
             }
 
-            if (DateTime.TryParse(Extract(text, @"last:\s*([0-9T:\.\-]+)"), culture, DateTimeStyles.None, out DateTime last))
+            if (DateTime.TryParse(Extract(text, @"(?:last|последний):\s*([0-9T:\.\-]+)"), culture, DateTimeStyles.None, out DateTime last))
             {
                 stats.Last = last;
             }
@@ -82,9 +100,11 @@ namespace SPI.Twamp.Server.Parser
             Match sentLost = RegExSendLoss().Match(text);
             if (sentLost.Success)
             {
-                stats.Sent = Int(sentLost.Groups[1].Value);
-                stats.Lost = Int(sentLost.Groups[2].Value);
-                stats.LossPercent = Num(sentLost.Groups[3].Value, culture);
+                // Счётчики стоят в разных группах: 1–2 в английском выводе,
+                // 3–4 в русском — сработала та ветвь шаблона, что подошла.
+                stats.Sent = Int(First(sentLost, 1, 3));
+                stats.Lost = Int(First(sentLost, 2, 4));
+                stats.LossPercent = Num(sentLost.Groups[5].Value, culture);
             }
         }
 
@@ -126,11 +146,11 @@ namespace SPI.Twamp.Server.Parser
         /// <summary>Джиттеры (двусторонний/прямой/обратный) и количество переходов (hops).</summary>
         private static void ParseJitterAndHops(string text, TwPingStats stats, CultureInfo culture)
         {
-            stats.TwoWayJitter = Num(Extract(text, @"two-way jitter = ([\d\.]+)") ?? "", culture);
-            stats.SendJitter = Num(Extract(text, @"send jitter = ([\d\.]+)") ?? "", culture);
-            stats.ReflectJitter = Num(Extract(text, @"reflect jitter = ([\d\.]+)") ?? "", culture);
-            stats.SendHops = Int(Extract(text, @"send hops = (\d+)") ?? "");
-            stats.ReflectHops = Int(Extract(text, @"reflect hops = (\d+)") ?? "");
+            stats.TwoWayJitter = Num(Extract(text, @"(?:two-way jitter|джиттер \(двусторонний\)) = ([\d\.]+)") ?? "", culture);
+            stats.SendJitter = Num(Extract(text, @"(?:send jitter|джиттер \(до отражателя\)) = ([\d\.]+)") ?? "", culture);
+            stats.ReflectJitter = Num(Extract(text, @"(?:reflect jitter|джиттер \(от отражателя\)) = ([\d\.]+)") ?? "", culture);
+            stats.SendHops = Int(Extract(text, @"(?:send hops|число хопов \(до отражателя\)) = (\d+)") ?? "");
+            stats.ReflectHops = Int(Extract(text, @"(?:reflect hops|число хопов \(от отражателя\)) = (\d+)") ?? "");
         }
 
 
@@ -296,19 +316,26 @@ namespace SPI.Twamp.Server.Parser
         }
 
 
-        [GeneratedRegex(@"from\s+\[([^\]]+)\]:(\d+)\s+to\s+\[([^\]]+)\]:(\d+)")]
+        // Шаблоны понимают два вида вывода: оригинальный twping из perfSONAR
+        // (английский) и клиент twping-go (русский). Оба дают одни и те же
+        // величины в одном порядке, различаются только подписи, поэтому шаблон
+        // — это альтернатива из двух вариантов подписи с общими группами.
+        // Без этого замеры twping-go разбирались бы в пустую статистику и
+        // не попадали ни в отчёт, ни в графики.
+
+        [GeneratedRegex(@"(?:from|от)\s+\[([^\]]+)\]:(\d+)\s+(?:to|к)\s+\[([^\]]+)\]:(\d+)")]
         private static partial Regex RegExHeader();
-        [GeneratedRegex(@"(\d+)\s+sent,\s+(\d+)\s+lost\s+\(([\d\.]+)%\)")]
+        [GeneratedRegex(@"(?:(\d+)\s+sent,\s+(\d+)\s+lost|отправлено\s+(\d+),\s+потеряно\s+(\d+))\s+\(([\d\.]+)%\)")]
         private static partial Regex RegExSendLoss();
-        [GeneratedRegex(@"reflect time min/median/max = ([\-\d\.]+)/([\-\d\.]+)/([\-\d\.]+)")]
+        [GeneratedRegex(@"(?:reflect time min/median/max|время от отражателя мин/медиана/макс) = ([\-\d\.eE\+]+)/([\-\d\.eE\+]+)/([\-\d\.eE\+]+)")]
         private static partial Regex RegExDateTime();
-        [GeneratedRegex(@"reflector processing time min/max = ([\-\d\.]+)/([\-\d\.]+)")]
+        [GeneratedRegex(@"(?:reflector processing time min/max|время обработки на отражателе мин/макс) = ([\-\d\.eE\+]+)/([\-\d\.eE\+]+)")]
         private static partial Regex RegExReflector();
-        [GeneratedRegex(@"round-trip time min/median/max = ([\-\d\.]+)/([\-\d\.]+)/([\-\d\.]+)")]
+        [GeneratedRegex(@"(?:round-trip time min/median/max|время кругового обхода мин/медиана/макс) = ([\-\d\.eE\+]+)/([\-\d\.eE\+]+)/([\-\d\.eE\+]+)")]
         private static partial Regex RegExRtt();
-        [GeneratedRegex(@"send time min/median/max = ([\-\d\.]+)/([\-\d\.]+)/([\-\d\.]+)")]
+        [GeneratedRegex(@"(?:send time min/median/max|время до отражателя мин/медиана/макс) = ([\-\d\.eE\+]+)/([\-\d\.eE\+]+)/([\-\d\.eE\+]+)")]
         private static partial Regex RegExSendTime();
-        [GeneratedRegex(@"(?=--- twping statistics)")]
+        [GeneratedRegex(@"(?=--- (?:twping statistics|статистика twping))")]
         private static partial Regex RegExMultiLine();
     }
 }
