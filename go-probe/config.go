@@ -1,4 +1,4 @@
-// Чтение конфигурации из appsettings.json — формат файла тот же, что у C#-пробы,
+// Чтение конфигурации из appsettings.json — формат тот же, что у сервера,
 // поэтому появившийся Go-вариант можно подложить в существующую инсталляцию.
 package main
 
@@ -17,7 +17,7 @@ type ProbeToolConfig struct {
 	Default string
 }
 
-// Config — настройки Go-пробы (подмножество appsettings.json C#-пробы).
+// Config — настройки пробы.
 type Config struct {
 	ListenAddr         string    // из Urls: "http://0.0.0.0:8443" → "0.0.0.0:8443"
 	ApiKey             string    // Auth:ApiKey; пусто — аутентификация выключена
@@ -35,6 +35,10 @@ type Config struct {
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
 	Twampy             ProbeToolConfig
+	// TwampyEmbedded — выполнять TWampy встроенным отправителем, без запуска
+	// python. Такой замер не занимает ни процесса, ни потока ожидания, поэтому
+	// предел одновременных замеров на него не распространяется.
+	TwampyEmbedded bool // twampy:embedded
 }
 
 // LoadConfig читает appsettings.json рядом с исполняемым файлом.
@@ -72,9 +76,10 @@ func LoadConfig(path string) (*Config, error) {
 			Console:   flag(raw, "Logging:Console", true),
 			Compress:  flag(raw, "Logging:Compress", true),
 		},
-		Ping:   ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
-		Twamp:  ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
-		Twampy: ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		Ping:           ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
+		Twamp:          ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
+		Twampy:         ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		TwampyEmbedded: flag(raw, "twampy:embedded", false),
 	}
 	return cfg, nil
 }

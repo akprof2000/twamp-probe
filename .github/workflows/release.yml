@@ -151,7 +151,7 @@ jobs:
 
           assemble () { # $1 — папка, $2 — бинарник, $3 — конфиг
             mkdir -p "$1"
-            cp -r ../SPI.TWamp.Probe/twampy "$1/twampy"
+            cp -r twampy "$1/twampy"
             rm -rf "$1/twampy/__pycache__"
             cp "deploy/$3" "$1/appsettings.json"
             cp deploy/README-DEPLOY.txt "$1/"

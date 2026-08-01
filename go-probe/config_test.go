@@ -1,4 +1,4 @@
-// Тесты конфигурации: формат appsettings.json C#-пробы, BOM, значения по умолчанию.
+// Тесты конфигурации: формат appsettings.json, BOM, значения по умолчанию.
 package main
 
 import (
@@ -55,5 +55,34 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 	if cfg.PersistIntervalSec != 5 || cfg.ServerTimeoutHours != 24 {
 		t.Errorf("значения по умолчанию: %+v", cfg)
+	}
+}
+
+func TestLoadConfig_TwampyEmbeddedFlag(t *testing.T) {
+	// Встроенный режим включается из того же appsettings.json, что и всё остальное.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "appsettings.json")
+
+	if err := os.WriteFile(path, []byte(`{"twampy":{"name":"python3","embedded":true}}`), 0o644); err != nil {
+		t.Fatalf("не удалось записать конфигурацию: %v", err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("конфигурация не прочиталась: %v", err)
+	}
+	if !cfg.TwampyEmbedded {
+		t.Error("twampy:embedded=true не прочитан")
+	}
+
+	// По умолчанию режим выключен: обновление пробы не меняет поведение молча.
+	if err := os.WriteFile(path, []byte(`{"twampy":{"name":"python3"}}`), 0o644); err != nil {
+		t.Fatalf("не удалось записать конфигурацию: %v", err)
+	}
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatalf("конфигурация не прочиталась: %v", err)
+	}
+	if cfg.TwampyEmbedded {
+		t.Error("без настройки встроенный режим оказался включён")
 	}
 }

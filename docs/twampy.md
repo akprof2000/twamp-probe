@@ -9,7 +9,7 @@
 | Режим | Утилита | Что это |
 |---|---|---|
 | `TWamp` | `twping` | клиент TWAMP от [perfsonar](https://github.com/perfsonar) (полный TWAMP с TCP-контролем) |
-| `TWampy` | `twampy` | [nokia/twampy](https://github.com/nokia/twampy) — TWAMP-Light на Python, **вендорен в репозитории** (`SPI.TWamp.Probe/twampy/`) |
+| `TWampy` | `twampy` | [nokia/twampy](https://github.com/nokia/twampy) — TWAMP-Light на Python, **вендорен в репозитории** (`go-probe/twampy/`); есть и встроенный отправитель, которому python не нужен |
 
 ### Зачем отдельный TWampy и почему форк
 

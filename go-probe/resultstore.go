@@ -144,7 +144,17 @@ func (s *ResultStore) Load() {
 }
 
 // persistLoop периодически пишет снимок недоставленного на диск (только при изменениях).
+//
+// Probe:PersistIntervalSec = 0 означает «по таймеру не сохранять»: снимок делается
+// только при остановке. Без этой проверки нулевой интервал ронял бы пробу при
+// старте — таймер с неположительным периодом в Go паникует.
 func (s *ResultStore) persistLoop() {
+	if s.persist <= 0 {
+		<-s.stop
+		s.flush() // финальный снимок при остановке
+		return
+	}
+
 	ticker := time.NewTicker(s.persist)
 	defer ticker.Stop()
 	for {

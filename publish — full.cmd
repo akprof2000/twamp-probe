@@ -1,10 +1,6 @@
 @echo off
-cd SPI.TWamp.Probe
-@dotnet publish -c Release -r linux-x64  --self-contained true -v n -o ../publish/Probe
+rem Локальная публикация сервера (проба собирается отдельно — см. go-probe\build-linux.cmd).
+cd SPI.Twamp.Server
+@dotnet publish -c Release -r linux-x64 --self-contained true -v n -o ../publish/Server
 cd ..
-cd SPI.TWamp.Server
-@dotnet publish -c Release -r linux-x64  --self-contained true -v n -o ../publish/Server
-cd ..
-rem del /f publish\Probe\appsettings*.json
-rem del /f publish\Server\appsettings*.json
 @pause

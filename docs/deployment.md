@@ -6,7 +6,7 @@
 
 ```
 SPI.TWamp.slnx              — решение (.NET 10)
-├── SPI.TWamp.Probe/        — проба (ASP.NET Core)
+├── go-probe/               — проба (Go): один бинарник, twampy и файлы установки
 ├── SPI.Twamp.Server/       — сервер (ASP.NET Core, LiteDB)
 └── SPI.Twamp.Tests/        — юнит-тесты (xUnit)
 ```

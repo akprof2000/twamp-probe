@@ -8,7 +8,7 @@ set GOARCH=amd64
 rmdir /s /q dist 2>nul
 mkdir dist\twamp-probe-go
 go build -trimpath -ldflags="-s -w" -o dist\twamp-probe-go\twamp-probe .
-xcopy /e /i /q ..\SPI.TWamp.Probe\twampy dist\twamp-probe-go\twampy > nul
+xcopy /e /i /q twampy dist\twamp-probe-go\twampy > nul
 del /q dist\twamp-probe-go\twampy\__pycache__\* 2>nul
 rmdir dist\twamp-probe-go\twampy\__pycache__ 2>nul
 copy /y deploy\appsettings.json dist\twamp-probe-go\ > nul

@@ -73,7 +73,7 @@ func (r *ProbeRunner) runSingleNode(ctx context.Context, task *TaskInfo, node st
 			if ctx.Err() != nil {
 				return
 			}
-			result := r.executeOnce(ctx, task, node, execName, args, env)
+			result := r.execute(ctx, task, node, execName, args, env)
 			if result.Cancelled {
 				return // задачу удалили — прекращаем циклы, результат не отправляем
 			}
@@ -128,6 +128,111 @@ func orDefault(params []string, def string) []string {
 		return params
 	}
 	return strings.Fields(def)
+}
+
+// execute выполняет один замер: встроенным отправителем, если он включён для
+// этого режима, иначе — запуском внешнего процесса зонда.
+func (r *ProbeRunner) execute(
+	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
+
+	if task.Mode == ModeTWampy && r.cfg.TwampyEmbedded {
+		return r.executeEmbeddedTwampy(ctx, task, node, args)
+	}
+	return r.executeOnce(ctx, task, node, execName, args, env)
+}
+
+// executeEmbeddedTwampy выполняет замер TWampy прямо в процессе пробы.
+//
+// Внешний процесс не запускается, поэтому такой замер не занимает ни процесса,
+// ни потока ожидания — предел одновременных замеров на него не действует
+// (см. docs/parallelism.md). Вывод и разбор совместимы с python-версией:
+// серверный парсер и отчёты не отличают один режим от другого.
+func (r *ProbeRunner) executeEmbeddedTwampy(
+	ctx context.Context, task *TaskInfo, node string, args []string) ActionData {
+
+	// Аргументы python-вызова («-m twampy sender <узел> …») приводим к виду
+	// самого отправителя: разбор опций у него общий с оригиналом.
+	senderArgs := args
+	if idx := indexOf(senderArgs, "sender"); idx >= 0 {
+		senderArgs = senderArgs[idx+1:]
+	}
+
+	callLine := "twampy(embedded) sender " + strings.Join(senderArgs, " ")
+	started := time.Now()
+	result := ActionData{
+		ResultId:    NewGuid(),
+		Creation:    CsTime{started},
+		TaskId:      task.Id,
+		EndNode:     node,
+		IPAddress:   task.IpAddress,
+		RequestInfo: task.RequestInfo,
+		Mode:        string(task.Mode),
+		CallLine:    callLine,
+	}
+
+	// Отмена работает так же, как для внешнего зонда: удаление задачи на сервере
+	// обрывает замер немедленно, а не после его окончания.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	untrack := r.cancels.Track(task.Id, cancel)
+	defer untrack()
+
+	var deadline time.Time
+	if task.TimeoutSec > 0 {
+		deadline = started.Add(time.Duration(task.TimeoutSec) * time.Second)
+	}
+
+	output, errText := runEmbeddedTwampy(runCtx, senderArgs, deadline)
+
+	// Отмена именно этого замера (задачу удалили), а не остановка всей пробы.
+	cancelled := runCtx.Err() != nil && ctx.Err() == nil
+	timedOut := strings.Contains(errText, errTimeout.Error())
+
+	switch {
+	case cancelled:
+		logRunner.Warn("Задача удалена — выполнение прервано",
+			"название", task.Title, "узел", node, "режим", task.Mode,
+			"длительность", time.Since(started).Round(time.Millisecond), "задача", task.Id)
+		r.registry.ReportOutcome(task.Id, OutcomeNotStarted, nil, "Задача удалена — выполнение прервано")
+		result.Cancelled = true
+		return result
+
+	case timedOut:
+		errText = fmt.Sprintf("Задача прервана по таймауту %d c.", task.TimeoutSec)
+	}
+
+	outcome := OutcomeSuccess
+	switch {
+	case timedOut:
+		outcome = OutcomeTimedOut
+	case errText != "":
+		outcome = OutcomeExitCodeError
+	}
+
+	exitCode := 0
+	summary := errText
+	if outcome == OutcomeSuccess {
+		summary = lastLine(output)
+	}
+	r.registry.ReportOutcome(task.Id, outcome, &exitCode, summary)
+
+	result.ExitCode = &exitCode
+	result.Outcome = string(outcome)
+	result.Console = output
+	result.ErrorConsole = errText
+
+	logRun(task, node, outcome, exitCode, time.Since(started), summary)
+	return result
+}
+
+// indexOf возвращает позицию значения в срезе (-1, если его нет).
+func indexOf(items []string, value string) int {
+	for i, item := range items {
+		if item == value {
+			return i
+		}
+	}
+	return -1
 }
 
 // executeOnce запускает процесс зонда один раз и возвращает собранный результат.

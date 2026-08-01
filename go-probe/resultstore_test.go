@@ -76,3 +76,17 @@ func TestResultStore_Clear(t *testing.T) {
 		t.Errorf("после Clear результатов быть не должно, получено %d", len(empty.Items))
 	}
 }
+
+func TestResultStore_ZeroPersistIntervalDoesNotPanic(t *testing.T) {
+	// Probe:PersistIntervalSec = 0 — допустимая настройка «не сохранять по
+	// таймеру». Раньше она роняла пробу при старте: таймер с нулевым периодом
+	// в Go паникует, а цикл сохранения запускается сразу из конструктора.
+	store := NewResultStore(10, 0)
+	defer store.Close()
+
+	store.Add(ActionData{ResultId: "r-1", TaskId: "t-1"})
+
+	if got := store.TakeBatch(10).Items; len(got) != 1 {
+		t.Errorf("получено результатов: %d, ожидался 1", len(got))
+	}
+}

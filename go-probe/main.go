@@ -1,6 +1,6 @@
-// SPI TWamp Probe (Go) — экспериментальный порт пробы на Go.
+// SPI TWamp Probe — проба системы SPI TWamp.
 //
-// Полностью совместим с сервером SPI.Twamp.Server: те же эндпоинты
+// Работает с сервером SPI.Twamp.Server: те же эндпоинты
 // api/probeinterface (CheckIn, SetJobs, TaskIds, TaskStatus, CheckData,
 // ConfirmData), тот же контракт JSON, та же механика ACK-доставки результатов,
 // инкрементального слияния задач и cron-планирования. Конфигурация — тот же
@@ -217,7 +217,7 @@ func (a *apiServer) routes() http.Handler {
 	})
 }
 
-// writeJSON сериализует ответ в JSON (camelCase — как AddNewtonsoftJson у C#-пробы).
+// writeJSON сериализует ответ в JSON (camelCase — как ожидает сервер).
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(value)
@@ -306,7 +306,7 @@ func (a *apiServer) taskStatus(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, t)
 	}
 
-	// Сначала выполняющиеся и проблемные, затем по названию — как у C#-пробы.
+	// Сначала выполняющиеся и проблемные, затем по названию.
 	// slices.SortFunc + cmp.Compare — Go 1.21.
 	bad := func(o RunOutcome) int {
 		if o == OutcomeExitCodeError || o == OutcomeStartFailed || o == OutcomeTimedOut {
