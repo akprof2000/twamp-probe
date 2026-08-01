@@ -130,34 +130,51 @@ func orDefault(params []string, def string) []string {
 	return strings.Fields(def)
 }
 
-// execute выполняет один замер: встроенным отправителем, если он включён для
-// этого режима, иначе — запуском внешнего процесса зонда.
+// embeddedProbe — встроенный зонд: выполняет замер прямо в процессе пробы и
+// возвращает вывод и текст ошибки в том же виде, что и внешняя утилита.
+type embeddedProbe func(ctx context.Context, args []string, deadline time.Time) (output, errText string)
+
+// execute выполняет один замер: встроенным зондом, если он включён для этого
+// режима, иначе — запуском внешнего процесса.
 func (r *ProbeRunner) execute(
 	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
 
-	if task.Mode == ModeTWampy && r.cfg.TwampyEmbedded {
-		return r.executeEmbeddedTwampy(ctx, task, node, args)
+	if probe, callLine, probeArgs := r.embeddedFor(task, args); probe != nil {
+		return r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
 	}
 	return r.executeOnce(ctx, task, node, execName, args, env)
 }
 
-// executeEmbeddedTwampy выполняет замер TWampy прямо в процессе пробы.
+// embeddedFor выбирает встроенный зонд для режима задачи: возвращает функцию
+// замера, строку вызова для журнала и аргументы. Нулевая функция означает,
+// что режим выполняется внешним процессом.
+func (r *ProbeRunner) embeddedFor(task *TaskInfo, args []string) (embeddedProbe, string, []string) {
+	switch {
+	case task.Mode == ModeTWampy && r.cfg.TwampyEmbedded:
+		// Аргументы python-вызова («-m twampy sender <узел> …») приводим к виду
+		// самого отправителя: разбор опций у него общий с оригиналом.
+		senderArgs := args
+		if idx := indexOf(senderArgs, "sender"); idx >= 0 {
+			senderArgs = senderArgs[idx+1:]
+		}
+		return runEmbeddedTwampy, "twampy(embedded) sender " + strings.Join(senderArgs, " "), senderArgs
+
+	case task.Mode == ModeTWamp && r.cfg.TwampEmbedded:
+		// Аргументы twping совпадают с аргументами внешней утилиты: клиент тот же.
+		return runEmbeddedTwping, "twping(embedded) " + strings.Join(args, " "), args
+	}
+	return nil, "", nil
+}
+
+// executeEmbedded выполняет замер встроенным зондом.
 //
 // Внешний процесс не запускается, поэтому такой замер не занимает ни процесса,
 // ни потока ожидания — предел одновременных замеров на него не действует
-// (см. docs/parallelism.md). Вывод и разбор совместимы с python-версией:
-// серверный парсер и отчёты не отличают один режим от другого.
-func (r *ProbeRunner) executeEmbeddedTwampy(
-	ctx context.Context, task *TaskInfo, node string, args []string) ActionData {
+// (см. docs/parallelism.md). Вывод совпадает с внешней утилитой: серверный
+// парсер и отчёты не отличают один режим от другого.
+func (r *ProbeRunner) executeEmbedded(ctx context.Context, task *TaskInfo, node,
+	callLine string, args []string, probe embeddedProbe) ActionData {
 
-	// Аргументы python-вызова («-m twampy sender <узел> …») приводим к виду
-	// самого отправителя: разбор опций у него общий с оригиналом.
-	senderArgs := args
-	if idx := indexOf(senderArgs, "sender"); idx >= 0 {
-		senderArgs = senderArgs[idx+1:]
-	}
-
-	callLine := "twampy(embedded) sender " + strings.Join(senderArgs, " ")
 	started := time.Now()
 	result := ActionData{
 		ResultId:    NewGuid(),
@@ -182,7 +199,7 @@ func (r *ProbeRunner) executeEmbeddedTwampy(
 		deadline = started.Add(time.Duration(task.TimeoutSec) * time.Second)
 	}
 
-	output, errText := runEmbeddedTwampy(runCtx, senderArgs, deadline)
+	output, errText := probe(runCtx, args, deadline)
 
 	// Отмена именно этого замера (задачу удалили), а не остановка всей пробы.
 	cancelled := runCtx.Err() != nil && ctx.Err() == nil

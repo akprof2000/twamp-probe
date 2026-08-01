@@ -35,10 +35,12 @@ type Config struct {
 	Ping               ProbeToolConfig
 	Twamp              ProbeToolConfig
 	Twampy             ProbeToolConfig
-	// TwampyEmbedded — выполнять TWampy встроенным отправителем, без запуска
-	// python. Такой замер не занимает ни процесса, ни потока ожидания, поэтому
-	// предел одновременных замеров на него не распространяется.
-	TwampyEmbedded bool // twampy:embedded
+	// Встроенные зонды выполняют замер прямо в процессе пробы, без запуска
+	// внешней программы. Такой замер не занимает ни процесса, ни потока
+	// ожидания, поэтому предел одновременных замеров на него не действует
+	// (см. docs/parallelism.md).
+	TwampEmbedded  bool // twamp:embedded — клиент twping как библиотека
+	TwampyEmbedded bool // twampy:embedded — отправитель TWAMP-Light без python
 }
 
 // LoadConfig читает appsettings.json рядом с исполняемым файлом.
@@ -79,6 +81,7 @@ func LoadConfig(path string) (*Config, error) {
 		Ping:           ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
 		Twamp:          ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
 		Twampy:         ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		TwampEmbedded:  flag(raw, "twamp:embedded", false),
 		TwampyEmbedded: flag(raw, "twampy:embedded", false),
 	}
 	return cfg, nil

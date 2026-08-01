@@ -1,3 +1,5 @@
+github.com/akprof2000/twping-go v1.0.1-0.20260801104846-8e1baeaa1bd6 h1:8Q9qL84qkk2pNi4qC2r4tLwsPK+QMcWXn599EDOyjek=
+github.com/akprof2000/twping-go v1.0.1-0.20260801104846-8e1baeaa1bd6/go.mod h1:AWrDpAl5/ShBbWmCQ7X1WmUc8VHK2URxxsnR50xc4ZI=
 github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
 github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
