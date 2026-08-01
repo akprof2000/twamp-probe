@@ -1,8 +1,9 @@
-
+﻿
 
 // Ignore Spelling: SPI Twamp
 
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
@@ -15,6 +16,15 @@ using SPI.Twamp.Server.Application;
 using SPI.Twamp.Server.BackgroundServices;
 using SPI.Twamp.Server.Infrastructure;
 using System.Reflection;
+
+// Служба Windows стартует с рабочим каталогом C:\Windows\System32 — туда бы
+// легли база LiteDB, буфер ClickHouse и журналы, а appsettings.json не нашёлся
+// бы вовсе. Поэтому сразу переходим в папку с исполняемым файлом.
+// Под systemd этого не требуется: рабочий каталог задан в юните.
+if (WindowsServiceHelpers.IsWindowsService())
+{
+    Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+}
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 string fileNamesStr = "appsettings.json";
@@ -33,7 +43,9 @@ try
 
     _ = builder.Configuration.AddEnvironmentVariables();
     _ = builder.Logging.ClearProviders();
-    _ = builder.Host.UseSystemd().UseNLog();
+    // Одна и та же сборка работает и как служба systemd, и как служба Windows,
+    // и как обычное консольное приложение — лишний вызов просто ничего не делает.
+    _ = builder.Host.UseSystemd().UseWindowsService().UseNLog();
 
     _ = builder.Services.AddMemoryCache(prop =>
     {

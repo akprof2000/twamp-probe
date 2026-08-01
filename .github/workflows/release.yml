@@ -3,13 +3,15 @@
 #     выпускается автоматически, тег v<версия> создаётся сам (обычный путь);
 #   * пуш тега v* — то же самое, если тег ставят руками;
 #   * вручную (workflow_dispatch) — только артефакты, без релиза.
-# Собираются четыре архива для Linux x64 —
-# сервер и проба, каждый в двух вариантах:
+# Собираются архивы для Linux x64 и Windows x64 — сервер и проба.
+# Сервер идёт в двух вариантах под каждую систему:
 #   * framework — маленький дистрибутив, требует установленного .NET Runtime на хосте;
 #   * selfcontained — самодостаточный (один исполняемый файл со всеми библиотеками
 #     плюс конфиги/twampy/wwwroot рядом): скопировал папку — и запустил, ничего
 #     дополнительно ставить не нужно.
-# Каждый архив — это упакованная папка публикации целиком.
+# Каждый архив — это упакованная папка публикации целиком: внутри лежит
+# и скрипт установки службы (install-centos.sh для Linux, install-windows.ps1
+# для Windows), так что разворачивание сводится к одной команде.
 name: release
 
 on:
@@ -43,7 +45,7 @@ jobs:
       - name: Юнит-тесты
         run: dotnet test SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release
 
-      - name: Публикация 4 вариантов (linux-x64)
+      - name: Публикация сервера (linux-x64 + windows-x64)
         run: |
           set -e
           # Откуда версия и выпускать ли релиз:
@@ -78,27 +80,44 @@ jobs:
           [ "$RELEASE" = "1" ] || NETVER="0.0.1-${GITHUB_SHA::8}"
           echo "NETVER=$NETVER" >> "$GITHUB_ENV"
 
+          # publish_one <проект> <имя> <вариант> <среда: linux-x64|win-x64> [доп. ключи]
           publish_one () {
-            local proj="$1" name="$2" variant="$3"; shift 3
-            local out="publish/${name}-${variant}"
-            dotnet publish "$proj" -c Release -r linux-x64 -o "$out" -p:Version="$NETVER" "$@"
-            # Папка публикации целиком уходит в архив с сохранением прав на запуск.
-            tar -C "$out" -czf "publish/${name}-${VERSION}-linux-x64-${variant}.tar.gz" .
+            local proj="$1" name="$2" variant="$3" rid="$4"; shift 4
+            local out="publish/${name}-${variant}-${rid}"
+            dotnet publish "$proj" -c Release -r "$rid" -o "$out" -p:Version="$NETVER" "$@"
+
+            # Установка службы — прямо в папке публикации: systemd для Linux,
+            # диспетчер служб для Windows.
+            local deploy="$(dirname "$proj")/deploy"
+            if [ "$rid" = "linux-x64" ]; then
+              install -m 0755 "$deploy"/*.sh "$out/"
+              install -m 0644 "$deploy"/*.service "$out/"
+              # Папка публикации целиком уходит в архив с сохранением прав на запуск.
+              tar -C "$out" -czf "publish/${name}-${VERSION}-linux-x64-${variant}.tar.gz" .
+            else
+              install -m 0644 "$deploy"/*.ps1 "$out/"
+              (cd "$out" && zip -qr "../../publish/${name}-${VERSION}-windows-x64-${variant}.zip" .)
+            fi
           }
 
+          SRV=SPI.Twamp.Server/SPI.Twamp.Server.csproj
+
           # Маленькие сборки: без библиотек .NET, на хосте нужен установленный .NET 10 Runtime (ASP.NET Core).
-          publish_one SPI.Twamp.Server/SPI.Twamp.Server.csproj twamp-server framework --self-contained false
+          publish_one "$SRV" twamp-server framework linux-x64 --self-contained false
+          publish_one "$SRV" twamp-server framework win-x64   --self-contained false
 
           # Самодостаточные сборки: один исполняемый файл, .NET не требуется.
-          publish_one SPI.Twamp.Server/SPI.Twamp.Server.csproj twamp-server selfcontained \
+          publish_one "$SRV" twamp-server selfcontained linux-x64 \
+            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          publish_one "$SRV" twamp-server selfcontained win-x64 \
             --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
-          ls -lh publish/*.tar.gz
+          ls -lh publish/*.tar.gz publish/*.zip
 
       - name: Установка Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
           cache-dependency-path: go-probe/go.sum
 
       # Go-проба: один статический бинарник ~6 МБ без зависимостей. Linux-вариант
@@ -152,6 +171,8 @@ jobs:
 
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go-win/twamp-probe.exe .
           assemble dist/twamp-probe-go-win twamp-probe.exe appsettings.windows.json
+          # Установка пробы службой Windows.
+          install -m 0644 deploy/install-windows.ps1 dist/twamp-probe-go-win/
           (cd dist && zip -qr "../../publish/twamp-probe-go-${VERSION}-windows-x64.zip" twamp-probe-go-win)
 
           ls -lh ../publish/twamp-probe-go-*
@@ -179,11 +200,25 @@ jobs:
             publish/*.zip
           generate_release_notes: true
           body: |
-            Сборки для Linux x64 (в каждом архиве — папка приложения целиком):
+            Сборки для Linux x64 и Windows x64. В каждом архиве — папка приложения
+            целиком вместе со скриптом установки службы.
+
+            **Установка одной командой:**
+
+            ```bash
+            # Linux (CentOS/RHEL): ставит службу systemd, лимиты и настройки ядра
+            sudo ./install-centos.sh
+            ```
+            ```powershell
+            # Windows: ставит службу, открывает порт в брандмауэре
+            powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+            ```
 
             | Архив | Что это | Требования на хосте |
             |---|---|---|
-            | `twamp-server-*-framework.tar.gz` | сервер, маленький | .NET 10 Runtime (ASP.NET Core) |
-            | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный | нет — распаковал и запустил |
-            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба (Go)** для Linux — один статический бинарник ~6 МБ | нет; для TWampy — Python 3.8+ |
+            | `twamp-server-*-linux-x64-framework.tar.gz` | сервер для Linux, маленький | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-server-*-linux-x64-selfcontained.tar.gz` | сервер для Linux, самодостаточный | нет — распаковал и запустил |
+            | `twamp-server-*-windows-x64-framework.zip` | сервер для Windows, маленький | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-server-*-windows-x64-selfcontained.zip` | сервер для Windows, самодостаточный | нет — распаковал и запустил |
+            | `twamp-probe-go-*-linux-x64.tar.gz` | **проба (Go)** для Linux — один статический бинарник, twping в комплекте | нет; для TWampy — Python 3.8+ |
             | `twamp-probe-go-*-windows-x64.zip` | **проба (Go)** для Windows | нет; для TWampy — Python 3.8+ |

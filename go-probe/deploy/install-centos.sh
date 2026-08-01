@@ -22,6 +22,12 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 echo "=== 1. Файлы пробы → $DEST"
+# Работающую службу надо остановить: иначе копирование поверх запущенного
+# файла падает с «Text file busy», и обновление версии не проходит.
+if systemctl is-active --quiet twamp-probe 2>/dev/null; then
+    echo "    останавливаем работающую службу"
+    systemctl stop twamp-probe
+fi
 mkdir -p "$DEST"
 # Конфигурацию не затираем: на работающей пробе там свои настройки.
 if [ -f "$DEST/appsettings.json" ]; then
@@ -43,7 +49,10 @@ echo "    диапазон портов    = $(cat /proc/sys/net/ipv4/ip_local_p
 echo "=== 3. Служба systemd"
 install -m 0644 "$SRC/twamp-probe.service" /etc/systemd/system/twamp-probe.service
 systemctl daemon-reload
-systemctl enable --now twamp-probe
+systemctl enable twamp-probe >/dev/null
+# Именно restart: при обновлении версии служба уже работает, и «--now»
+# оставил бы в памяти старый процесс.
+systemctl restart twamp-probe
 sleep 2
 
 echo "=== 4. Результат"

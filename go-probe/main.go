@@ -16,12 +16,10 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -44,6 +42,10 @@ var (
 )
 
 func main() {
+	// Служба Windows стартует в System32 — сначала переходим к своим файлам,
+	// иначе не найдётся даже appsettings.json.
+	prepareServiceEnvironment()
+
 	// Конфигурация читается до настройки журнала (в ней его параметры),
 	// поэтому об ошибке на этом шаге сообщаем напрямую в stderr.
 	cfg, err := LoadConfig("appsettings.json")
@@ -83,8 +85,13 @@ func main() {
 		"уровень_журнала", cfg.Log.Level,
 		"журнал", filepath.Join(cfg.Log.Dir, cfg.Log.FileName))
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Остановка приходит по-разному: сигналом на Unix и командой диспетчера
+	// служб на Windows. Платформенная обёртка прячет эту разницу.
+	ctx, stop := shutdownContext()
 	defer stop()
+	// Пока проба обрывает зонды и сохраняет результаты, службе Windows рано
+	// сообщать диспетчеру, что она остановлена.
+	defer markProbeFinished()
 
 	results := NewResultStore(cfg.MaxPendingResults, cfg.PersistIntervalSec)
 	results.Load()

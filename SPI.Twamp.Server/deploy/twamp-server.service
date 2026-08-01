@@ -1,0 +1,32 @@
+[Unit]
+Description=SPI TWamp Server
+Documentation=https://github.com/akprof2000/twamp-probe
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=twamp
+Group=twamp
+WorkingDirectory=/opt/twamp-server
+ExecStart=/opt/twamp-server/SPI.Twamp.Server
+Restart=always
+RestartSec=5
+
+# Сервер держит по соединению на каждую пробу (длинный опрос), плюс база
+# LiteDB, файлы буфера ClickHouse и веб-интерфейс.
+LimitNOFILE=1048576
+
+# Остановку не торопим: перед выходом сервер дописывает буфер результатов,
+# чтобы ничего не потерять по дороге в ClickHouse.
+TimeoutStopSec=60
+KillSignal=SIGTERM
+
+# Каталог рабочий, но системные пути сервер не трогает.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
