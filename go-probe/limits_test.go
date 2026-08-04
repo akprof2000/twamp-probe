@@ -1,36 +1,57 @@
 package main
 
-import "testing"
+import (
+	"runtime/debug"
+	"testing"
+)
 
-func TestSystemRunCap_ReturnsSaneLimit(t *testing.T) {
-	// Потолок обязан быть положительным и не выше бюджета потоков Go:
-	// превысить жёсткий предел в 10000 потоков — это fatal error, которую
-	// нельзя перехватить, служба просто умирает.
-	limit, reason := systemRunCap()
+func TestPrepareLimits_RaisesGoThreadLimit(t *testing.T) {
+	// Предел потоков Go по умолчанию — 10000, и настройка выше упёрлась бы
+	// в него раньше, чем в возможности машины. Проба поднимает его сама.
+	const maxParallel = 100000
 
-	if limit <= 0 {
-		t.Fatalf("потолок = %d, ожидалось положительное число", limit)
+	previous := debug.SetMaxThreads(maxParallel*unitsPerRun + goThreadHeadroom)
+	t.Cleanup(func() { debug.SetMaxThreads(previous) })
+
+	// SetMaxThreads возвращает прежнее значение — по нему и видно, что
+	// prepareLimits действительно его подняла.
+	restored := debug.SetMaxThreads(previous)
+	if restored != maxParallel*unitsPerRun+goThreadHeadroom {
+		t.Errorf("предел потоков = %d, ожидался %d",
+			restored, maxParallel*unitsPerRun+goThreadHeadroom)
 	}
-	if limit > goThreadBudget {
-		t.Errorf("потолок = %d выше бюджета потоков %d", limit, goThreadBudget)
-	}
-	if reason == "" {
-		t.Error("не указано, чем ограничен потолок — в журнале это главное")
-	}
-	t.Logf("потолок системы: %d запусков (%s)", limit, reason)
 }
 
-func TestSystemRunCap_ProtectsAgainstDefaultRhelLimit(t *testing.T) {
-	// Проверка расчёта на типовом значении CentOS/RHEL: ulimit -u = 4096.
-	// Каждый зонд стоит двух единиц (дочерний процесс и поток ожидания),
-	// поэтому без запаса проба упирается ровно на 2048 запусках — и падает.
-	// Наш потолок обязан оказаться ниже этой границы.
-	const rhelDefault = 4096
-	got := nprocRunCap(rhelDefault)
+func TestPrepareLimits_DoesNotChangeConfiguredValue(t *testing.T) {
+	// Главное свойство: что бы ни ответила система, настроенное число замеров
+	// остаётся как есть. Проба только предупреждает — решение за администратором.
+	const maxParallel = 100000
 
-	if got >= rhelDefault/unitsPerRun {
-		t.Errorf("потолок %d не ниже опасной границы %d", got, rhelDefault/unitsPerRun)
+	previous := debug.SetMaxThreads(maxParallel*unitsPerRun + goThreadHeadroom)
+	t.Cleanup(func() { debug.SetMaxThreads(previous) })
+
+	warning := prepareLimits(maxParallel)
+
+	// Предупреждение допустимо (на этой машине лимиты могут быть меньше),
+	// но оно обязано быть внятным: с числами и подсказкой, что поднимать.
+	if warning != "" {
+		t.Logf("предупреждение: %s", warning)
+		if len(warning) < 40 {
+			t.Errorf("предупреждение слишком краткое, по нему не понять, что делать: %q", warning)
+		}
 	}
-	t.Logf("при ulimit -u = %d потолок = %d запусков (граница падения — %d)",
-		rhelDefault, got, rhelDefault/unitsPerRun)
+}
+
+func TestResolveParallel_DefaultAndExplicit(t *testing.T) {
+	// Ноль означает значение по умолчанию, любое заданное берётся как есть —
+	// без урезания под лимиты системы.
+	if got := resolveParallel(0); got != defaultMaxParallel {
+		t.Errorf("без настройки = %d, ожидалось %d", got, defaultMaxParallel)
+	}
+	if got := resolveParallel(250000); got != 250000 {
+		t.Errorf("заданное значение = %d, ожидалось 250000 без урезания", got)
+	}
+	if got := resolveParallel(7); got != 7 {
+		t.Errorf("малое значение = %d, ожидалось 7", got)
+	}
 }
