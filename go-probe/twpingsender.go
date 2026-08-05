@@ -54,5 +54,22 @@ func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (
 	if extra := strings.TrimSpace(errOut.String()); extra != "" {
 		message += ": " + extra
 	}
-	return output, message
+	return output, message + portExhaustionHint(message)
+}
+
+// portExhaustionHint добавляет подсказку, когда замеры упёрлись в эфемерные
+// порты. Сама ошибка ядра об этом не говорит: «address already in use» при
+// привязке к порту 0 выглядит как конфликт, хотя означает, что свободных
+// портов в диапазоне не осталось.
+//
+// Каждый замер TWAMP занимает два порта — TCP для управляющего соединения и
+// UDP для тестового, — поэтому штатные 32768–60999 (около 28 тысяч) кончаются
+// на нескольких тысячах одновременных замеров.
+func portExhaustionHint(message string) string {
+	if !strings.Contains(message, "address already in use") {
+		return ""
+	}
+	return ". Похоже, закончились свободные порты: каждый замер занимает два. " +
+		"Расширьте диапазон (sysctl net.ipv4.ip_local_port_range = 1024 65535 — " +
+		"он есть в 99-twamp-probe.conf из пакета) или уменьшите Probe:MaxParallel"
 }

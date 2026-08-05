@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"sync"
 )
 
@@ -73,6 +75,37 @@ func (d *Dispatcher) Enqueue(task *TaskInfo) {
 	}
 }
 
+// runTask выполняет одну задачу и освобождает всё, что она заняла.
+//
+// Паника внутри зонда не должна уносить с собой службу. Замер идёт в общем
+// процессе — и во встроенном режиме это код измерительной библиотеки, и в
+// внешнем это разбор чужого вывода; ошибка в любом из них убила бы пробу
+// целиком вместе с недоставленными результатами и всеми остальными задачами.
+// Поэтому паника здесь превращается в запись в журнале: одна задача пропала,
+// остальные продолжают работать.
+func (d *Dispatcher) runTask(task *TaskInfo) {
+	defer func() {
+		if reason := recover(); reason != nil {
+			logDispatcher.Error("Задача упала с паникой — остальные продолжают работу",
+				"задача", task.Id, "название", task.Title, "узел", task.EndNode,
+				"режим", task.Mode, "причина", reason,
+				"стек", string(debug.Stack()))
+			d.registry.ReportOutcome(task.Id, OutcomeExitCodeError, nil,
+				fmt.Sprintf("Внутренняя ошибка зонда: %v", reason))
+		}
+
+		// Освобождение — в defer: иначе паника оставила бы занятый слот
+		// ограничителя и вечную пометку «задача выполняется».
+		d.registry.MarkFinished(task.Id)
+		d.limiter.Release()
+		d.active.Delete(task.Id) // задача свободна — следующее срабатывание пройдёт
+	}()
+
+	// Фиксируем начало и конец выполнения — это видно в TaskStatus.
+	d.registry.MarkStarted(task)
+	d.runner.RunForNodes(d.ctx, task)
+}
+
 // workerLoop — рабочий цикл: берёт задачи из очереди и выполняет их.
 func (d *Dispatcher) workerLoop() {
 	for {
@@ -85,14 +118,7 @@ func (d *Dispatcher) workerLoop() {
 			if !d.limiter.Acquire(d.ctx) {
 				return // служба останавливается
 			}
-
-			// Фиксируем начало и конец выполнения — это видно в TaskStatus.
-			d.registry.MarkStarted(task)
-			d.runner.RunForNodes(d.ctx, task)
-			d.registry.MarkFinished(task.Id)
-
-			d.limiter.Release()
-			d.active.Delete(task.Id) // задача свободна — следующее срабатывание пройдёт
+			d.runTask(task)
 		}
 	}
 }

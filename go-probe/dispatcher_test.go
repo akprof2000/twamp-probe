@@ -117,3 +117,81 @@ func TestDispatcher_DifferentTasksRunInParallel(t *testing.T) {
 	}
 	close(runner.release)
 }
+
+// panicRunner — исполнитель, который падает с паникой на заданной задаче.
+type panicRunner struct {
+	panicOn string
+	started chan string
+}
+
+func (r *panicRunner) RunForNodes(_ context.Context, task *TaskInfo) {
+	r.started <- task.Id
+	if task.Id == r.panicOn {
+		panic("зонд сломался посреди замера")
+	}
+}
+
+func TestDispatcher_PanicInProbeDoesNotKillService(t *testing.T) {
+	// Паника в зонде — например, в измерительной библиотеке — раньше уносила
+	// с собой всю службу: недоставленные результаты и все остальные задачи.
+	// Теперь она гасится на уровне задачи, и проба продолжает работать.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runner := &panicRunner{panicOn: "падучая", started: make(chan string, 4)}
+	d := newTestDispatcher(ctx, runner, 2)
+
+	d.Enqueue(&TaskInfo{Id: "падучая", Title: "сломанный зонд", EndNode: "10.0.0.1", Circles: 1, Repeats: 1})
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("падучая задача не дошла до исполнителя")
+	}
+
+	// Служба жива: следующая задача выполняется как ни в чём не бывало.
+	d.Enqueue(&TaskInfo{Id: "обычная", Title: "рабочий зонд", EndNode: "10.0.0.2", Circles: 1, Repeats: 1})
+	select {
+	case id := <-runner.started:
+		if id != "обычная" {
+			t.Errorf("выполнилась задача %s, ожидалась «обычная»", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("после паники проба перестала брать задачи")
+	}
+}
+
+func TestDispatcher_PanicReleasesSlotAndMark(t *testing.T) {
+	// Паника не должна оставлять за собой занятый слот ограничителя и вечную
+	// пометку «задача выполняется»: иначе после нескольких падений проба
+	// перестала бы запускать замеры вовсе.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runner := &panicRunner{panicOn: "падучая", started: make(chan string, 8)}
+	limiter := NewAdaptiveLimiter(2, 1, 2)
+	d := NewDispatcher(ctx, 2, 100, runner, NewRunRegistry(), limiter)
+
+	for range 3 { // одна и та же задача падает несколько раз подряд
+		d.Enqueue(&TaskInfo{Id: "падучая", Title: "сломанный зонд", EndNode: "10.0.0.1", Circles: 1, Repeats: 1})
+		select {
+		case <-runner.started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("задача не запустилась — слот или пометка остались занятыми после паники")
+		}
+		// Ждём, пока диспетчер снимет пометку занятости.
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if _, busy := d.active.Load("падучая"); !busy {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("пометка занятости не снята после паники")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if left := limiter.InFlight(); left != 0 {
+		t.Errorf("после паник занято слотов: %d, ожидалось 0", left)
+	}
+}

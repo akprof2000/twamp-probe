@@ -171,3 +171,19 @@ func TestEmbeddedTwping_RespectsTaskTimeout(t *testing.T) {
 		t.Errorf("замер шёл %v — таймаут не сработал вовремя", elapsed)
 	}
 }
+
+func TestPortExhaustionHint(t *testing.T) {
+	// «address already in use» при привязке к порту 0 означает не конфликт,
+	// а исчерпание эфемерных портов. Без подсказки это уводит в сторону:
+	// на боевой пробе такая ошибка шла тысячами и выглядела необъяснимо.
+	got := portExhaustionHint("Ошибка встроенного twping: не удалось открыть тестовый сокет: " +
+		"listen udp4 10.123.20.142:0: bind: address already in use")
+	if !strings.Contains(got, "ip_local_port_range") {
+		t.Errorf("подсказка не называет, что чинить: %q", got)
+	}
+
+	// Прочие ошибки подсказкой не засоряем.
+	if got := portExhaustionHint("Ошибка встроенного twping: сервер отклонил сессию"); got != "" {
+		t.Errorf("подсказка добавлена к посторонней ошибке: %q", got)
+	}
+}
