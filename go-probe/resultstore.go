@@ -198,5 +198,14 @@ func (s *ResultStore) flush() {
 	}
 }
 
+// PendingCount сообщает, сколько результатов ждёт отправки серверу.
+// Число видно в веб-интерфейсе: растущая очередь означает, что сервер
+// перестал их забирать.
+func (s *ResultStore) PendingCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.pending)
+}
+
 // Close останавливает фоновый цикл и делает финальный снимок.
 func (s *ResultStore) Close() { close(s.stop) }

@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using Microsoft.AspNetCore.Mvc;
 using NLog;
@@ -150,6 +150,25 @@ namespace SPI.Twamp.Server.Controllers
                 (string.IsNullOrEmpty(title) ? "" : $"&title={Uri.EscapeDataString(title)}") +
                 (string.IsNullOrEmpty(outcome) ? "" : $"&outcome={Uri.EscapeDataString(outcome)}");
             string json = await _probeClient.GetTaskStatusRawAsync(probe, query, cancellationToken);
+            return Content(json, "application/json");
+        }
+
+        /// <summary>
+        /// Возвращает состояние пробы: каким путём идут замеры (встроенный зонд
+        /// или внешняя утилита), сколько их сейчас и каков предел, что с пулом
+        /// локальных портов и очередью недоставленных результатов.
+        /// <para>
+        /// Это то, что иначе видно только в журнале самой пробы: например,
+        /// нехватка портов или предел, снизившийся из-за памяти.
+        /// </para>
+        /// </summary>
+        /// <param name="probe">Адрес пробы (RequestInfo).</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        [HttpGet("[action]")]
+        public async Task<ActionResult> ProbeState(
+            [FromQuery][Required] string probe, CancellationToken cancellationToken = default)
+        {
+            string json = await _probeClient.GetProbeStateRawAsync(probe, cancellationToken);
             return Content(json, "application/json");
         }
 

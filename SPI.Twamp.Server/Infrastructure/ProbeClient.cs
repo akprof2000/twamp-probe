@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using Flurl;
 using Flurl.Http;
@@ -89,5 +89,11 @@ namespace SPI.Twamp.Server.Infrastructure
             }
             return request.GetAsync(cancellationToken: cancellationToken).ReceiveString();
         }
+
+        /// <inheritdoc/>
+        public Task<string> GetProbeStateRawAsync(string probeUrl, CancellationToken cancellationToken) =>
+            Request(probeUrl, "api/ProbeInterface/ProbeState")
+                .GetAsync(cancellationToken: cancellationToken)
+                .ReceiveString();
     }
 }

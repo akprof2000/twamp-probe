@@ -30,6 +30,7 @@
 | GET | `/api/userinterface/probestatus` | статус связи, версия, число задач по каждой пробе |
 | GET | `/api/userinterface/clickhousestatus` | состояние переноса измерений в ClickHouse: связь с базой, очередь буфера, счётчики выгруженного |
 | GET | `/api/userinterface/probetaskstatus?probe=…` | живой статус выполнения задач на пробе (запущена ли, следующий запуск, ошибка) |
+| GET | `/api/userinterface/probestate?probe=…` | состояние пробы: каким путём идут замеры (встроенный зонд или внешняя утилита), сколько их сейчас и каков предел, пул локальных портов, очередь недоставленных результатов |
 | GET | `/api/userinterface/lastresults` | последние результаты по задачам (момент + признак ошибки) |
 | GET | `/api/userinterface/waitchanges?version=N` | длинный опрос изменений (до 25 с): ответ сразу при изменении задач/результатов/проб |
 | GET | `/api/userinterface/taskspage?skip&take&title&probe&node&type&status&outcome&error` | страница задач с фильтрами по всем столбцам |
@@ -58,6 +59,7 @@
 | GET | `/api/probeinterface/taskids` | идентификаторы задач, известных пробе (для сверки) |
 | GET | `/api/probeinterface/tasks` | полные определения задач по расписанию (сервер забирает для восстановления БД после потери данных) |
 | GET | `/api/probeinterface/taskstatus` | состояние выполнения задач (running, старт/финиш, следующий запуск, ошибка) |
+| GET | `/api/probeinterface/probestate` | снимок состояния пробы: предел и число идущих замеров, режимы зондов, пул портов, очередь результатов |
 | GET | `/api/probeinterface/checkdata` | длинный опрос: пачка результатов с `batchId` |
 | POST | `/api/probeinterface/confirmdata?batchId=…` | подтвердить запись пачки (проба удаляет её) |
 

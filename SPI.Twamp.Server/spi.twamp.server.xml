@@ -243,6 +243,16 @@
             <param name="query">Строка запроса с фильтрами и пагинацией (без «?»), может быть пустой.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Abstractions.IProbeClient.GetProbeStateRawAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Возвращает состояние пробы как есть: каким путём идут замеры
+            (встроенный зонд или внешняя утилита), сколько их сейчас, что
+            с пулом портов и очередью результатов.
+            </summary>
+            <param name="probeUrl">Адрес пробы.</param>
+            <param name="cancellationToken">Токен отмены.</param>
+            <returns>JSON состояния пробы.</returns>
+        </member>
         <member name="T:SPI.Twamp.Server.Abstractions.IProbePoller">
             <summary>
             Управление фоновым опросом проб. Позволяет запустить опрос вновь
@@ -2328,6 +2338,19 @@
             <param name="outcome">Фильтр по исходу запуска.</param>
             <param name="cancellationToken">Токен отмены.</param>
         </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ProbeState(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Возвращает состояние пробы: каким путём идут замеры (встроенный зонд
+            или внешняя утилита), сколько их сейчас и каков предел, что с пулом
+            локальных портов и очередью недоставленных результатов.
+            <para>
+            Это то, что иначе видно только в журнале самой пробы: например,
+            нехватка портов или предел, снизившийся из-за памяти.
+            </para>
+            </summary>
+            <param name="probe">Адрес пробы (RequestInfo).</param>
+            <param name="cancellationToken">Токен отмены.</param>
+        </member>
         <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ProbeStatus">
             <summary>
             Возвращает состояние всех проб: связь (последний успешный опрос, ошибки,
@@ -2727,6 +2750,9 @@
             <inheritdoc/>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetTaskStatusRawAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <inheritdoc/>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ProbeClient.GetProbeStateRawAsync(System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.ResultSpool">

@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using SPI.Twamp.Server.Contracts;
 
@@ -64,5 +64,15 @@ namespace SPI.Twamp.Server.Abstractions
         /// <param name="query">Строка запроса с фильтрами и пагинацией (без «?»), может быть пустой.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         Task<string> GetTaskStatusRawAsync(string probeUrl, string query, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Возвращает состояние пробы как есть: каким путём идут замеры
+        /// (встроенный зонд или внешняя утилита), сколько их сейчас, что
+        /// с пулом портов и очередью результатов.
+        /// </summary>
+        /// <param name="probeUrl">Адрес пробы.</param>
+        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <returns>JSON состояния пробы.</returns>
+        Task<string> GetProbeStateRawAsync(string probeUrl, CancellationToken cancellationToken);
     }
 }

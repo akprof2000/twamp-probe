@@ -131,7 +131,8 @@ func main() {
 	tracker := NewContactTracker()
 	go RunWatchdog(ctx, cfg.ServerTimeoutHours, tracker, tasks, results)
 
-	api := &apiServer{cfg: cfg, results: results, tasks: tasks, runReg: runReg, tracker: tracker}
+	api := &apiServer{cfg: cfg, results: results, tasks: tasks, runReg: runReg,
+		tracker: tracker, limiter: limiter, ports: ports}
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.routes()}
 
 	go func() {
@@ -204,6 +205,8 @@ type apiServer struct {
 	tasks   *TaskRegistry
 	runReg  *RunRegistry
 	tracker *ContactTracker
+	limiter *AdaptiveLimiter // текущий предел и число идущих замеров
+	ports   *PortPool        // состояние пула локальных портов
 }
 
 // routes собирает маршруты. ASP.NET сопоставляет пути регистронезависимо,
@@ -215,6 +218,7 @@ func (a *apiServer) routes() http.Handler {
 	mux.HandleFunc("GET /api/probeinterface/taskids", a.taskIds)
 	mux.HandleFunc("GET /api/probeinterface/tasks", a.tasksFull)
 	mux.HandleFunc("GET /api/probeinterface/taskstatus", a.taskStatus)
+	mux.HandleFunc("GET /api/probeinterface/probestate", a.probeState)
 	mux.HandleFunc("GET /api/probeinterface/checkdata", a.checkData)
 	mux.HandleFunc("POST /api/probeinterface/confirmdata", a.confirmData)
 
@@ -380,4 +384,54 @@ func firstInterface() (ip, mac, name string) {
 		}
 	}
 	return
+}
+
+// ProbeState — текущее состояние пробы для веб-интерфейса сервера.
+//
+// Отвечает на вопросы, которые иначе видны только в журнале самой пробы:
+// каким путём идут замеры (встроенный зонд или внешняя утилита), сколько их
+// сейчас и упирается ли проба в предел или в порты.
+type ProbeState struct {
+	Version string `json:"version"`
+
+	// Замеры: текущий предел, сколько идёт и потолок из настройки.
+	Running     int `json:"running"`
+	Limit       int `json:"limit"`
+	MaxParallel int `json:"maxParallel"`
+
+	// Каким путём выполняются режимы: true — встроенным зондом, без процесса.
+	TwampEmbedded  bool `json:"twampEmbedded"`
+	TwampyEmbedded bool `json:"twampyEmbedded"`
+
+	// Пул локальных портов (диапазон пуст — порты выбирает ядро).
+	PortRange   string `json:"portRange"`
+	PortsFree   int    `json:"portsFree"`
+	PortsTaken  int    `json:"portsTaken"`
+	PortsBanned int    `json:"portsBanned"`
+	PortsWaited int    `json:"portsWaited"`
+
+	// Очереди.
+	QueueCapacity  int `json:"queueCapacity"`
+	PendingResults int `json:"pendingResults"`
+}
+
+// probeState отдаёт снимок состояния пробы.
+func (a *apiServer) probeState(w http.ResponseWriter, r *http.Request) {
+	state := ProbeState{
+		Version:        probeVersion,
+		Running:        a.limiter.InFlight(),
+		Limit:          a.limiter.Limit(),
+		MaxParallel:    a.cfg.MaxParallel,
+		TwampEmbedded:  a.cfg.TwampEmbedded,
+		TwampyEmbedded: a.cfg.TwampyEmbedded,
+		QueueCapacity:  a.cfg.QueueCapacity,
+		PendingResults: a.results.PendingCount(),
+	}
+
+	if from, to := a.ports.Range(); from > 0 {
+		state.PortRange = fmt.Sprintf("%d-%d", from, to)
+		state.PortsFree, state.PortsTaken, state.PortsBanned, state.PortsWaited = a.ports.Stats()
+	}
+
+	writeJSON(w, state)
 }

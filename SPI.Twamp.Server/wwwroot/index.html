@@ -64,6 +64,7 @@
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgStatus"></div>
+    <div id="probeState" style="display:none;margin-top:12px"></div>
   </div>
   <div class="card" id="cardProbeTasks" style="display:none">
     <h2>Выполнение задач на пробе <span id="probeTasksAddr" style="color:var(--mut);font-weight:400"></span></h2>
@@ -383,6 +384,7 @@ function renderProbes() {
     <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
     <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
     <td><button class="act" onclick="loadProbeTasks(this,'${esc(p.requestInfo)}')">задачи</button>
+        <button class="act" onclick="withBusy(this,()=>showProbeState('${esc(p.requestInfo)}'))">состояние</button>
         <button class="act" onclick="renameProbe('${esc(p.requestInfo)}','${esc(p.name)}')">имя</button>
         <button class="act" onclick="removeProbe('${esc(p.requestInfo)}')">удалить</button></td></tr>`).join('')
     || `<tr><td colspan="10">${probesCache.length ? 'ничего не найдено по фильтру' : 'пробы не подключены'}</td></tr>`;
@@ -390,6 +392,45 @@ function renderProbes() {
     ? `показано ${rows.length} из ${probesCache.length}`
     : `всего проб: ${probesCache.length}`;
 }
+// Состояние пробы: каким путём идут замеры, сколько их сейчас и что с портами.
+// Эти величины иначе видны только в журнале самой пробы, а понадобиться могут
+// в тот момент, когда замеры перестали идти и надо понять почему.
+async function showProbeState(requestInfo) {
+  const box = $('#probeState');
+  try {
+    const d = await jget('probestate?probe=' + encodeURIComponent(requestInfo));
+
+    // Каким путём выполняются режимы: встроенный зонд не занимает ни процесса,
+    // ни потока, поэтому предел одновременных замеров на него не действует.
+    const way = e => e
+      ? '<span class="ok">встроенный зонд</span>'
+      : 'внешняя утилита';
+
+    const ports = d.portRange
+      ? `${escHtml(d.portRange)}: свободно ${d.portsFree}, занято ${d.portsTaken}`
+        + (d.portsBanned ? `, исключено ${d.portsBanned}` : '')
+        + (d.portsWaited ? `, ожиданий ${d.portsWaited}` : '')
+      : 'выбирает ядро (Probe:PortRange не задан)';
+
+    box.innerHTML = `<h2 style="font-size:14px">Состояние пробы ${escHtml(requestInfo)}
+        <button class="del" style="float:right" onclick="$('#probeState').style.display='none'">закрыть</button></h2>
+      <table><tbody>
+        <tr><td>Версия</td><td>${escHtml(d.version)}</td></tr>
+        <tr><td>Замеров идёт сейчас</td><td><b>${d.running}</b> при пределе ${d.limit}
+            (потолок из настройки ${d.maxParallel})</td></tr>
+        <tr><td>Режим TWamp</td><td>${way(d.twampEmbedded)}</td></tr>
+        <tr><td>Режим TWampy</td><td>${way(d.twampyEmbedded)}</td></tr>
+        <tr><td>Локальные порты зондов</td><td>${ports}</td></tr>
+        <tr><td>Очередь задач</td><td>ёмкость ${d.queueCapacity}</td></tr>
+        <tr><td>Результатов ждёт отправки</td><td>${d.pendingResults}</td></tr>
+      </tbody></table>`;
+    box.style.display = '';
+  } catch (e) {
+    box.innerHTML = '<b>Не удалось получить состояние пробы:</b> ' + escHtml(e.message);
+    box.style.display = '';
+  }
+}
+
 // Переименование пробы: SetInfoClient обновляет существующую запись по адресу.
 async function renameProbe(requestInfo, currentName) {
   const name = prompt('Новое имя пробы ' + requestInfo + ':', currentName || '');
