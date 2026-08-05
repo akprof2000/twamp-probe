@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 )
@@ -176,10 +177,37 @@ func TestWithLocalPort(t *testing.T) {
 		t.Errorf("диапазон задачи заменён: %v", own)
 	}
 
+	// near-end не задан — добавляем «:порт» сразу за адресом рефлектора.
 	twampy := withLocalPort(ModeTWampy,
 		[]string{"-m", "twampy", "sender", "10.0.0.1", "-c", "10"}, 20006)
 	if len(twampy) < 5 || twampy[4] != ":20006" {
 		t.Errorf("twampy получил %v, ожидался near-end :20006 после узла", twampy)
+	}
+
+	// near-end задан задачей: порт дописывается к нему, а не вставляется
+	// отдельным аргументом — иначе адрес съехал бы на третью позицию и замер
+	// пошёл бы не с того интерфейса.
+	withNear := withLocalPort(ModeTWampy,
+		[]string{"-m", "twampy", "sender", "10.93.47.146:5018", "10.123.20.140",
+			"-c", "150", "-i", "1000"}, 20006)
+	want := []string{"-m", "twampy", "sender", "10.93.47.146:5018", "10.123.20.140:20006",
+		"-c", "150", "-i", "1000"}
+	if !slices.Equal(withNear, want) {
+		t.Errorf("получено %v, ожидалось %v", withNear, want)
+	}
+
+	// Задача указала и адрес, и порт — её выбор важнее.
+	ownPort := withLocalPort(ModeTWampy,
+		[]string{"-m", "twampy", "sender", "10.0.0.1", "10.123.20.140:5000"}, 20006)
+	if ownPort[4] != "10.123.20.140:5000" {
+		t.Errorf("порт задачи заменён: %v", ownPort)
+	}
+
+	// IPv6 в скобках: двоеточия внутри адреса за порт не считаются.
+	v6 := withLocalPort(ModeTWampy,
+		[]string{"-m", "twampy", "sender", "[2001:db8::1]:5018", "[2001:db8::2]"}, 20006)
+	if v6[4] != "[2001:db8::2]:20006" {
+		t.Errorf("IPv6 near-end получил %q, ожидался [2001:db8::2]:20006", v6[4])
 	}
 
 	// Для ping локальный порт бессмыслен.

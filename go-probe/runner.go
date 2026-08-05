@@ -198,18 +198,51 @@ func withLocalPort(mode TaskMode, args []string, port int) []string {
 		return append([]string{"-P", fmt.Sprintf("%d-%d", port, port)}, args...)
 
 	case ModeTWampy:
-		// «… sender <far-end> [near-end] [опции]» — near-end идёт сразу за узлом.
-		idx := indexOf(args, "sender")
-		if idx < 0 || idx+1 >= len(args) {
-			return args
-		}
-		nearEnd := fmt.Sprintf(":%d", port)
-		if idx+2 < len(args) && strings.HasPrefix(args[idx+2], ":") {
-			return args // near-end уже задан
-		}
-		return slices.Insert(slices.Clone(args), idx+2, nearEnd)
+		return withTwampyNearEnd(args, port)
 	}
 	return args
+}
+
+// withTwampyNearEnd задаёт локальный адрес отправителя в вызове twampy.
+//
+// Формат: «sender <far-end> [near-end] [опции]». Возможны два случая:
+//
+//   - near-end задан задачей (например «10.123.20.140») — тогда порт
+//     дописывается к нему: «10.123.20.140:20006». Вставлять порт отдельным
+//     аргументом здесь нельзя: адрес задачи съехал бы на третью позицию,
+//     где twampy его уже не ждёт, и замер пошёл бы не с того интерфейса;
+//   - near-end не задан — добавляем «:порт» сразу за far-end.
+func withTwampyNearEnd(args []string, port int) []string {
+	idx := indexOf(args, "sender")
+	if idx < 0 {
+		return args
+	}
+
+	far := idx + 1 // адрес рефлектора
+	if far >= len(args) || strings.HasPrefix(args[far], "-") {
+		return args // вызов не похож на «sender <адрес>» — не вмешиваемся
+	}
+
+	near := far + 1
+	if near < len(args) && !strings.HasPrefix(args[near], "-") {
+		if hasPort(args[near]) {
+			return args // задача указала и адрес, и порт — её выбор важнее
+		}
+		out := slices.Clone(args)
+		out[near] = fmt.Sprintf("%s:%d", args[near], port)
+		return out
+	}
+
+	return slices.Insert(slices.Clone(args), near, fmt.Sprintf(":%d", port))
+}
+
+// hasPort сообщает, указан ли в адресе порт. Для IPv6 в квадратных скобках
+// («[::1]:20001») двоеточия внутри адреса не считаются.
+func hasPort(addr string) bool {
+	if end := strings.LastIndex(addr, "]"); end >= 0 {
+		return strings.Contains(addr[end:], ":")
+	}
+	return strings.Contains(addr, ":")
 }
 
 // portTaken распознаёт отказ ядра «порт уже занят».
