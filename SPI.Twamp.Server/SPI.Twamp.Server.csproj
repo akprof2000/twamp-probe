@@ -20,6 +20,7 @@
     <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.9" />
+    <PackageReference Include="NCrontab" Version="3.4.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="NLog.Extensions.Logging" Version="6.1.4" />
     <PackageReference Include="NLog.Web.AspNetCore" Version="6.1.4" />

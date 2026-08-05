@@ -394,11 +394,17 @@
             <summary>
             Загружает файл шаблонов (CSV с заголовками, «;») в набор с указанным именем.
             Повторная загрузка с тем же именем обновляет набор; другие наборы не трогаются.
+            <para>
+            Файл проверяется целиком до записи: если хотя бы одна строка неверна,
+            набор не загружается вовсе, а ошибки возвращаются оператору. Частично
+            загруженный набор хуже незагруженного — по нему создались бы задачи,
+            которые молча не работают.
+            </para>
             </summary>
             <param name="csv">Поток с содержимым CSV.</param>
             <param name="setName">Имя набора (по умолчанию — имя файла).</param>
             <param name="cancellationToken">Токен отмены.</param>
-            <returns>Число загруженных шаблонов.</returns>
+            <returns>Число загруженных шаблонов и список ошибок (при ошибках набор не изменён).</returns>
         </member>
         <member name="M:SPI.Twamp.Server.Abstractions.IProvisioningService.GetTemplatesAsync">
             <summary>Возвращает все шаблоны всех наборов.</summary>
@@ -898,6 +904,9 @@
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.UploadTemplatesAsync(System.IO.Stream,System.String,System.Threading.CancellationToken)">
             <inheritdoc/>
         </member>
+        <member name="M:SPI.Twamp.Server.Application.ProvisioningService.FirstLine(System.String)">
+            <summary>Первая строка сообщения об ошибке: CsvHelper выдаёт их многострочными.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Application.ProvisioningService.GetTemplatesAsync">
             <inheritdoc/>
         </member>
@@ -1044,6 +1053,33 @@
         </member>
         <member name="M:SPI.Twamp.Server.Application.TaskService.TryPushAsync(System.String,System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.TaskInfo},System.Threading.CancellationToken)">
             <summary>Пытается передать пробе изменения; при недоступности пробы только логирует.</summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Application.TemplateValidator">
+            <summary>
+            Проверка шаблонов задач перед загрузкой.
+            <para>
+            Раньше файл принимался почти без разбора: строки без адреса пробы молча
+            отбрасывались, а всё остальное — неверный cron, несуществующий режим,
+            нулевое число повторов — доезжало до задач и обнаруживалось уже на пробе,
+            когда замеры не шли. Поэтому проверка идёт до записи: набор либо
+            загружается целиком, либо не загружается вовсе, а оператор получает
+            список того, что именно исправить и в какой строке.
+            </para>
+            </summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Application.TemplateValidator.MaxReportedErrors">
+            <summary>Сколько ошибок показывать: дальше список перестаёт быть полезным.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TemplateValidator.Validate(System.Collections.Generic.IReadOnlyList{SPI.Twamp.Server.Contracts.ProbeTemplate})">
+            <summary>
+            Проверяет разобранные шаблоны и возвращает список ошибок.
+            Пустой список означает, что набор можно загружать.
+            </summary>
+            <param name="templates">Шаблоны в том порядке, в каком они шли в файле.</param>
+            <returns>Ошибки с номерами строк CSV.</returns>
+        </member>
+        <member name="M:SPI.Twamp.Server.Application.TemplateValidator.ValidateOne(SPI.Twamp.Server.Contracts.ProbeTemplate,System.Int32,System.Collections.Generic.List{System.String})">
+            <summary>Проверяет один шаблон, дописывая найденное в общий список.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Application.TimeSpec">
             <summary>
@@ -2197,6 +2233,25 @@
             <summary>
             Задача по расписанию (cron).
             </summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Contracts.TemplateUploadResult">
+            <summary>
+            Итог загрузки набора шаблонов.
+            <para>
+            Загрузка «всё или ничего»: при непустом <see cref="P:SPI.Twamp.Server.Contracts.TemplateUploadResult.Errors"/> набор в базе
+            не изменился, и <see cref="P:SPI.Twamp.Server.Contracts.TemplateUploadResult.Loaded"/> равно нулю. Так оператор не получает
+            наполовину применённый набор, по которому часть задач молча не работает.
+            </para>
+            </summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TemplateUploadResult.Loaded">
+            <summary>Сколько шаблонов загружено (0, если файл отклонён).</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TemplateUploadResult.Errors">
+            <summary>Что именно неверно в файле — с номерами строк CSV.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Contracts.TemplateUploadResult.Ok">
+            <summary>Файл принят: ошибок нет.</summary>
         </member>
         <member name="T:SPI.Twamp.Server.Controllers.ProbesController">
             <summary>

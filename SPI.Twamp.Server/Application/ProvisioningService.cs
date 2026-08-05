@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -195,7 +195,8 @@ namespace SPI.Twamp.Server.Application
         }
 
         /// <inheritdoc/>
-        public async Task<int> UploadTemplatesAsync(Stream csv, string setName, CancellationToken cancellationToken)
+        public async Task<TemplateUploadResult> UploadTemplatesAsync(Stream csv, string setName,
+            CancellationToken cancellationToken)
         {
             using StreamReader reader = new(csv, Encoding.UTF8);
 
@@ -209,17 +210,44 @@ namespace SPI.Twamp.Server.Application
                 TrimOptions = TrimOptions.Trim
             };
 
-            using CsvReader csvReader = new(reader, config);
-            ProbeTemplate[] parsed = await csvReader.GetRecordsAsync<ProbeTemplate>(cancellationToken)
-                .ToArrayAsync(cancellationToken);
+            ProbeTemplate[] parsed;
+            try
+            {
+                using CsvReader csvReader = new(reader, config);
+                parsed = await csvReader.GetRecordsAsync<ProbeTemplate>(cancellationToken)
+                    .ToArrayAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Разбор не дошёл до конца: неверный тип в числовой колонке,
+                // неизвестное значение Type/Mode, поехавшие кавычки. Сообщение
+                // CsvHelper содержит номер строки и поле — оно и нужно оператору.
+                _logger.Warn(ex, "Набор шаблонов «{Set}» не загружен: файл не разобрался", setName);
+                return new TemplateUploadResult
+                {
+                    Errors = [$"Файл не удалось разобрать: {FirstLine(ex.Message)}"]
+                };
+            }
 
-            // Шаблон без адреса пробы бесполезен — отбрасываем.
-            ProbeTemplate[] valid = [.. parsed.Where(t => !string.IsNullOrWhiteSpace(t.Probe))];
+            IReadOnlyList<string> errors = TemplateValidator.Validate(parsed);
+            if (errors.Count > 0)
+            {
+                // Набор не трогаем: наполовину применённый хуже незагруженного.
+                _logger.Warn("Набор шаблонов «{Set}» отклонён: {Count} ошибок, первая — {First}",
+                    setName, errors.Count, errors[0]);
+                return new TemplateUploadResult { Errors = errors };
+            }
 
-            await _templates.ReplaceSetAsync(setName, valid);
-            _logger.Info("Набор шаблонов «{Set}»: загружено {Count} (отброшено без адреса пробы: {Bad})",
-                setName, valid.Length, parsed.Length - valid.Length);
-            return valid.Length;
+            await _templates.ReplaceSetAsync(setName, parsed);
+            _logger.Info("Набор шаблонов «{Set}»: загружено {Count}", setName, parsed.Length);
+            return new TemplateUploadResult { Loaded = parsed.Length };
+        }
+
+        /// <summary>Первая строка сообщения об ошибке: CsvHelper выдаёт их многострочными.</summary>
+        private static string FirstLine(string message)
+        {
+            using StringReader lines = new(message);
+            return lines.ReadLine() ?? message;
         }
 
         /// <inheritdoc/>

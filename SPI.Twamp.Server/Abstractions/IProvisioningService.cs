@@ -1,4 +1,4 @@
-// Ignore Spelling: SPI Twamp
+﻿// Ignore Spelling: SPI Twamp
 
 using SPI.Twamp.Server.Contracts;
 
@@ -27,12 +27,18 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>
         /// Загружает файл шаблонов (CSV с заголовками, «;») в набор с указанным именем.
         /// Повторная загрузка с тем же именем обновляет набор; другие наборы не трогаются.
+        /// <para>
+        /// Файл проверяется целиком до записи: если хотя бы одна строка неверна,
+        /// набор не загружается вовсе, а ошибки возвращаются оператору. Частично
+        /// загруженный набор хуже незагруженного — по нему создались бы задачи,
+        /// которые молча не работают.
+        /// </para>
         /// </summary>
         /// <param name="csv">Поток с содержимым CSV.</param>
         /// <param name="setName">Имя набора (по умолчанию — имя файла).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        /// <returns>Число загруженных шаблонов.</returns>
-        Task<int> UploadTemplatesAsync(Stream csv, string setName, CancellationToken cancellationToken);
+        /// <returns>Число загруженных шаблонов и список ошибок (при ошибках набор не изменён).</returns>
+        Task<TemplateUploadResult> UploadTemplatesAsync(Stream csv, string setName, CancellationToken cancellationToken);
 
         /// <summary>Возвращает все шаблоны всех наборов.</summary>
         Task<IReadOnlyList<ProbeTemplate>> GetTemplatesAsync();

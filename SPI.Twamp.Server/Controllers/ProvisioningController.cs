@@ -124,8 +124,22 @@ namespace SPI.Twamp.Server.Controllers
 
             _logger.Info("Загрузка шаблонов из {FileName} в набор «{Set}», размер {Size}", file.FileName, setName, file.Length);
             using Stream stream = file.OpenReadStream();
-            int count = await _provisioningService.UploadTemplatesAsync(stream, setName, cancellationToken);
-            return Ok(new { Set = setName, Templates = count });
+            TemplateUploadResult result = await _provisioningService.UploadTemplatesAsync(stream, setName, cancellationToken);
+
+            if (!result.Ok)
+            {
+                // Набор не изменён: оператор правит файл и загружает заново.
+                // Частично применённый набор хуже — по нему создались бы задачи,
+                // которые молча не работают.
+                return BadRequest(new
+                {
+                    Set = setName,
+                    Message = $"Набор не загружен: в файле {result.Errors.Count} ошибок. Исправьте и загрузите снова.",
+                    result.Errors
+                });
+            }
+
+            return Ok(new { Set = setName, Templates = result.Loaded });
         }
 
         /// <summary>Возвращает все шаблоны всех наборов.</summary>

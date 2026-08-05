@@ -257,7 +257,15 @@ async function jsend(p, method, body, isForm) {
   const opt = { method, headers: hdrs() };
   if (body) { if (isForm) opt.body = body; else { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); } }
   const r = await fetch(api(p), opt);
-  if (!r.ok) throw new Error(r.status + ' ' + await r.text());
+  if (!r.ok) {
+    // Тело ответа сохраняем в ошибке: сервер объясняет в нём, что не так —
+    // например, перечисляет ошибки в файле шаблонов построчно.
+    const text = await r.text();
+    const err = new Error(r.status + ' ' + text);
+    err.status = r.status;
+    err.body = text;
+    throw err;
+  }
   return r;
 }
 const fmt = d => d ? new Date(d).toLocaleString('ru-RU') : '—';
@@ -598,8 +606,33 @@ async function uploadTemplates() {
     const name = $('#setName').value.trim();
     const path = 'uploadtemplates' + (name ? '?name=' + encodeURIComponent(name) : '');
     const r = await postFile('#fileTemplates', path, '#msgTemplates');
-    if (r) { $('#msgTemplates').textContent = 'Загружено: ' + JSON.stringify(await r.json()); loadSets(); }
-  } catch (e) { $('#msgTemplates').textContent = 'Ошибка: ' + e.message; }
+    if (r) {
+      const d = await r.json();
+      $('#msgTemplates').textContent = 'Загружен набор «' + d.set + '»: шаблонов ' + d.templates;
+      loadSets();
+    }
+  } catch (e) {
+    // Файл с ошибками сервер отклоняет целиком и перечисляет, что исправить.
+    // Показываем списком: одной строкой такой перечень нечитаем.
+    const errors = templateErrors(e);
+    if (errors) {
+      $('#msgTemplates').innerHTML = '<b>' + escHtml(errors.message) + '</b><ul style="margin:6px 0 0 18px">'
+        + errors.list.map(x => '<li>' + escHtml(x) + '</li>').join('') + '</ul>';
+    } else {
+      $('#msgTemplates').textContent = 'Ошибка: ' + e.message;
+    }
+  }
+}
+
+// templateErrors достаёт из ответа сервера перечень ошибок файла шаблонов
+// (null — ответ не про это, показываем сообщение как есть).
+function templateErrors(e) {
+  if (!e.body) return null;
+  try {
+    const d = JSON.parse(e.body);
+    if (!Array.isArray(d.errors) || !d.errors.length) return null;
+    return { message: d.message || 'Файл не загружен', list: d.errors };
+  } catch { return null; }
 }
 async function uploadRouters(create) {
   try {
