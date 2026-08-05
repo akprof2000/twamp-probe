@@ -40,6 +40,10 @@ type Config struct {
 	// (см. docs/parallelism.md).
 	TwampEmbedded  bool // twamp:embedded — клиент twping как библиотека
 	TwampyEmbedded bool // twampy:embedded — отправитель TWAMP-Light без python
+
+	// PortRange — диапазон локальных портов, который проба раздаёт зондам сама
+	// (Probe:PortRange, «нижний-верхний»). Пусто — порт выбирает ядро.
+	PortRange string
 }
 
 // LoadConfig читает appsettings.json рядом с исполняемым файлом.
@@ -80,11 +84,19 @@ func LoadConfig(path string) (*Config, error) {
 		Ping:           ProbeToolConfig{str(raw, "ping:name", "ping"), str(raw, "ping:default", "")},
 		Twamp:          ProbeToolConfig{str(raw, "twamp:name", "./twping"), str(raw, "twamp:default", "")},
 		Twampy:         ProbeToolConfig{str(raw, "twampy:name", "python3"), str(raw, "twampy:default", "")},
+		PortRange:      str(raw, "Probe:PortRange", defaultPortRange),
 		TwampEmbedded:  flag(raw, "twamp:embedded", false),
 		TwampyEmbedded: flag(raw, "twampy:embedded", false),
 	}
 	return cfg, nil
 }
+
+// defaultPortRange — диапазон, из которого проба раздаёт зондам локальные
+// порты. Взят ниже эфемерного диапазона Linux (32768–60999): оттуда ядро порты
+// не раздаёт, поэтому наши замеры не сталкиваются ни друг с другом, ни
+// с посторонними соединениями. Пустая строка в настройке выключает раздачу —
+// тогда порт, как раньше, выбирает ядро.
+const defaultPortRange = "20000-32767"
 
 // defaultMaxParallel — сколько замеров разрешено одновременно, если настройка
 // не задана. Это верхняя граница, а не план: сколько замеров идёт на самом

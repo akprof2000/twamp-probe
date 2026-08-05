@@ -1,0 +1,196 @@
+package main
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+func TestPortPool_GivesDistinctPorts(t *testing.T) {
+	// Главное свойство пула: два замера не получают один и тот же порт.
+	// Именно на этом и спотыкались зонды, когда порт выбирало ядро.
+	pool, err := NewPortPool(20000, 20009)
+	if err != nil {
+		t.Fatalf("пул не создался: %v", err)
+	}
+
+	seen := map[int]bool{}
+	for range 10 {
+		port, ok := pool.Acquire(context.Background())
+		if !ok {
+			t.Fatal("пул отказал, хотя свободные порты есть")
+		}
+		if seen[port] {
+			t.Fatalf("порт %d выдан дважды", port)
+		}
+		if port < 20000 || port > 20009 {
+			t.Errorf("порт %d вне диапазона 20000-20009", port)
+		}
+		seen[port] = true
+	}
+}
+
+func TestPortPool_WaitsInsteadOfFailing(t *testing.T) {
+	// Когда свободных портов нет, замер должен подождать освобождения, а не
+	// упасть с «address already in use»: очередь лучше потерянного замера.
+	pool, err := NewPortPool(20000, 20000) // ровно один порт
+	if err != nil {
+		t.Fatalf("пул не создался: %v", err)
+	}
+
+	first, ok := pool.Acquire(context.Background())
+	if !ok {
+		t.Fatal("не удалось занять единственный порт")
+	}
+
+	got := make(chan int, 1)
+	go func() {
+		port, ok := pool.Acquire(context.Background())
+		if ok {
+			got <- port
+		}
+	}()
+
+	select {
+	case port := <-got:
+		t.Fatalf("порт %d выдан дважды — ожидание не сработало", port)
+	case <-time.After(200 * time.Millisecond):
+		// ожидаемо: второй замер ждёт
+	}
+
+	pool.Release(first)
+
+	select {
+	case port := <-got:
+		if port != first {
+			t.Errorf("выдан порт %d, ожидался освободившийся %d", port, first)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("освобождение порта не разбудило ожидающего")
+	}
+
+	if _, _, _, waited := pool.Stats(); waited != 1 {
+		t.Errorf("ожиданий засчитано %d, ожидалось 1", waited)
+	}
+}
+
+func TestPortPool_CancelStopsWaiting(t *testing.T) {
+	// Снятая задача не должна ждать порт вечно.
+	pool, _ := NewPortPool(20000, 20000)
+	if _, ok := pool.Acquire(context.Background()); !ok {
+		t.Fatal("не удалось занять единственный порт")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := pool.Acquire(ctx)
+		done <- ok
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Error("после отмены выдан порт, ожидался отказ")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("отмена не прервала ожидание порта")
+	}
+}
+
+func TestPortPool_BlacklistRemovesPortFromRotation(t *testing.T) {
+	// Порт, занятый посторонним процессом, в оборот больше не идёт: иначе
+	// каждый следующий замер налетал бы на ту же ошибку.
+	pool, _ := NewPortPool(20000, 20001)
+
+	bad, _ := pool.Acquire(context.Background())
+	pool.Blacklist(bad)
+
+	good, ok := pool.Acquire(context.Background())
+	if !ok {
+		t.Fatal("пул отказал, хотя один порт ещё свободен")
+	}
+	if good == bad {
+		t.Errorf("исключённый порт %d выдан снова", bad)
+	}
+
+	// Второй порт занят, исключённый не возвращается — свободных нет.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, ok := pool.Acquire(ctx); ok {
+		t.Error("выдан порт, хотя свободных не осталось")
+	}
+
+	if _, _, banned, _ := pool.Stats(); banned != 1 {
+		t.Errorf("исключённых портов %d, ожидался 1", banned)
+	}
+}
+
+func TestPortPool_DisabledPoolIsTransparent(t *testing.T) {
+	// Пустая настройка означает прежнее поведение: порт выбирает ядро.
+	pool, err := ParsePortPool("")
+	if err != nil {
+		t.Fatalf("пустая настройка дала ошибку: %v", err)
+	}
+	if pool != nil {
+		t.Fatal("пустая настройка должна выключать пул")
+	}
+
+	port, ok := pool.Acquire(context.Background())
+	if !ok || port != 0 {
+		t.Errorf("выключенный пул вернул порт %d (ok=%v), ожидался 0", port, ok)
+	}
+	pool.Release(port) // не должно паниковать
+	pool.Blacklist(port)
+	pool.Close()
+}
+
+func TestParsePortPool_Errors(t *testing.T) {
+	for _, bad := range []string{"20000", "abc-30000", "20000-abc", "30000-20000", "0-100", "1-70000"} {
+		if _, err := ParsePortPool(bad); err == nil {
+			t.Errorf("настройка %q принята, ожидалась ошибка", bad)
+		}
+	}
+	pool, err := ParsePortPool(" 20000 - 32767 ")
+	if err != nil {
+		t.Fatalf("корректная настройка отклонена: %v", err)
+	}
+	if from, to := pool.Range(); from != 20000 || to != 32767 {
+		t.Errorf("разобран диапазон %d-%d, ожидался 20000-32767", from, to)
+	}
+}
+
+func TestWithLocalPort(t *testing.T) {
+	// Каждой утилите порт передаётся её способом.
+	twamp := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 20005)
+	if len(twamp) < 2 || twamp[0] != "-P" || twamp[1] != "20005-20005" {
+		t.Errorf("twping получил %v, ожидался флаг -P 20005-20005", twamp)
+	}
+
+	// Свой диапазон задачи не перебиваем.
+	own := withLocalPort(ModeTWamp, []string{"-P", "9000-9100", "10.0.0.1"}, 20005)
+	if own[1] != "9000-9100" {
+		t.Errorf("диапазон задачи заменён: %v", own)
+	}
+
+	twampy := withLocalPort(ModeTWampy,
+		[]string{"-m", "twampy", "sender", "10.0.0.1", "-c", "10"}, 20006)
+	if len(twampy) < 5 || twampy[4] != ":20006" {
+		t.Errorf("twampy получил %v, ожидался near-end :20006 после узла", twampy)
+	}
+
+	// Для ping локальный порт бессмыслен.
+	ping := withLocalPort(ModeWinPing, []string{"10.0.0.1", "-c", "2"}, 20007)
+	if len(ping) != 3 {
+		t.Errorf("аргументы ping изменены: %v", ping)
+	}
+
+	// Выключенный пул ничего не добавляет.
+	off := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 0)
+	if len(off) != 3 {
+		t.Errorf("при выключенном пуле аргументы изменены: %v", off)
+	}
+}

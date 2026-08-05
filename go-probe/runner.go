@@ -23,17 +23,23 @@ type ProbeRunner struct {
 	results  *ResultStore
 	registry *RunRegistry
 	cancels  *RunCancelRegistry // активные запуски — чтобы оборвать удалённую задачу
+	ports    *PortPool          // локальные порты зондов (nil — порт выбирает ядро)
 	baseDir  string             // каталог приложения — для PYTHONPATH вендоренного twampy
 }
 
 // NewProbeRunner создаёт исполнитель.
-func NewProbeRunner(cfg *Config, results *ResultStore, registry *RunRegistry, cancels *RunCancelRegistry) *ProbeRunner {
+func NewProbeRunner(cfg *Config, results *ResultStore, registry *RunRegistry,
+	cancels *RunCancelRegistry, ports *PortPool) *ProbeRunner {
+
 	exe, err := os.Executable()
 	base := "."
 	if err == nil {
 		base = filepath.Dir(exe)
 	}
-	return &ProbeRunner{cfg: cfg, results: results, registry: registry, cancels: cancels, baseDir: base}
+	return &ProbeRunner{
+		cfg: cfg, results: results, registry: registry,
+		cancels: cancels, ports: ports, baseDir: base,
+	}
 }
 
 // RunForNodes выполняет все циклы и повторы зонда для каждого узла задачи параллельно.
@@ -136,13 +142,79 @@ type embeddedProbe func(ctx context.Context, args []string, deadline time.Time) 
 
 // execute выполняет один замер: встроенным зондом, если он включён для этого
 // режима, иначе — запуском внешнего процесса.
+//
+// Локальный порт зонду выдаёт проба, а не ядро: так два замера не могут взять
+// один и тот же, а когда свободных нет — замер ждёт освобождения вместо того
+// чтобы упасть с «address already in use».
 func (r *ProbeRunner) execute(
 	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
 
-	if probe, callLine, probeArgs := r.embeddedFor(task, args); probe != nil {
-		return r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
+	port, ok := r.ports.Acquire(ctx)
+	if !ok {
+		// Ждать смысла больше нет: задачу сняли или проба останавливается.
+		return ActionData{
+			ResultId: NewGuid(), Creation: CsTime{time.Now()}, TaskId: task.Id,
+			EndNode: node, IPAddress: task.IpAddress, RequestInfo: task.RequestInfo,
+			Mode: string(task.Mode), Cancelled: true,
+		}
 	}
-	return r.executeOnce(ctx, task, node, execName, args, env)
+	defer r.ports.Release(port)
+
+	args = withLocalPort(task.Mode, args, port)
+
+	var result ActionData
+	if probe, callLine, probeArgs := r.embeddedFor(task, args); probe != nil {
+		result = r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
+	} else {
+		result = r.executeOnce(ctx, task, node, execName, args, env)
+	}
+
+	// Порт занят кем-то посторонним — в оборот он больше не идёт, иначе
+	// следующий замер налетел бы на ту же ошибку.
+	if portTaken(result.ErrorConsole) || portTaken(result.Console) {
+		r.ports.Blacklist(port)
+		logRunner.Warn("Порт занят посторонним процессом — исключён из пула",
+			"порт", port, "задача", task.Id, "узел", node)
+	}
+	return result
+}
+
+// withLocalPort добавляет зонду локальный порт, если проба раздаёт их сама
+// (port > 0) и задача не указала свой.
+//
+// У каждой утилиты свой способ: twping принимает диапазон флагом -P, а twampy —
+// адрес near-end вторым позиционным аргументом.
+func withLocalPort(mode TaskMode, args []string, port int) []string {
+	if port <= 0 {
+		return args
+	}
+
+	switch mode {
+	case ModeTWamp:
+		if slices.Contains(args, "-P") {
+			return args // задача выбрала диапазон сама — не перебиваем
+		}
+		// Диапазон из одного порта: именно его зонд и займёт.
+		return append([]string{"-P", fmt.Sprintf("%d-%d", port, port)}, args...)
+
+	case ModeTWampy:
+		// «… sender <far-end> [near-end] [опции]» — near-end идёт сразу за узлом.
+		idx := indexOf(args, "sender")
+		if idx < 0 || idx+1 >= len(args) {
+			return args
+		}
+		nearEnd := fmt.Sprintf(":%d", port)
+		if idx+2 < len(args) && strings.HasPrefix(args[idx+2], ":") {
+			return args // near-end уже задан
+		}
+		return slices.Insert(slices.Clone(args), idx+2, nearEnd)
+	}
+	return args
+}
+
+// portTaken распознаёт отказ ядра «порт уже занят».
+func portTaken(text string) bool {
+	return strings.Contains(text, "address already in use")
 }
 
 // embeddedFor выбирает встроенный зонд для режима задачи: возвращает функцию

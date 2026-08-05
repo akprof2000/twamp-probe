@@ -17,7 +17,7 @@ func newEmbeddedRunner(t *testing.T, embedded bool) (*ProbeRunner, *ResultStore)
 		Twampy: ProbeToolConfig{Name: "python3-не-существует", Default: ""},
 	}
 	results := NewResultStore(100, 0)
-	return NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry()), results
+	return NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), nil), results
 }
 
 func TestRunner_EmbeddedTwampyRunsWithoutExternalProcess(t *testing.T) {
@@ -87,7 +87,7 @@ func TestRunner_EmbeddedTwpingRunsWithoutExternalProcess(t *testing.T) {
 		Twamp: ProbeToolConfig{Name: "twping-не-существует"},
 	}
 	results := NewResultStore(100, 0)
-	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry())
+	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), nil)
 
 	task := &TaskInfo{
 		Id: "twamp-emb", Title: "встроенный twping", Mode: ModeTWamp,
@@ -114,7 +114,7 @@ func TestRunner_ExternalTwpingUsedWhenEmbeddedDisabled(t *testing.T) {
 	// Без настройки режим TWamp по-прежнему выполняется внешней утилитой.
 	cfg := &Config{Twamp: ProbeToolConfig{Name: "twping-не-существует"}}
 	results := NewResultStore(100, 0)
-	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry())
+	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), nil)
 
 	task := &TaskInfo{
 		Id: "twamp-ext", Title: "внешний twping", Mode: ModeTWamp,

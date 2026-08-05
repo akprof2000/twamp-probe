@@ -96,7 +96,22 @@ func main() {
 	results.Load()
 	runReg := NewRunRegistry()
 	cancels := NewRunCancelRegistry()
-	runner := NewProbeRunner(cfg, results, runReg, cancels)
+	// Локальные порты зондов проба раздаёт сама: два замера не возьмут один и
+	// тот же, а когда свободных нет — замер ждёт, а не падает с ошибкой ядра.
+	ports, err := ParsePortPool(cfg.PortRange)
+	if err != nil {
+		logMain.Error("Диапазон портов задан неверно — порт будет выбирать ядро",
+			"настройка", cfg.PortRange, "ошибка", err)
+	}
+	defer ports.Close()
+	if from, to := ports.Range(); from > 0 {
+		logMain.Info("Порты зондов раздаёт проба",
+			"диапазон", fmt.Sprintf("%d-%d", from, to), "всего", to-from+1)
+	} else {
+		logMain.Info("Порты зондов выбирает ядро (Probe:PortRange не задан)")
+	}
+
+	runner := NewProbeRunner(cfg, results, runReg, cancels, ports)
 	// Предел одновременных запусков: настройка задаёт потолок, память — фактическое
 	// значение. Стартуем с малого и разгоняемся, а не запускаем всё разом.
 	limiter := NewAdaptiveLimiter(cfg.MaxParallel, cfg.MinParallel, cfg.StartParallel)

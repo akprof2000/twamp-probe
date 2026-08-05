@@ -26,7 +26,7 @@ func newTestRunner(t *testing.T, exec, args string) (*ProbeRunner, *ResultStore,
 	}
 	results := NewResultStore(cfg.MaxPendingResults, 60)
 	cancels := NewRunCancelRegistry()
-	return NewProbeRunner(cfg, results, NewRunRegistry(), cancels), results, cancels
+	return NewProbeRunner(cfg, results, NewRunRegistry(), cancels, nil), results, cancels
 }
 
 // probeTask — задача, выполняющая заведомо долгий зонд без таймаута.
