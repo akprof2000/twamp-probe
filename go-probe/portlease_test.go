@@ -323,6 +323,91 @@ func TestMixedEmbeddedProbes_SmallPoolStillCompletes(t *testing.T) {
 	}
 }
 
+func TestMixedEmbeddedProbes_UnderLoad(t *testing.T) {
+	// Нагрузочная проверка: замеров больше, чем портов. Здесь переиспользование
+	// неизбежно и законно — проверяется, что оно идёт по кругу и ничего не
+	// ломает: замеры не теряются, в карантин никто не уходит, задействован весь
+	// диапазон, а не горстка номеров.
+	//
+	// Одновременность пересечений тут не измерить: рефлектор видит порт, но не
+	// знает, кто держал его в тот же миг. За это отвечает
+	// TestPool_ConcurrentLeasesNeverOverlap с настоящей привязкой сокетов.
+	if testing.Short() {
+		t.Skip("нагрузочный прогон занимает секунды — пропускаем в коротком режиме")
+	}
+
+	const (
+		each     = 60  // задач каждого режима: всего 120 замеров
+		poolSize = 100 // портов меньше, чем замеров
+	)
+	twamp := startTwampReflector(t)
+	twampy := startTwampyReflector(t)
+	pool := leasePool(t, 22000, 22000+poolSize-1)
+	runner, results := embeddedMixRunner(t, pool)
+
+	started := time.Now()
+	var wg sync.WaitGroup
+	for i := range each {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runner.RunForNodes(context.Background(), mixTask(fmt.Sprintf("load-twamp-%d", i),
+				"TWamp "+itoa(i), ModeTWamp, twamp.Addr(), "-c 10 -i 0.02"))
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runner.RunForNodes(context.Background(), mixTask(fmt.Sprintf("load-twampy-%d", i),
+				"TWampy "+itoa(i), ModeTWampy, "127.0.0.1:"+itoa(twampy.port), "-c 10 -i 20"))
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(started)
+
+	batch := results.TakeBatch(2 * time.Second).Items
+	failed := 0
+	for _, item := range batch {
+		if item.Outcome != string(OutcomeSuccess) {
+			failed++
+			t.Errorf("замер %s (%s) завершился как %s: %s",
+				item.TaskId, item.Mode, item.Outcome, firstLine(item.ErrorConsole))
+		}
+	}
+	if len(batch) != 2*each {
+		t.Errorf("получено %d результатов, ожидалось %d — часть замеров потеряна", len(batch), 2*each)
+	}
+
+	// Все наблюдённые номера — из пула, и задействован он широко: если бы
+	// выдача крутилась на последних освобождённых, уникальных было бы единицы.
+	ports := append(twamp.SenderPorts(), twampy.SenderPorts()...)
+	slices.Sort(ports)
+	unique := slices.Compact(slices.Clone(ports))
+	for _, port := range unique {
+		if port < 22000 || port >= 22000+poolSize {
+			t.Errorf("зонд занял порт %d вне пула", port)
+		}
+	}
+	if len(unique) < poolSize*3/4 {
+		t.Errorf("задействовано лишь %d портов из %d — выдача не идёт по кругу", len(unique), poolSize)
+	}
+
+	stats := pool.Stats()
+	if stats.Banned != 0 {
+		t.Errorf("в карантине %d портов — зонды столкнулись на одном номере", stats.Banned)
+	}
+	if stats.Taken != 0 {
+		t.Errorf("после прогона в аренде осталось %d портов", stats.Taken)
+	}
+
+	// Счётчики не проверяем, а показываем: они зависят от того, насколько плотно
+	// легли замеры, и в отчёте о прогоне полезнее любых порогов.
+	t.Logf("замеров=%d неудач=%d за %v; портов задействовано %d из %d; "+
+		"ожиданий=%d выдано досрочно=%d",
+		len(batch), failed, elapsed.Round(time.Millisecond), len(unique), poolSize,
+		stats.Waited, stats.Hurried)
+}
+
 func TestEmbeddedProbesBindExactlyThePooledPort(t *testing.T) {
 	// Обе утилиты обязаны занять именно тот номер, который выдал пул, — иначе
 	// учёт пула расходится с действительностью и столкновения неизбежны.

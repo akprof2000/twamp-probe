@@ -63,6 +63,29 @@
 | GET | `/api/probeinterface/checkdata` | длинный опрос: пачка результатов с `batchId` |
 | POST | `/api/probeinterface/confirmdata?batchId=…` | подтвердить запись пачки (проба удаляет её) |
 
+#### Снимок состояния пробы (`probestate`)
+
+Тот же ответ отдаёт `/api/userinterface/probestate` — сервер только проксирует
+его пробе. Поля пула локальных портов:
+
+| Поле | Что означает |
+|---|---|
+| `portRange` | диапазон пула (`Probe:PortRange`); пусто — порты выбирает ядро |
+| `portsFree` | готовы к выдаче, включая отлёживающиеся |
+| `portsCooling` | из них отлёживаются после аренды; выдаются только под нагрузкой |
+| `portsTaken` | в аренде у идущих замеров |
+| `portsBanned` | в карантине: заняты посторонним процессом |
+| `portsWaited` | сколько раз замеры ждали свободного порта |
+| `portsHurried` | сколько раз порт выдан, не долежав срока — признак тесного пула |
+
+Растущий `portsBanned` означает, что диапазон не зарезервирован в ядре;
+растущий `portsHurried` — что пул мал для текущего числа замеров. Разбор обоих
+случаев — в [parallelism.md](parallelism.md#что-делать-если-в-журнале-address-already-in-use).
+
+Остальные поля: `version`, `running`, `limit`, `maxParallel`,
+`twampEmbedded` / `twampyEmbedded` (каким путём идут замеры),
+`queueCapacity`, `pendingResults`.
+
 ---
 
 ---
