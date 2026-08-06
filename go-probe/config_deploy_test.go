@@ -2,11 +2,86 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"testing"
 )
+
+// Пул портов и эфемерный диапазон ядра обязаны быть разведены: если они
+// наложатся, ядро начнёт отдавать чужим соединениям номера, законно выданные
+// пулом, и замеры пойдут в отказ с «address already in use». Оба значения
+// лежат в разных файлах пакета, поэтому разъехаться им проще простого.
+func TestDeployConfig_PortRangeDoesNotOverlapKernelEphemeral(t *testing.T) {
+	pool, err := os.ReadFile("deploy/appsettings.json")
+	if err != nil {
+		t.Fatalf("не удалось прочитать appsettings.json: %v", err)
+	}
+	var config struct {
+		Probe struct {
+			PortRange string
+		}
+	}
+	if err := json.Unmarshal(pool, &config); err != nil {
+		t.Fatalf("appsettings.json — некорректный JSON: %v", err)
+	}
+
+	poolFrom, poolTo, err := parseRange(config.Probe.PortRange, "-")
+	if err != nil {
+		t.Fatalf("Probe:PortRange = %q: %v", config.Probe.PortRange, err)
+	}
+	if config.Probe.PortRange != defaultPortRange {
+		t.Errorf("в appsettings.json диапазон %q, а в коде по умолчанию %q — "+
+			"проба без файла настроек возьмёт не то, что в пакете",
+			config.Probe.PortRange, defaultPortRange)
+	}
+
+	sysctl, err := os.ReadFile("deploy/99-twamp-probe.conf")
+	if err != nil {
+		t.Fatalf("не удалось прочитать 99-twamp-probe.conf: %v", err)
+	}
+	setting := regexp.MustCompile(`(?m)^\s*net\.ipv4\.ip_local_port_range\s*=\s*(\d+)\s+(\d+)`).
+		FindStringSubmatch(string(sysctl))
+	if setting == nil {
+		t.Fatal("в 99-twamp-probe.conf нет net.ipv4.ip_local_port_range")
+	}
+	kernelFrom, kernelTo, err := parseRange(setting[1]+" "+setting[2], " ")
+	if err != nil {
+		t.Fatalf("ip_local_port_range: %v", err)
+	}
+
+	if poolFrom <= kernelTo && kernelFrom <= poolTo {
+		t.Errorf("пул пробы %d-%d пересекается с эфемерным диапазоном ядра %d-%d "+
+			"из 99-twamp-probe.conf", poolFrom, poolTo, kernelFrom, kernelTo)
+	}
+
+	// Резервировать пул списком больше не нужно — диапазоны разведены. Если
+	// строка осталась, она либо лишняя, либо противоречит разведению.
+	if regexp.MustCompile(`(?m)^\s*net\.ipv4\.ip_local_reserved_ports`).Match(sysctl) {
+		t.Error("в 99-twamp-probe.conf осталось ip_local_reserved_ports, " +
+			"хотя диапазоны разведены по построению")
+	}
+}
+
+// parseRange разбирает «нижний<sep>верхний».
+func parseRange(value, sep string) (int, int, error) {
+	low, high, ok := strings.Cut(strings.TrimSpace(value), sep)
+	if !ok {
+		return 0, 0, fmt.Errorf("ожидался диапазон вида «нижний%sверхний», получено %q", sep, value)
+	}
+	from, err := strconv.Atoi(strings.TrimSpace(low))
+	if err != nil {
+		return 0, 0, err
+	}
+	to, err := strconv.Atoi(strings.TrimSpace(high))
+	if err != nil {
+		return 0, 0, err
+	}
+	return from, to, nil
+}
 
 // Настройка, которой нет в поставляемом appsettings.json, для администратора
 // не существует: он её не найдёт и не поправит, а проба молча возьмёт значение
