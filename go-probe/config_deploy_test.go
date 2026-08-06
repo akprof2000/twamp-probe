@@ -11,11 +11,16 @@ import (
 	"testing"
 )
 
-// Пул портов и эфемерный диапазон ядра обязаны быть разведены: если они
-// наложатся, ядро начнёт отдавать чужим соединениям номера, законно выданные
-// пулом, и замеры пойдут в отказ с «address already in use». Оба значения
-// лежат в разных файлах пакета, поэтому разъехаться им проще простого.
-func TestDeployConfig_PortRangeDoesNotOverlapKernelEphemeral(t *testing.T) {
+// Пул портов и эфемерный диапазон ядра лежат в разных файлах пакета, и оба
+// задают одно и то же — из каких номеров берутся порты. Разъехаться им проще
+// простого, поэтому проверяем, что они остаются согласованными.
+//
+// Пересечение здесь допустимо и сделано намеренно: ядро раздаёт из этого
+// диапазона исходящие TCP-соединения, а управляющий канал twping нужен каждому
+// замеру TWamp. Отдай ядру участок в стороне от пула — и число замеров TWamp
+// упёрлось бы в размер этого участка. Плата за совмещение — редкие коллизии
+// по UDP с чужими сокетами машины, их отрабатывает карантин.
+func TestDeployConfig_PortRangeMatchesKernelSetting(t *testing.T) {
 	pool, err := os.ReadFile("deploy/appsettings.json")
 	if err != nil {
 		t.Fatalf("не удалось прочитать appsettings.json: %v", err)
@@ -53,16 +58,23 @@ func TestDeployConfig_PortRangeDoesNotOverlapKernelEphemeral(t *testing.T) {
 		t.Fatalf("ip_local_port_range: %v", err)
 	}
 
-	if poolFrom <= kernelTo && kernelFrom <= poolTo {
-		t.Errorf("пул пробы %d-%d пересекается с эфемерным диапазоном ядра %d-%d "+
-			"из 99-twamp-probe.conf", poolFrom, poolTo, kernelFrom, kernelTo)
+	// Два допустимых расклада, и оба осмысленны: диапазоны либо совпадают
+	// (замерам TWamp доступен весь пул под управляющие соединения), либо
+	// разведены полностью (коллизии по UDP невозможны). Частичное перекрытие
+	// не даёт ни того, ни другого — это всегда чья-то невнимательная правка.
+	same := poolFrom == kernelFrom && poolTo == kernelTo
+	apart := poolTo < kernelFrom || kernelTo < poolFrom
+	if !same && !apart {
+		t.Errorf("пул пробы %d-%d и эфемерный диапазон ядра %d-%d перекрываются частично: "+
+			"либо совмещайте их полностью, либо разводите",
+			poolFrom, poolTo, kernelFrom, kernelTo)
 	}
 
-	// Резервировать пул списком больше не нужно — диапазоны разведены. Если
-	// строка осталась, она либо лишняя, либо противоречит разведению.
+	// Резервировать пул списком нельзя: ip_local_reserved_ports вычитает номера
+	// и из TCP тоже, а значит отнимет их у управляющих соединений twping.
 	if regexp.MustCompile(`(?m)^\s*net\.ipv4\.ip_local_reserved_ports`).Match(sysctl) {
-		t.Error("в 99-twamp-probe.conf осталось ip_local_reserved_ports, " +
-			"хотя диапазоны разведены по построению")
+		t.Error("в 99-twamp-probe.conf появилось ip_local_reserved_ports — " +
+			"оно вычтет номера и из TCP, оставив замеры TWamp без управляющих соединений")
 	}
 }
 

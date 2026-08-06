@@ -110,9 +110,13 @@ func main() {
 		logMain.Info("Порты зондов раздаёт проба — общий пул для TWamp и TWampy",
 			"диапазон", fmt.Sprintf("%d-%d", from, to), "всего", to-from+1,
 			"карантин", portQuarantine)
-		if warning := checkPortRangeOverlap(from, to); warning != "" {
-			logMain.Warn("Диапазон портов пересекается с эфемерным диапазоном ядра",
-				"подробности", warning)
+		// Не «предупреждение», а описание расклада: перекрытие в поставляемых
+		// настройках сделано намеренно. Уровень оставлен предупреждающим, чтобы
+		// строка была видна при штатном Logging:Level = Warn — когда полезут
+		// коллизии, объяснение уже будет в журнале.
+		if overlap := checkPortRangeOverlap(from, to); overlap != "" {
+			logMain.Warn("Пул портов перекрывается с эфемерным диапазоном ядра",
+				"подробности", overlap)
 		}
 	} else {
 		logMain.Info("Порты зондов выбирает ядро (Probe:PortRange не задан)")
