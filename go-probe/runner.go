@@ -149,35 +149,52 @@ type embeddedProbe func(ctx context.Context, args []string, deadline time.Time) 
 func (r *ProbeRunner) execute(
 	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
 
-	port, ok := r.ports.Acquire(ctx)
-	if !ok {
-		// Ждать смысла больше нет: задачу сняли или проба останавливается.
-		return ActionData{
-			ResultId: NewGuid(), Creation: CsTime{time.Now()}, TaskId: task.Id,
-			EndNode: node, IPAddress: task.IpAddress, RequestInfo: task.RequestInfo,
-			Mode: string(task.Mode), Cancelled: true,
-		}
-	}
-	defer r.ports.Release(port)
-
-	args = withLocalPort(task.Mode, args, port)
-
 	var result ActionData
-	if probe, callLine, probeArgs := r.embeddedFor(task, args); probe != nil {
-		result = r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
-	} else {
-		result = r.executeOnce(ctx, task, node, execName, args, env)
-	}
 
-	// Порт занят кем-то посторонним — в оборот он больше не идёт, иначе
-	// следующий замер налетел бы на ту же ошибку.
-	if portTaken(result.ErrorConsole) || portTaken(result.Console) {
+	// Порт из пула может оказаться занят посторонним процессом: диапазон пробы
+	// пересекается с эфемерным диапазоном ядра, и чужое соединение способно
+	// встать на наш номер между выдачей и привязкой. Раньше такой замер просто
+	// пропадал; теперь берём другой порт и пробуем снова.
+	for attempt := 1; ; attempt++ {
+		port, ok := r.ports.Acquire(ctx)
+		if !ok {
+			// Ждать смысла больше нет: задачу сняли или проба останавливается.
+			return ActionData{
+				ResultId: NewGuid(), Creation: CsTime{time.Now()}, TaskId: task.Id,
+				EndNode: node, IPAddress: task.IpAddress, RequestInfo: task.RequestInfo,
+				Mode: string(task.Mode), Cancelled: true,
+			}
+		}
+
+		attemptArgs := withLocalPort(task.Mode, args, port)
+		if probe, callLine, probeArgs := r.embeddedFor(task, attemptArgs); probe != nil {
+			result = r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
+		} else {
+			result = r.executeOnce(ctx, task, node, execName, attemptArgs, env)
+		}
+
+		if !portTaken(result.ErrorConsole) && !portTaken(result.Console) {
+			r.ports.Release(port)
+			return result
+		}
+
+		// Порт занят: в оборот он больше не идёт, иначе следующий замер налетел
+		// бы на ту же ошибку. Сам замер повторяем с другим номером.
 		r.ports.Blacklist(port)
-		logRunner.Warn("Порт занят посторонним процессом — исключён из пула",
-			"порт", port, "задача", task.Id, "узел", node)
+		if attempt >= portRetries || result.Cancelled {
+			logRunner.Warn("Порт занят посторонним процессом — замер не удался",
+				"порт", port, "попыток", attempt, "задача", task.Id, "узел", node)
+			return result
+		}
+		logRunner.Warn("Порт занят посторонним процессом — исключён из пула, пробуем другой",
+			"порт", port, "попытка", attempt, "задача", task.Id, "узел", node)
 	}
-	return result
 }
+
+// portRetries — сколько раз пробовать другой порт, если выданный занят.
+// Больше трёх смысла нет: если заняты и они, дело не в невезении, а в том,
+// что пул пересекается с чужими соединениями — это лечится настройкой.
+const portRetries = 3
 
 // withLocalPort добавляет зонду локальный порт, если проба раздаёт их сама
 // (port > 0) и задача не указала свой.

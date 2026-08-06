@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"net"
+	"runtime"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -220,5 +224,69 @@ func TestWithLocalPort(t *testing.T) {
 	off := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 0)
 	if len(off) != 3 {
 		t.Errorf("при выключенном пуле аргументы изменены: %v", off)
+	}
+}
+
+func TestExecute_RetriesOnBusyPort(t *testing.T) {
+	// Порт из пула может оказаться занят посторонним процессом. Раньше такой
+	// замер просто пропадал; теперь проба берёт другой порт и повторяет.
+	// Занимаем часть пула по-настоящему, чтобы отказ пришёл от ядра.
+	//
+	// Только Linux: в Windows два UDP-сокета уживаются на одном порту, поэтому
+	// занятый порт там не отказывает и проверять нечего.
+	if runtime.GOOS != "linux" {
+		t.Skip("проверка занятого UDP-порта имеет смысл только на Linux")
+	}
+	pool, err := NewPortPool(21500, 21504)
+	if err != nil {
+		t.Fatalf("пул не создался: %v", err)
+	}
+
+	// Держим все порты пула, кроме одного: первые попытки обязаны упереться
+	// в занятые номера, а замер — состояться на оставшемся.
+	var held []*net.UDPConn
+	free := 0
+	for port := 21500; port <= 21504; port++ {
+		if port == 21502 {
+			free = port
+			continue // этот оставляем свободным
+		}
+		conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: port})
+		if err != nil {
+			t.Skipf("порт %d занят посторонним процессом — проверка невозможна: %v", port, err)
+		}
+		held = append(held, conn)
+	}
+	t.Cleanup(func() {
+		for _, c := range held {
+			c.Close()
+		}
+	})
+
+	cfg := &Config{TwampyEmbedded: true, Twampy: ProbeToolConfig{Name: "python-не-существует"}}
+	results := NewResultStore(10, 0)
+	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), pool)
+
+	task := &TaskInfo{
+		Id: "busy-port", Title: "занятый порт", Mode: ModeTWampy,
+		EndNode: "127.0.0.1:20999", Circles: 1, Repeats: 1, TimeoutSec: 20,
+		Parameters: map[string]string{"args": "-c 1 -i 100"},
+	}
+	runner.RunForNodes(context.Background(), task)
+
+	batch := results.TakeBatch(10).Items
+	if len(batch) != 1 {
+		t.Fatalf("получено результатов: %d, ожидался 1", len(batch))
+	}
+	if portTaken(batch[0].ErrorConsole) {
+		t.Errorf("замер так и не нашёл свободный порт: %s", batch[0].ErrorConsole)
+	}
+	if !strings.Contains(batch[0].CallLine, strconv.Itoa(free)) {
+		t.Errorf("замер выполнен не на свободном порту %d: %s", free, batch[0].CallLine)
+	}
+
+	// Занятые порты исключены из оборота — следующий замер их не получит.
+	if _, _, banned, _ := pool.Stats(); banned == 0 {
+		t.Error("занятые порты не исключены из пула")
 	}
 }
