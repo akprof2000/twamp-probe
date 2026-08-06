@@ -105,8 +105,15 @@ func main() {
 	}
 	defer ports.Close()
 	if from, to := ports.Range(); from > 0 {
-		logMain.Info("Порты зондов раздаёт проба",
-			"диапазон", fmt.Sprintf("%d-%d", from, to), "всего", to-from+1)
+		// Пул общий для всех режимов: twping и twampy берут номера отсюда и за
+		// порты друг с другом не конкурируют.
+		logMain.Info("Порты зондов раздаёт проба — общий пул для TWamp и TWampy",
+			"диапазон", fmt.Sprintf("%d-%d", from, to), "всего", to-from+1,
+			"карантин", portQuarantine)
+		if warning := checkPortRangeOverlap(from, to); warning != "" {
+			logMain.Warn("Диапазон портов пересекается с эфемерным диапазоном ядра",
+				"подробности", warning)
+		}
 	} else {
 		logMain.Info("Порты зондов выбирает ядро (Probe:PortRange не задан)")
 	}

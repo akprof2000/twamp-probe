@@ -408,7 +408,7 @@ async function showProbeState(requestInfo) {
 
     const ports = d.portRange
       ? `${escHtml(d.portRange)}: свободно ${d.portsFree}, занято ${d.portsTaken}`
-        + (d.portsBanned ? `, исключено ${d.portsBanned}` : '')
+        + (d.portsBanned ? `, в карантине ${d.portsBanned}` : '')
         + (d.portsWaited ? `, ожиданий ${d.portsWaited}` : '')
       : 'выбирает ядро (Probe:PortRange не задан)';
 

@@ -140,16 +140,66 @@ func orDefault(params []string, def string) []string {
 // возвращает вывод и текст ошибки в том же виде, что и внешняя утилита.
 type embeddedProbe func(ctx context.Context, args []string, deadline time.Time) (output, errText string)
 
+// runReport — итог одного прогона зонда для журнала и реестра статусов.
+//
+// Прогон сам о себе не отчитывается: за неудачной попыткой может последовать
+// повтор с другим портом, и тогда в журнале появился бы провал задачи, которой
+// на деле ещё предстоит выполниться. Решение принимает execute — он один знает,
+// была попытка последней или нет.
+//
+// Пустой outcome означает, что прогон уже отчитался сам: такие исходы
+// терминальны (зонд не запустился, задачу удалили) и повтору не подлежат.
+type runReport struct {
+	outcome  RunOutcome
+	exitCode *int // nil — процесса не было (встроенный зонд) либо он не запустился
+	summary  string
+	elapsed  time.Duration
+}
+
+// report пишет итог замера в журнал и в реестр статусов — ровно один раз на
+// замер, после того как исход стал окончательным.
+func (r *ProbeRunner) report(task *TaskInfo, node string, rep runReport) {
+	if rep.outcome == "" {
+		return // прогон отчитался сам
+	}
+	r.registry.ReportOutcome(task.Id, rep.outcome, rep.exitCode, rep.summary)
+	logRun(task, node, rep.outcome, rep.exitCode, rep.elapsed, rep.summary)
+}
+
+// cancelReason — обычная причина отмены: задачу удалили на сервере.
+const cancelReason = "Задача удалена — выполнение прервано"
+
+// cancelledRun оформляет прерванный запуск: замера больше никто не ждёт, поэтому
+// результат помечается отменённым и серверу не отправляется — иначе в отчёте
+// появился бы обрывок замера по уже удалённой задаче.
+//
+// Отчитывается сразу сам: отмена окончательна, повторять с другим портом нечего.
+func (r *ProbeRunner) cancelledRun(task *TaskInfo, node string, started time.Time,
+	message string, result *ActionData) (ActionData, runReport) {
+
+	logRunner.Warn(message,
+		"название", task.Title, "узел", node, "режим", task.Mode,
+		"длительность", time.Since(started).Round(time.Millisecond), "задача", task.Id)
+	r.registry.ReportOutcome(task.Id, OutcomeNotStarted, nil, message)
+
+	result.Outcome = string(OutcomeNotStarted)
+	result.ErrorConsole = message
+	result.Cancelled = true
+	return *result, runReport{}
+}
+
 // execute выполняет один замер: встроенным зондом, если он включён для этого
 // режима, иначе — запуском внешнего процесса.
 //
 // Локальный порт зонду выдаёт проба, а не ядро: так два замера не могут взять
 // один и тот же, а когда свободных нет — замер ждёт освобождения вместо того
-// чтобы упасть с «address already in use».
+// чтобы упасть с «address already in use». Пул общий для всех режимов, поэтому
+// twping и twampy за номера не конкурируют.
 func (r *ProbeRunner) execute(
 	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
 
 	var result ActionData
+	var report runReport
 
 	// Порт из пула может оказаться занят посторонним процессом: диапазон пробы
 	// пересекается с эфемерным диапазоном ядра, и чужое соединение способно
@@ -166,34 +216,48 @@ func (r *ProbeRunner) execute(
 			}
 		}
 
-		attemptArgs := withLocalPort(task.Mode, args, port)
+		attemptArgs, portApplied := withLocalPort(task.Mode, args, port)
 		if probe, callLine, probeArgs := r.embeddedFor(task, attemptArgs); probe != nil {
-			result = r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
+			result, report = r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
 		} else {
-			result = r.executeOnce(ctx, task, node, execName, attemptArgs, env)
+			result, report = r.executeOnce(ctx, task, node, execName, attemptArgs, env)
 		}
 
-		if !portTaken(result.ErrorConsole) && !portTaken(result.Console) {
+		busy := portTaken(result.ErrorConsole) || portTaken(result.Console)
+		// Занятым числим только тот порт, который зонду действительно достался.
+		// Если порт свой указала задача (или вызов нестандартный и подставить
+		// номер некуда), упал чужой номер — карантинить наш незачем, да и повтор
+		// ничего не изменит: следующая попытка возьмёт ровно тот же чужой порт.
+		ourPortBusy := busy && portApplied
+		if !ourPortBusy {
 			r.ports.Release(port)
+			r.report(task, node, report)
 			return result
 		}
 
-		// Порт занят: в оборот он больше не идёт, иначе следующий замер налетел
-		// бы на ту же ошибку. Сам замер повторяем с другим номером.
+		// Порт занят: в оборот он временно не идёт, иначе следующий замер
+		// налетел бы на ту же ошибку. Сам замер повторяем с другим номером.
 		r.ports.Blacklist(port)
+		free, _, quarantined, _ := r.ports.Stats()
+
 		if attempt >= portRetries || result.Cancelled {
 			logRunner.Warn("Порт занят посторонним процессом — замер не удался",
-				"порт", port, "попыток", attempt, "задача", task.Id, "узел", node)
+				"порт", port, "попыток", attempt, "режим", task.Mode,
+				"свободно", free, "в_карантине", quarantined,
+				"задача", task.Id, "узел", node)
+			r.report(task, node, report)
 			return result
 		}
-		logRunner.Warn("Порт занят посторонним процессом — исключён из пула, пробуем другой",
-			"порт", port, "попытка", attempt, "задача", task.Id, "узел", node)
+		logRunner.Warn("Порт занят посторонним процессом — в карантин, пробуем другой",
+			"порт", port, "попытка", attempt, "режим", task.Mode,
+			"свободно", free, "в_карантине", quarantined,
+			"задача", task.Id, "узел", node)
 	}
 }
 
 // portRetries — сколько раз пробовать другой порт, если выданный занят.
 //
-// Попытки не бесплодны: каждый занятый порт исключается из пула, поэтому выбор
+// Попытки не бесплодны: каждый занятый порт уходит в карантин, поэтому выбор
 // с каждым разом сужается и следующая попытка вероятнее предыдущей. Десяти
 // хватает и на редкое невезение, и на несколько чужих сокетов подряд; если
 // заняты и они, дело не в случайности, а в том, что пул пересекается с
@@ -202,27 +266,31 @@ func (r *ProbeRunner) execute(
 const portRetries = 10
 
 // withLocalPort добавляет зонду локальный порт, если проба раздаёт их сама
-// (port > 0) и задача не указала свой.
+// (port > 0) и задача не указала свой. Второе значение сообщает, достался ли
+// порт зонду: без него замер пойдёт с номером от ядра, и отвечать за него пул
+// не может.
 //
 // У каждой утилиты свой способ: twping принимает диапазон флагом -P, а twampy —
 // адрес near-end вторым позиционным аргументом.
-func withLocalPort(mode TaskMode, args []string, port int) []string {
+func withLocalPort(mode TaskMode, args []string, port int) ([]string, bool) {
 	if port <= 0 {
-		return args
+		return args, false
 	}
 
 	switch mode {
 	case ModeTWamp:
 		if slices.Contains(args, "-P") {
-			return args // задача выбрала диапазон сама — не перебиваем
+			return args, false // задача выбрала диапазон сама — не перебиваем
 		}
-		// Диапазон из одного порта: именно его зонд и займёт.
-		return append([]string{"-P", fmt.Sprintf("%d-%d", port, port)}, args...)
+		// Диапазон из одного порта: именно его зонд и займёт. Перебирать номера
+		// внутри диапазона — дело пула, а не зонда, иначе два замера столкнулись
+		// бы на одном порту.
+		return append([]string{"-P", fmt.Sprintf("%d-%d", port, port)}, args...), true
 
 	case ModeTWampy:
 		return withTwampyNearEnd(args, port)
 	}
-	return args
+	return args, false
 }
 
 // withTwampyNearEnd задаёт локальный адрес отправителя в вызове twampy.
@@ -234,28 +302,28 @@ func withLocalPort(mode TaskMode, args []string, port int) []string {
 //     аргументом здесь нельзя: адрес задачи съехал бы на третью позицию,
 //     где twampy его уже не ждёт, и замер пошёл бы не с того интерфейса;
 //   - near-end не задан — добавляем «:порт» сразу за far-end.
-func withTwampyNearEnd(args []string, port int) []string {
+func withTwampyNearEnd(args []string, port int) ([]string, bool) {
 	idx := indexOf(args, "sender")
 	if idx < 0 {
-		return args
+		return args, false
 	}
 
 	far := idx + 1 // адрес рефлектора
 	if far >= len(args) || strings.HasPrefix(args[far], "-") {
-		return args // вызов не похож на «sender <адрес>» — не вмешиваемся
+		return args, false // вызов не похож на «sender <адрес>» — не вмешиваемся
 	}
 
 	near := far + 1
 	if near < len(args) && !strings.HasPrefix(args[near], "-") {
 		if hasPort(args[near]) {
-			return args // задача указала и адрес, и порт — её выбор важнее
+			return args, false // задача указала и адрес, и порт — её выбор важнее
 		}
 		out := slices.Clone(args)
 		out[near] = fmt.Sprintf("%s:%d", args[near], port)
-		return out
+		return out, true
 	}
 
-	return slices.Insert(slices.Clone(args), near, fmt.Sprintf(":%d", port))
+	return slices.Insert(slices.Clone(args), near, fmt.Sprintf(":%d", port)), true
 }
 
 // hasPort сообщает, указан ли в адресе порт. Для IPv6 в квадратных скобках
@@ -300,7 +368,7 @@ func (r *ProbeRunner) embeddedFor(task *TaskInfo, args []string) (embeddedProbe,
 // (см. docs/parallelism.md). Вывод совпадает с внешней утилитой: серверный
 // парсер и отчёты не отличают один режим от другого.
 func (r *ProbeRunner) executeEmbedded(ctx context.Context, task *TaskInfo, node,
-	callLine string, args []string, probe embeddedProbe) ActionData {
+	callLine string, args []string, probe embeddedProbe) (ActionData, runReport) {
 
 	started := time.Now()
 	result := ActionData{
@@ -334,12 +402,7 @@ func (r *ProbeRunner) executeEmbedded(ctx context.Context, task *TaskInfo, node,
 
 	switch {
 	case cancelled:
-		logRunner.Warn("Задача удалена — выполнение прервано",
-			"название", task.Title, "узел", node, "режим", task.Mode,
-			"длительность", time.Since(started).Round(time.Millisecond), "задача", task.Id)
-		r.registry.ReportOutcome(task.Id, OutcomeNotStarted, nil, "Задача удалена — выполнение прервано")
-		result.Cancelled = true
-		return result
+		return r.cancelledRun(task, node, started, cancelReason, &result)
 
 	case timedOut:
 		errText = fmt.Sprintf("Задача прервана по таймауту %d c.", task.TimeoutSec)
@@ -353,20 +416,21 @@ func (r *ProbeRunner) executeEmbedded(ctx context.Context, task *TaskInfo, node,
 		outcome = OutcomeExitCodeError
 	}
 
-	exitCode := 0
 	summary := errText
 	if outcome == OutcomeSuccess {
 		summary = lastLine(output)
 	}
-	r.registry.ReportOutcome(task.Id, outcome, &exitCode, summary)
 
+	// Кода выхода у встроенного зонда нет: процесса не было. В результате он
+	// остаётся нулевым — этого поля ждёт сервер, — но в журнал и в реестр не
+	// идёт, иначе строка «исход=ExitCodeError код=0» противоречит сама себе.
+	exitCode := 0
 	result.ExitCode = &exitCode
 	result.Outcome = string(outcome)
 	result.Console = output
 	result.ErrorConsole = errText
 
-	logRun(task, node, outcome, exitCode, time.Since(started), summary)
-	return result
+	return result, runReport{outcome: outcome, summary: summary, elapsed: time.Since(started)}
 }
 
 // indexOf возвращает позицию значения в срезе (-1, если его нет).
@@ -381,7 +445,7 @@ func indexOf(items []string, value string) int {
 
 // executeOnce запускает процесс зонда один раз и возвращает собранный результат.
 func (r *ProbeRunner) executeOnce(
-	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) ActionData {
+	ctx context.Context, task *TaskInfo, node, execName string, args, env []string) (ActionData, runReport) {
 
 	callLine := execName + " " + strings.Join(args, " ")
 	started := time.Now()
@@ -422,6 +486,18 @@ func (r *ProbeRunner) executeOnce(
 
 	err := cmd.Start()
 	if err != nil {
+		// Отмена успела прийти до самого запуска: exec отказывается стартовать по
+		// отменённому контексту. Зонд тут ни при чём — задачу удалили (или проба
+		// останавливается), и обходиться с этим надо как с отменой, а не как с
+		// поломкой. Иначе по удалённой задаче уходит выдуманный результат «зонд не
+		// запустился», а в журнале появляется ERROR на ровном месте.
+		if runCtx.Err() != nil {
+			message := cancelReason
+			if ctx.Err() != nil {
+				message = "Проба останавливается — замер не начат"
+			}
+			return r.cancelledRun(task, node, started, message, &result)
+		}
 		// Зонд не запустился (например, утилита не установлена) — ошибка обязана
 		// дойти до сервера как результат, иначе задача выглядит «молча пропавшей».
 		message := fmt.Sprintf("Не удалось запустить зонд «%s»: %v", execName, err)
@@ -431,7 +507,7 @@ func (r *ProbeRunner) executeOnce(
 		r.registry.ReportOutcome(task.Id, OutcomeStartFailed, nil, message)
 		result.Outcome = string(OutcomeStartFailed)
 		result.ErrorConsole = message
-		return result
+		return result, runReport{}
 	}
 
 	waitErr := cmd.Wait()
@@ -441,16 +517,7 @@ func (r *ProbeRunner) executeOnce(
 	exitCode := cmd.ProcessState.ExitCode()
 
 	if cancelled {
-		// Задачи больше нет — результат никому не нужен: не отправляем его серверу,
-		// иначе в отчёте появится обрывок замера по уже удалённой задаче.
-		logRunner.Warn("Задача удалена — выполнение прервано",
-			"название", task.Title, "узел", node, "режим", task.Mode,
-			"длительность", time.Since(started).Round(time.Millisecond), "задача", task.Id)
-		r.registry.ReportOutcome(task.Id, OutcomeNotStarted, nil, "Задача удалена — выполнение прервано")
-		result.Outcome = string(OutcomeNotStarted)
-		result.ErrorConsole = "Задача удалена — выполнение прервано"
-		result.Cancelled = true
-		return result
+		return r.cancelledRun(task, node, started, cancelReason, &result)
 	}
 
 	output := stdout.String()
@@ -479,29 +546,37 @@ func (r *ProbeRunner) executeOnce(
 	if outcome == OutcomeSuccess {
 		summary = lastLine(output)
 	}
-	r.registry.ReportOutcome(task.Id, outcome, &exitCode, summary)
 
 	result.ExitCode = &exitCode
 	result.Outcome = string(outcome)
 	result.Console = output
 	result.ErrorConsole = errText
 
-	logRun(task, node, outcome, exitCode, time.Since(started), summary)
-	return result
+	return result, runReport{
+		outcome: outcome, exitCode: &exitCode, summary: summary, elapsed: time.Since(started),
+	}
 }
 
 // logRun пишет итог одного прогона зонда: успех — Info, нештатный исход — Warn.
 // По записи видно, когда, какая задача и по какому узлу отработала и с каким результатом.
-func logRun(task *TaskInfo, node string, outcome RunOutcome, exitCode int, elapsed time.Duration, summary string) {
+func logRun(task *TaskInfo, node string, outcome RunOutcome, exitCode *int,
+	elapsed time.Duration, summary string) {
+
 	fields := []any{
 		"название", task.Title,
 		"узел", node,
 		"режим", task.Mode,
 		"исход", outcome,
-		"код", exitCode,
+	}
+	// Код выхода есть только у внешнего зонда: у встроенного процесса нет, и
+	// «код=0» рядом с нештатным исходом только сбивал бы с толку.
+	if exitCode != nil {
+		fields = append(fields, "код", *exitCode)
+	}
+	fields = append(fields,
 		"длительность", elapsed.Round(time.Millisecond),
 		"задача", task.Id,
-	}
+	)
 	if outcome == OutcomeSuccess {
 		logRunner.Info("Задача выполнена", fields...)
 		return

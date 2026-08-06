@@ -176,14 +176,28 @@ func TestPortExhaustionHint(t *testing.T) {
 	// «address already in use» при привязке к порту 0 означает не конфликт,
 	// а исчерпание эфемерных портов. Без подсказки это уводит в сторону:
 	// на боевой пробе такая ошибка шла тысячами и выглядела необъяснимо.
-	got := portExhaustionHint("Ошибка встроенного twping: не удалось открыть тестовый сокет: " +
-		"listen udp4 10.123.20.142:0: bind: address already in use")
+	got := portExhaustionHint("Ошибка встроенного twping: не удалось открыть тестовый сокет: "+
+		"listen udp4 10.123.20.142:0: bind: address already in use",
+		[]string{"-c", "100", "192.0.2.1"})
 	if !strings.Contains(got, "ip_local_port_range") {
 		t.Errorf("подсказка не называет, что чинить: %q", got)
 	}
 
 	// Прочие ошибки подсказкой не засоряем.
-	if got := portExhaustionHint("Ошибка встроенного twping: сервер отклонил сессию"); got != "" {
+	if got := portExhaustionHint("Ошибка встроенного twping: сервер отклонил сессию", nil); got != "" {
 		t.Errorf("подсказка добавлена к посторонней ошибке: %q", got)
+	}
+
+	// Диапазон из одного порта задала сама проба: там нечему кончаться — занят
+	// именно этот номер. Совет «расширьте эфемерный диапазон» тут уводит не туда.
+	pooled := portExhaustionHint("Ошибка встроенного twping: не удалось открыть тестовый сокет: "+
+		"нет свободного порта в диапазоне 31400-31400: listen udp4 10.123.20.142:31400: "+
+		"bind: address already in use",
+		[]string{"-P", "31400-31400", "-c", "100", "192.0.2.1"})
+	if !strings.Contains(pooled, "31400") || !strings.Contains(pooled, "карантин") {
+		t.Errorf("подсказка про порт пула не объясняет происходящее: %q", pooled)
+	}
+	if strings.Contains(pooled, "уменьшите Probe:MaxParallel") {
+		t.Errorf("подсказка советует лечить не то: %q", pooled)
 	}
 }

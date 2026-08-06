@@ -80,6 +80,34 @@ func TestCancelTask_KillsRunningProbe(t *testing.T) {
 	}
 }
 
+func TestExecute_CancelledBeforeProcessStarted(t *testing.T) {
+	// Отмена может прийти в узкое окно между регистрацией запуска и самим
+	// стартом процесса: exec тогда отказывается запускать зонд по отменённому
+	// контексту, и запуск падает с ошибкой, хотя зонд ни при чём.
+	//
+	// Раньше это оформлялось как «зонд не запустился»: по удалённой задаче
+	// уходил выдуманный результат, а в журнал — ERROR. На боевой пробе окно
+	// узкое, но при тысячах замеров в него попадают регулярно; в тестах ошибка
+	// всплывала примерно в одном полном прогоне из четырёх. Здесь оно
+	// воспроизводится точно: контекст отменён ещё до вызова.
+	exec, args := longRunningProbe()
+	runner, _, _ := newTestRunner(t, exec, args)
+	task := probeTask("22222222-2222-2222-2222-222222222222")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	execName, cmdArgs, env := runner.buildCommand(task, "127.0.0.1")
+	result := runner.execute(ctx, task, "127.0.0.1", execName, cmdArgs, env)
+
+	if !result.Cancelled {
+		t.Error("прерванный до старта замер не помечен отменённым — результат уйдёт серверу")
+	}
+	if result.Outcome == string(OutcomeStartFailed) {
+		t.Errorf("отмена оформлена как поломка зонда: %s", result.ErrorConsole)
+	}
+}
+
 func TestCancelAll_KillsEveryRunningProbe(t *testing.T) {
 	exec, args := longRunningProbe()
 	runner, _, cancels := newTestRunner(t, exec, args)

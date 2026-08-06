@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,22 +55,56 @@ func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (
 	if extra := strings.TrimSpace(errOut.String()); extra != "" {
 		message += ": " + extra
 	}
-	return output, message + portExhaustionHint(message)
+	return output, message + portExhaustionHint(message, args)
 }
 
-// portExhaustionHint добавляет подсказку, когда замеры упёрлись в эфемерные
-// порты. Сама ошибка ядра об этом не говорит: «address already in use» при
-// привязке к порту 0 выглядит как конфликт, хотя означает, что свободных
-// портов в диапазоне не осталось.
+// portExhaustionHint добавляет подсказку, когда замеры упёрлись в порты. Сама
+// ошибка ядра об этом не говорит: «address already in use» при привязке к
+// порту 0 выглядит как конфликт, хотя означает, что свободных портов в
+// диапазоне не осталось.
 //
-// Каждый замер TWAMP занимает два порта — TCP для управляющего соединения и
-// UDP для тестового, — поэтому штатные 32768–60999 (около 28 тысяч) кончаются
-// на нескольких тысячах одновременных замеров.
-func portExhaustionHint(message string) string {
+// Подсказки две, и путать их нельзя. Если диапазон зонду задала проба (пул
+// выдал один номер, отсюда «-P N-N»), кончиться там нечему: занят ровно этот
+// номер, и виноват чужой сокет, а не размер эфемерного диапазона. Совет
+// «расширьте ip_local_port_range» в этом случае уводит не туда — лечится
+// такое разведением диапазонов пула и ядра.
+//
+// Если же диапазон не задан, порт выбирает ядро, и тогда действительно могли
+// закончиться эфемерные порты: каждый замер TWAMP занимает два — TCP для
+// управляющего соединения и UDP для тестового, — поэтому штатные 32768–60999
+// (около 28 тысяч) кончаются на нескольких тысячах одновременных замеров.
+func portExhaustionHint(message string, args []string) string {
 	if !strings.Contains(message, "address already in use") {
 		return ""
+	}
+	if port, single := singlePortRange(args); single {
+		return fmt.Sprintf(". Порт %d выдан пулом пробы (Probe:PortRange) и занят"+
+			" посторонним процессом: проба уведёт его в карантин и повторит замер"+
+			" с другим номером. Если это повторяется, диапазон пула пересекается"+
+			" с эфемерным диапазоном ядра — разведите их"+
+			" (sysctl net.ipv4.ip_local_port_range либо ip_local_reserved_ports,"+
+			" см. 99-twamp-probe.conf из пакета)", port)
 	}
 	return ". Похоже, закончились свободные порты: каждый замер занимает два. " +
 		"Расширьте диапазон (sysctl net.ipv4.ip_local_port_range = 1024 65535 — " +
 		"он есть в 99-twamp-probe.conf из пакета) или уменьшите Probe:MaxParallel"
+}
+
+// singlePortRange распознаёт вырожденный диапазон «-P N-N» — признак того, что
+// номер зонду выдал пул пробы, а не выбрал администратор.
+func singlePortRange(args []string) (int, bool) {
+	idx := indexOf(args, "-P")
+	if idx < 0 || idx+1 >= len(args) {
+		return 0, false
+	}
+
+	low, high, ok := strings.Cut(args[idx+1], "-")
+	if !ok || low != high {
+		return 0, false
+	}
+	port, err := strconv.Atoi(low)
+	if err != nil {
+		return 0, false
+	}
+	return port, true
 }

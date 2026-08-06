@@ -107,8 +107,8 @@ func TestPortPool_CancelStopsWaiting(t *testing.T) {
 }
 
 func TestPortPool_BlacklistRemovesPortFromRotation(t *testing.T) {
-	// Порт, занятый посторонним процессом, в оборот больше не идёт: иначе
-	// каждый следующий замер налетал бы на ту же ошибку.
+	// Порт, занятый посторонним процессом, на время карантина в оборот не идёт:
+	// иначе каждый следующий замер налетал бы на ту же ошибку.
 	pool, _ := NewPortPool(20000, 20001)
 
 	bad, _ := pool.Acquire(context.Background())
@@ -130,7 +130,62 @@ func TestPortPool_BlacklistRemovesPortFromRotation(t *testing.T) {
 	}
 
 	if _, _, banned, _ := pool.Stats(); banned != 1 {
-		t.Errorf("исключённых портов %d, ожидался 1", banned)
+		t.Errorf("портов в карантине %d, ожидался 1", banned)
+	}
+}
+
+func TestPortPool_QuarantineExpires(t *testing.T) {
+	// Чужой сокет живёт минуты, а пул — месяцами: отобранный порт обязан
+	// вернуться в оборот сам, иначе за неделю от диапазона осталась бы половина.
+	pool, _ := NewPortPool(20000, 20000) // ровно один порт
+	pool.quarantine = 50 * time.Millisecond
+
+	bad, _ := pool.Acquire(context.Background())
+	pool.Blacklist(bad)
+
+	// Пока карантин идёт, порта нет.
+	short, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, ok := pool.Acquire(short); ok {
+		t.Fatal("порт выдан во время карантина")
+	}
+
+	// А по его окончании ожидание завершается само — Release тут никого не будит.
+	ctx, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	port, ok := pool.Acquire(ctx)
+	if !ok {
+		t.Fatal("порт не вернулся в пул после карантина")
+	}
+	if port != bad {
+		t.Errorf("выдан порт %d, ожидался вернувшийся из карантина %d", port, bad)
+	}
+	if _, _, banned, _ := pool.Stats(); banned != 0 {
+		t.Errorf("в карантине осталось %d портов, ожидалось 0", banned)
+	}
+}
+
+func TestPortPool_QuarantineDoesNotDuplicateTakenPort(t *testing.T) {
+	// Порт мог быть выдан заново уже после карантина. Возвращать его в free
+	// повторно нельзя: два замера получили бы один номер.
+	pool, _ := NewPortPool(20000, 20000)
+	pool.quarantine = 20 * time.Millisecond
+
+	port, _ := pool.Acquire(context.Background())
+	pool.Blacklist(port)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	again, ok := pool.Acquire(ctx) // порт вернулся и снова выдан
+	if !ok {
+		t.Fatal("порт не вернулся из карантина")
+	}
+
+	time.Sleep(40 * time.Millisecond) // с запасом переживаем прежний срок
+	free, taken, _, _ := pool.Stats()
+	if free != 0 || taken != 1 {
+		t.Errorf("после карантина свободно=%d занято=%d, ожидалось 0 и 1 (порт %d выдан)",
+			free, taken, again)
 	}
 }
 
@@ -170,28 +225,37 @@ func TestParsePortPool_Errors(t *testing.T) {
 
 func TestWithLocalPort(t *testing.T) {
 	// Каждой утилите порт передаётся её способом.
-	twamp := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 20005)
+	twamp, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 20005)
 	if len(twamp) < 2 || twamp[0] != "-P" || twamp[1] != "20005-20005" {
 		t.Errorf("twping получил %v, ожидался флаг -P 20005-20005", twamp)
 	}
+	if !applied {
+		t.Error("порт передан зонду, но withLocalPort сообщил обратное")
+	}
 
 	// Свой диапазон задачи не перебиваем.
-	own := withLocalPort(ModeTWamp, []string{"-P", "9000-9100", "10.0.0.1"}, 20005)
+	own, applied := withLocalPort(ModeTWamp, []string{"-P", "9000-9100", "10.0.0.1"}, 20005)
 	if own[1] != "9000-9100" {
 		t.Errorf("диапазон задачи заменён: %v", own)
 	}
+	if applied {
+		t.Error("диапазон задан задачей — порт пула зонду не достался, а отмечен как применённый")
+	}
 
 	// near-end не задан — добавляем «:порт» сразу за адресом рефлектора.
-	twampy := withLocalPort(ModeTWampy,
+	twampy, applied := withLocalPort(ModeTWampy,
 		[]string{"-m", "twampy", "sender", "10.0.0.1", "-c", "10"}, 20006)
 	if len(twampy) < 5 || twampy[4] != ":20006" {
 		t.Errorf("twampy получил %v, ожидался near-end :20006 после узла", twampy)
+	}
+	if !applied {
+		t.Error("порт передан twampy, но withLocalPort сообщил обратное")
 	}
 
 	// near-end задан задачей: порт дописывается к нему, а не вставляется
 	// отдельным аргументом — иначе адрес съехал бы на третью позицию и замер
 	// пошёл бы не с того интерфейса.
-	withNear := withLocalPort(ModeTWampy,
+	withNear, _ := withLocalPort(ModeTWampy,
 		[]string{"-m", "twampy", "sender", "10.93.47.146:5018", "10.123.20.140",
 			"-c", "150", "-i", "1000"}, 20006)
 	want := []string{"-m", "twampy", "sender", "10.93.47.146:5018", "10.123.20.140:20006",
@@ -200,30 +264,40 @@ func TestWithLocalPort(t *testing.T) {
 		t.Errorf("получено %v, ожидалось %v", withNear, want)
 	}
 
-	// Задача указала и адрес, и порт — её выбор важнее.
-	ownPort := withLocalPort(ModeTWampy,
+	// Задача указала и адрес, и порт — её выбор важнее. Отвечать за такой порт
+	// пул не может: упадёт он — карантинить наш номер бессмысленно.
+	ownPort, applied := withLocalPort(ModeTWampy,
 		[]string{"-m", "twampy", "sender", "10.0.0.1", "10.123.20.140:5000"}, 20006)
 	if ownPort[4] != "10.123.20.140:5000" {
 		t.Errorf("порт задачи заменён: %v", ownPort)
 	}
+	if applied {
+		t.Error("порт задан задачей — порт пула зонду не достался, а отмечен как применённый")
+	}
 
 	// IPv6 в скобках: двоеточия внутри адреса за порт не считаются.
-	v6 := withLocalPort(ModeTWampy,
+	v6, _ := withLocalPort(ModeTWampy,
 		[]string{"-m", "twampy", "sender", "[2001:db8::1]:5018", "[2001:db8::2]"}, 20006)
 	if v6[4] != "[2001:db8::2]:20006" {
 		t.Errorf("IPv6 near-end получил %q, ожидался [2001:db8::2]:20006", v6[4])
 	}
 
+	// Вызов не похож на «sender <адрес>» — вмешиваться некуда.
+	odd, applied := withLocalPort(ModeTWampy, []string{"-m", "twampy", "responder"}, 20006)
+	if len(odd) != 3 || applied {
+		t.Errorf("нестандартный вызов изменён: %v (применён=%v)", odd, applied)
+	}
+
 	// Для ping локальный порт бессмыслен.
-	ping := withLocalPort(ModeWinPing, []string{"10.0.0.1", "-c", "2"}, 20007)
-	if len(ping) != 3 {
-		t.Errorf("аргументы ping изменены: %v", ping)
+	ping, applied := withLocalPort(ModeWinPing, []string{"10.0.0.1", "-c", "2"}, 20007)
+	if len(ping) != 3 || applied {
+		t.Errorf("аргументы ping изменены: %v (применён=%v)", ping, applied)
 	}
 
 	// Выключенный пул ничего не добавляет.
-	off := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 0)
-	if len(off) != 3 {
-		t.Errorf("при выключенном пуле аргументы изменены: %v", off)
+	off, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 0)
+	if len(off) != 3 || applied {
+		t.Errorf("при выключенном пуле аргументы изменены: %v (применён=%v)", off, applied)
 	}
 }
 
