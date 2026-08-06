@@ -74,7 +74,7 @@ func TestPortPool_WaitsInsteadOfFailing(t *testing.T) {
 		t.Fatal("освобождение порта не разбудило ожидающего")
 	}
 
-	if _, _, _, waited := pool.Stats(); waited != 1 {
+	if waited := pool.Stats().Waited; waited != 1 {
 		t.Errorf("ожиданий засчитано %d, ожидалось 1", waited)
 	}
 }
@@ -129,7 +129,7 @@ func TestPortPool_BlacklistRemovesPortFromRotation(t *testing.T) {
 		t.Error("выдан порт, хотя свободных не осталось")
 	}
 
-	if _, _, banned, _ := pool.Stats(); banned != 1 {
+	if banned := pool.Stats().Banned; banned != 1 {
 		t.Errorf("портов в карантине %d, ожидался 1", banned)
 	}
 }
@@ -160,7 +160,7 @@ func TestPortPool_QuarantineExpires(t *testing.T) {
 	if port != bad {
 		t.Errorf("выдан порт %d, ожидался вернувшийся из карантина %d", port, bad)
 	}
-	if _, _, banned, _ := pool.Stats(); banned != 0 {
+	if banned := pool.Stats().Banned; banned != 0 {
 		t.Errorf("в карантине осталось %d портов, ожидалось 0", banned)
 	}
 }
@@ -182,7 +182,8 @@ func TestPortPool_QuarantineDoesNotDuplicateTakenPort(t *testing.T) {
 	}
 
 	time.Sleep(40 * time.Millisecond) // с запасом переживаем прежний срок
-	free, taken, _, _ := pool.Stats()
+	stats := pool.Stats()
+	free, taken := stats.Free, stats.Taken
 	if free != 0 || taken != 1 {
 		t.Errorf("после карантина свободно=%d занято=%d, ожидалось 0 и 1 (порт %d выдан)",
 			free, taken, again)
@@ -364,6 +365,6 @@ func TestExecute_RetriesOnBusyPort(t *testing.T) {
 	// Занятые порты исключены из оборота — следующий замер их не получит.
 	// Сколько именно, зависит от везения (пул перемешан, свободный номер мог
 	// выпасть первым), поэтому число не проверяем — только сам факт замера.
-	_, _, banned, _ := pool.Stats()
+	banned := pool.Stats().Banned
 	t.Logf("замер прошёл на порту %d, исключено занятых портов: %d", free, banned)
 }

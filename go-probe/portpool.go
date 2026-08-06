@@ -19,6 +19,11 @@
 // берут порт отсюда, поэтому замеры разных режимов не могут получить один и
 // тот же номер. Управляющее соединение twping идёт по TCP и на пул не влияет:
 // пространства портов TCP и UDP у ядра разные.
+//
+// Порт выдаётся в аренду: он принадлежит замеру от выдачи до возврата, а после
+// возврата не уходит следующему замеру сразу — сначала отлёживается (см.
+// portCooldown) и встаёт в конец очереди. Номера тем самым идут по кругу, а не
+// перевыбираются между одними и теми же.
 package main
 
 import (
@@ -34,21 +39,30 @@ import (
 // PortPool раздаёт зондам локальные порты и следит, чтобы два замера не взяли
 // один и тот же. Нулевой указатель означает «пул выключен» — порт выбирает ядро.
 type PortPool struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	free   []int
-	taken  map[int]bool
-	banned map[int]time.Time // порты в карантине и время его окончания
-	from   int
-	to     int
-	closed bool
-	done   chan struct{} // закрывается в Close — останавливает сборщик карантина
+	mu      sync.Mutex
+	cond    *sync.Cond
+	free    []int             // готовые к выдаче, в порядке очереди
+	cooling []coolingPort     // возвращённые, отлёживаются перед новой выдачей
+	taken   map[int]bool      // в аренде у замеров
+	banned  map[int]time.Time // порты в карантине и время его окончания
+	from    int
+	to      int
+	closed  bool
+	done    chan struct{} // закрывается в Close — останавливает сборщик
 
-	// quarantine — срок карантина. Поле, а не константа, только ради тестов:
+	// quarantine и cooldown — сроки. Поля, а не константы, только ради тестов:
 	// ждать в них пять минут никто не станет.
 	quarantine time.Duration
+	cooldown   time.Duration
 
-	waited int // сколько раз замеры ждали свободного порта — для журнала
+	waited  int // сколько раз замеры ждали свободного порта — для журнала
+	hurried int // сколько раз порт выдан, не долежав cooldown (пул под нагрузкой)
+}
+
+// coolingPort — возвращённый порт и время, когда он снова годен к выдаче.
+type coolingPort struct {
+	port  int
+	until time.Time
 }
 
 // portQuarantine — на сколько порт выводится из оборота, если его занял
@@ -60,6 +74,20 @@ type PortPool struct {
 // бы половина. Пяти минут хватает, чтобы переждать и чужое соединение, и
 // TIME_WAIT, но мало, чтобы пул заметно похудел.
 const portQuarantine = 5 * time.Minute
+
+// portCooldown — сколько порт отлёживается после возврата, прежде чем уйти
+// следующему замеру.
+//
+// Зачем: закончившийся замер не значит, что о его порте забыли все. Рефлектор
+// может ещё досылать ответы на последние пакеты, а сетевое оборудование —
+// держать запись трансляции. Если отдать номер сразу, эти хвосты прилетят уже
+// новому замеру — на том же порту, с того же адреса, — и попадут в его
+// статистику. Секунды хватает, чтобы хвост рассеялся.
+//
+// Под нагрузкой срок не соблюдается: когда готовых портов не осталось, замеру
+// отдаётся самый долго лежащий из отлёживающихся — очередь замеров хуже, чем
+// недолежавший порт. Такие случаи считает счётчик hurried.
+const portCooldown = time.Second
 
 // NewPortPool создаёт пул портов из диапазона [from, to].
 func NewPortPool(from, to int) (*PortPool, error) {
@@ -76,6 +104,7 @@ func NewPortPool(from, to int) (*PortPool, error) {
 		done:   make(chan struct{}),
 
 		quarantine: portQuarantine,
+		cooldown:   portCooldown,
 	}
 	for port := from; port <= to; port++ {
 		p.free = append(p.free, port)
@@ -160,7 +189,7 @@ func (p *PortPool) Acquire(ctx context.Context) (int, bool) {
 	waited := false
 	for {
 		p.expireLocked()
-		if len(p.free) > 0 || p.closed || ctx.Err() != nil {
+		if len(p.free) > 0 || len(p.cooling) > 0 || p.closed || ctx.Err() != nil {
 			break
 		}
 		if !waited {
@@ -174,21 +203,37 @@ func (p *PortPool) Acquire(ctx context.Context) (int, bool) {
 				p.cond.Broadcast()
 			}()
 		}
-		// Разбудит либо Release, либо сборщик карантина: портов, которые никто
-		// не вернёт, в пуле не бывает.
+		// Разбудит либо Release, либо сборщик: портов, которые никто не вернёт,
+		// в пуле не бывает.
 		p.cond.Wait()
 	}
 	if p.closed || ctx.Err() != nil {
 		return 0, false
 	}
 
-	port := p.free[len(p.free)-1]
-	p.free = p.free[:len(p.free)-1]
+	var port int
+	switch {
+	case len(p.free) > 0:
+		// Выдаём с головы очереди: там номер, который отдыхал дольше всех.
+		// Брать с конца (как раньше) означало бы гонять по кругу два-три
+		// последних номера, пока остальной диапазон простаивает.
+		port = p.free[0]
+		p.free = p.free[1:]
+
+	default:
+		// Готовых портов нет — берём самый долго лежащий из отлёживающихся.
+		// Очередь замеров хуже недолежавшего порта.
+		port = p.cooling[0].port
+		p.cooling = p.cooling[1:]
+		p.hurried++
+	}
 	p.taken[port] = true
 	return port, true
 }
 
-// Release возвращает порт в пул.
+// Release завершает аренду: порт возвращается в пул, но не сразу к выдаче —
+// сначала отлёживается portCooldown, чтобы хвосты предыдущего замера не попали
+// в следующий.
 func (p *PortPool) Release(port int) {
 	if p == nil || port == 0 {
 		return
@@ -198,7 +243,9 @@ func (p *PortPool) Release(port int) {
 	if p.taken[port] {
 		delete(p.taken, port)
 		if _, quarantined := p.banned[port]; !quarantined {
-			p.free = append(p.free, port)
+			// Срок у всех одинаковый, поэтому append сохраняет очередь
+			// упорядоченной по времени готовности.
+			p.cooling = append(p.cooling, coolingPort{port: port, until: time.Now().Add(p.cooldown)})
 		}
 	}
 	p.mu.Unlock()
@@ -221,14 +268,20 @@ func (p *PortPool) Blacklist(port int) {
 	p.cond.Signal()
 }
 
-// expireLocked возвращает в оборот порты, отсидевшие карантин.
-// Вызывается под захваченным замком.
+// expireLocked переводит в готовые к выдаче порты, отсидевшие свой срок:
+// отлежавшиеся после аренды и отбывшие карантин. Вызывается под замком.
 func (p *PortPool) expireLocked() {
-	if len(p.banned) == 0 {
-		return
-	}
-
 	now := time.Now()
+
+	// Очередь отлёживающихся упорядочена по времени, поэтому достаточно снять
+	// с головы всё, чей срок вышел.
+	ready := 0
+	for ready < len(p.cooling) && !now.Before(p.cooling[ready].until) {
+		p.free = append(p.free, p.cooling[ready].port)
+		ready++
+	}
+	p.cooling = p.cooling[ready:]
+
 	for port, until := range p.banned {
 		if now.Before(until) {
 			continue
@@ -243,16 +296,35 @@ func (p *PortPool) expireLocked() {
 	}
 }
 
-// Stats сообщает состояние пула: свободно, занято, в карантине, сколько раз ждали.
-func (p *PortPool) Stats() (free, taken, banned, waited int) {
+// PoolStats — снимок состояния пула для журнала и страницы состояния.
+type PoolStats struct {
+	Free    int // готовы к выдаче, включая отлёживающиеся после аренды
+	Cooling int // из них отлёживаются — выданы будут только под нагрузкой
+	Taken   int // в аренде у идущих замеров
+	Banned  int // в карантине: заняты посторонним процессом
+	Waited  int // сколько раз замеры ждали свободного порта
+	Hurried int // сколько раз порт выдан, не долежав cooldown
+}
+
+// Stats сообщает состояние пула.
+func (p *PortPool) Stats() PoolStats {
 	if p == nil {
-		return 0, 0, 0, 0
+		return PoolStats{}
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.expireLocked()
-	return len(p.free), len(p.taken), len(p.banned), p.waited
+	return PoolStats{
+		// Отлёживающиеся числятся свободными: они не заняты замером и будут
+		// выданы, как только понадобятся.
+		Free:    len(p.free) + len(p.cooling),
+		Cooling: len(p.cooling),
+		Taken:   len(p.taken),
+		Banned:  len(p.banned),
+		Waited:  p.waited,
+		Hurried: p.hurried,
+	}
 }
 
 // Range возвращает границы диапазона (0, 0 — пул выключен).

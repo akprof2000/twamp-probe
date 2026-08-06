@@ -6,14 +6,42 @@ import (
 	"math"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// startTestReflector поднимает минимальный TWAMP-Light рефлектор: принимает тестовый
-// пакет и отражает его с метками t2/t3 в раскладке, которую разбирает отправитель.
-// Возвращает порт и функцию остановки.
+// twampyReflector — минимальный TWAMP-Light рефлектор: принимает тестовый пакет
+// и отражает его с метками t2/t3 в раскладке, которую разбирает отправитель.
+type twampyReflector struct {
+	port int
+	stop func()
+
+	mu      sync.Mutex
+	senders map[int]bool // порты, с которых приходили пакеты
+}
+
+// SenderPorts возвращает локальные порты отправителей, увиденные с другой
+// стороны провода: по ним видно, какой порт зонд занял на самом деле.
+func (r *twampyReflector) SenderPorts() []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ports := make([]int, 0, len(r.senders))
+	for port := range r.senders {
+		ports = append(ports, port)
+	}
+	return ports
+}
+
+// startTestReflector поднимает рефлектор. Возвращает порт и функцию остановки —
+// её и достаточно тестам, которым сами адреса отправителей не нужны.
 func startTestReflector(t *testing.T) (int, func()) {
+	r := startTwampyReflector(t)
+	return r.port, r.stop
+}
+
+// startTwampyReflector поднимает рефлектор и запоминает адреса отправителей.
+func startTwampyReflector(t *testing.T) *twampyReflector {
 	t.Helper()
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -21,6 +49,7 @@ func startTestReflector(t *testing.T) (int, func()) {
 	}
 	port := conn.LocalAddr().(*net.UDPAddr).Port
 	done := make(chan struct{})
+	refl := &twampyReflector{port: port, senders: map[int]bool{}}
 
 	go func() {
 		defer close(done)
@@ -46,6 +75,9 @@ func startTestReflector(t *testing.T) (int, func()) {
 			if n < 14 {
 				continue
 			}
+			refl.mu.Lock()
+			refl.senders[addr.Port] = true
+			refl.mu.Unlock()
 
 			t2 := twNow()
 			sseq := binary.BigEndian.Uint32(buf[0:4])
@@ -64,7 +96,9 @@ func startTestReflector(t *testing.T) (int, func()) {
 		}
 	}()
 
-	return port, func() { _ = conn.Close(); <-done }
+	refl.stop = func() { _ = conn.Close(); <-done }
+	t.Cleanup(refl.stop)
+	return refl
 }
 
 // isClosed — грубая проверка, что соединение закрыто (для завершения рефлектора).

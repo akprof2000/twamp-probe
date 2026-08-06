@@ -411,11 +411,15 @@ type ProbeState struct {
 	TwampyEmbedded bool `json:"twampyEmbedded"`
 
 	// Пул локальных портов (диапазон пуст — порты выбирает ядро).
-	PortRange   string `json:"portRange"`
-	PortsFree   int    `json:"portsFree"`
-	PortsTaken  int    `json:"portsTaken"`
-	PortsBanned int    `json:"portsBanned"`
-	PortsWaited int    `json:"portsWaited"`
+	PortRange string `json:"portRange"`
+	PortsFree int    `json:"portsFree"`
+	// Из свободных — те, что отлёживаются после аренды: их выдадут только под
+	// нагрузкой. Растущее portsHurried означает, что отлежаться они не успевают.
+	PortsCooling int `json:"portsCooling"`
+	PortsTaken   int `json:"portsTaken"`
+	PortsBanned  int `json:"portsBanned"`
+	PortsWaited  int `json:"portsWaited"`
+	PortsHurried int `json:"portsHurried"`
 
 	// Очереди.
 	QueueCapacity  int `json:"queueCapacity"`
@@ -437,7 +441,10 @@ func (a *apiServer) probeState(w http.ResponseWriter, r *http.Request) {
 
 	if from, to := a.ports.Range(); from > 0 {
 		state.PortRange = fmt.Sprintf("%d-%d", from, to)
-		state.PortsFree, state.PortsTaken, state.PortsBanned, state.PortsWaited = a.ports.Stats()
+		pool := a.ports.Stats()
+		state.PortsFree, state.PortsTaken = pool.Free, pool.Taken
+		state.PortsBanned, state.PortsWaited = pool.Banned, pool.Waited
+		state.PortsCooling, state.PortsHurried = pool.Cooling, pool.Hurried
 	}
 
 	writeJSON(w, state)

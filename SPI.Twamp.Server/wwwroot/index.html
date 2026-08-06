@@ -407,9 +407,11 @@ async function showProbeState(requestInfo) {
       : 'внешняя утилита';
 
     const ports = d.portRange
-      ? `${escHtml(d.portRange)}: свободно ${d.portsFree}, занято ${d.portsTaken}`
+      ? `${escHtml(d.portRange)}: свободно ${d.portsFree}, в аренде ${d.portsTaken}`
+        + (d.portsCooling ? `, отлёживается ${d.portsCooling}` : '')
         + (d.portsBanned ? `, в карантине ${d.portsBanned}` : '')
         + (d.portsWaited ? `, ожиданий ${d.portsWaited}` : '')
+        + (d.portsHurried ? `, выдано досрочно ${d.portsHurried}` : '')
       : 'выбирает ядро (Probe:PortRange не задан)';
 
     box.innerHTML = `<h2 style="font-size:14px">Состояние пробы ${escHtml(requestInfo)}

@@ -238,19 +238,19 @@ func (r *ProbeRunner) execute(
 		// Порт занят: в оборот он временно не идёт, иначе следующий замер
 		// налетел бы на ту же ошибку. Сам замер повторяем с другим номером.
 		r.ports.Blacklist(port)
-		free, _, quarantined, _ := r.ports.Stats()
+		pool := r.ports.Stats()
 
 		if attempt >= portRetries || result.Cancelled {
 			logRunner.Warn("Порт занят посторонним процессом — замер не удался",
 				"порт", port, "попыток", attempt, "режим", task.Mode,
-				"свободно", free, "в_карантине", quarantined,
+				"свободно", pool.Free, "в_карантине", pool.Banned,
 				"задача", task.Id, "узел", node)
 			r.report(task, node, report)
 			return result
 		}
 		logRunner.Warn("Порт занят посторонним процессом — в карантин, пробуем другой",
 			"порт", port, "попытка", attempt, "режим", task.Mode,
-			"свободно", free, "в_карантине", quarantined,
+			"свободно", pool.Free, "в_карантине", pool.Banned,
 			"задача", task.Id, "узел", node)
 	}
 }
