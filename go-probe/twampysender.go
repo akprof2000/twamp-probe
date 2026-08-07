@@ -37,6 +37,11 @@ type twampyOptions struct {
 	remoteIP   net.IP
 	remotePort int
 	localPort  int
+	// localIP — адрес near-end. Пустой означает «любой»: сокет встанет на
+	// 0.0.0.0 и займёт номер сразу на всех адресах машины. Когда адрес задан,
+	// порт занимается только на нём — на остальных тот же номер остаётся
+	// свободным, и пул может выдать его другому замеру.
+	localIP    net.IP
 	count      int
 	intervalMs int
 	tos        int
@@ -47,17 +52,20 @@ type twampyOptions struct {
 // runEmbeddedTwampy проводит замер встроенным отправителем и возвращает текст
 // итоговой таблицы (stdout) и текст ошибки (stderr-аналог). Совместим по формату
 // с python-выводом, поэтому серверный парсер работает без изменений.
-func runEmbeddedTwampy(ctx context.Context, args []string, deadline time.Time) (output, errText string) {
+func runEmbeddedTwampy(ctx context.Context, args []string, deadline time.Time) (output, errText string, leaked bool) {
 	opts, err := parseTwampyArgs(args)
 	if err != nil {
-		return "", fmt.Sprintf("Некорректные аргументы twampy sender: %v", err)
+		return "", fmt.Sprintf("Некорректные аргументы twampy sender: %v", err), false
 	}
 
+	// Отправитель здесь свой, а не библиотечный: цикл сам проверяет дедлайн и
+	// отмену на каждом витке и закрывает сокет, выходя. Поэтому порт всегда
+	// свободен к моменту возврата — признака leaked тут не бывает.
 	table, runErr := twampySession(ctx, opts, deadline)
 	if runErr != nil {
-		return "", fmt.Sprintf("Ошибка встроенного twampy sender: %v", runErr)
+		return "", fmt.Sprintf("Ошибка встроенного twampy sender: %v", runErr), false
 	}
-	return table, ""
+	return table, "", false
 }
 
 // twampySession проводит один сеанс отправителя и возвращает текст таблицы.
@@ -66,7 +74,7 @@ func twampySession(ctx context.Context, opts *twampyOptions, deadline time.Time)
 	if opts.remoteIP.To4() == nil {
 		network = "udp6"
 	}
-	conn, err := net.ListenUDP(network, &net.UDPAddr{Port: opts.localPort})
+	conn, err := net.ListenUDP(network, &net.UDPAddr{IP: opts.localIP, Port: opts.localPort})
 	if err != nil {
 		return "", fmt.Errorf("не удалось открыть UDP-сокет: %w", err)
 	}
@@ -308,10 +316,13 @@ func parseTwampyArgs(tokens []string) (*twampyOptions, error) {
 	if err != nil {
 		return nil, err
 	}
-	localPort := 0 // near-end по умолчанию :0 (эфемерный порт)
+	// near-end по умолчанию «:0» — любой адрес и эфемерный порт.
+	localPort := 0
+	localHost := ""
 	if len(positionals) > 1 {
-		if _, p, perr := parseTwampyAddr(positionals[1], 0); perr == nil {
+		if host, p, perr := parseTwampyAddr(positionals[1], 0); perr == nil {
 			localPort = p
+			localHost = host
 		}
 	}
 
@@ -334,6 +345,7 @@ func parseTwampyArgs(tokens []string) (*twampyOptions, error) {
 		remoteIP:   ip,
 		remotePort: farPort,
 		localPort:  localPort,
+		localIP:    net.ParseIP(localHost), // nil при пустом адресе — «любой»
 		count:      clampInt(count, 1, 9999),
 		intervalMs: maxInt(1, interval),
 		tos:        tos,

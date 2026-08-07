@@ -26,7 +26,7 @@ import (
 //
 // Аргументы — те же, что у внешней утилиты (адрес узла последним). Возвращает
 // текст вывода и текст ошибки; пустая ошибка означает успешный замер.
-func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (output, errText string) {
+func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (output, errText string, leaked bool) {
 	// Индивидуальный таймаут задачи — тот же контекст, что и отмена: клиент
 	// прерывается и на подключении, и во время сессии.
 	if !deadline.IsZero() {
@@ -35,19 +35,48 @@ func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (
 		defer cancel()
 	}
 
+	// Клиент запускается под сторожем, а не напрямую. Контекст останавливает
+	// его не везде: время ограничено только у подключения (30 секунд у Dialer),
+	// а дальше — чтение приветствия и весь обмен по управляющему каналу — идёт
+	// без дедлайнов и на отмену не смотрит. Достаточно рефлектору принять
+	// TCP-соединение и замолчать, и замер повисает навсегда: ни таймаут задачи,
+	// ни её удаление его не снимут.
+	//
+	// Чем это кончается, видно по боевой пробе: замеры копятся, задачи вечно
+	// числятся выполняющимися (новые запуски пропускаются), а их порты остаются
+	// в аренде — пул исчерпывается, и в нём не остаётся свободных номеров.
+	//
+	// Поэтому ждём ровно столько, сколько отпущено задаче, и возвращаемся.
+	// Настоящее лечение — дедлайны на управляющем канале в twping-go; здесь
+	// проба защищает себя тем, что ей доступно.
 	var out, errOut bytes.Buffer
-	err := twping.Run(ctx, args, &out, &errOut)
+	done := make(chan error, 1)
+	go func() { done <- twping.Run(ctx, args, &out, &errOut) }()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		// Клиент остался в горутине вместе со своими сокетами. Порт из пула
+		// вернуть нельзя — он занят, пока тот не закончит; об этом говорит
+		// признак leaked, по нему execute уводит номер в карантин.
+		if ctx.Err() == context.Canceled {
+			return out.String(), errCancelled.Error(), true
+		}
+		return out.String(), errTimeout.Error(), true
+	}
 
 	output = out.String()
 	switch {
 	case err == nil:
-		return output, strings.TrimSpace(errOut.String())
+		return output, strings.TrimSpace(errOut.String()), false
 
 	case ctx.Err() == context.DeadlineExceeded:
-		return output, errTimeout.Error()
+		// Клиент вернулся сам — сокеты закрыты, порт свободен.
+		return output, errTimeout.Error(), false
 
 	case ctx.Err() == context.Canceled:
-		return output, errCancelled.Error()
+		return output, errCancelled.Error(), false
 	}
 
 	// Диагностика клиента информативнее самой ошибки, поэтому показываем обе.
@@ -55,7 +84,7 @@ func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (
 	if extra := strings.TrimSpace(errOut.String()); extra != "" {
 		message += ": " + extra
 	}
-	return output, message + portExhaustionHint(message, args)
+	return output, message + portExhaustionHint(message, args), false
 }
 
 // portExhaustionHint добавляет подсказку, когда замеры упёрлись в порты. Сама

@@ -61,3 +61,14 @@ func ephemeralRange() (int, int) {
 	}
 	return low, high
 }
+
+// ephemeralPortsPerAddr — сколько эфемерных портов ядро может выдать на один
+// адрес. Из них берутся управляющие TCP-соединения twping, поэтому число
+// ограничивает замеры TWamp наравне с размером пула.
+func ephemeralPortsPerAddr() int {
+	low, high := ephemeralRange()
+	if low <= 0 || high < low {
+		return 0
+	}
+	return high - low + 1
+}

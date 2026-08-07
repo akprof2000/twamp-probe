@@ -122,7 +122,7 @@ func TestEmbeddedTwampy_RoundtripProducesTable(t *testing.T) {
 	defer stop()
 
 	args := strings.Fields("sender 127.0.0.1:" + itoa(port) + " :0 -c 5 -i 20")
-	output, errText := runEmbeddedTwampy(context.Background(), args, time.Now().Add(5*time.Second))
+	output, errText, _ := runEmbeddedTwampy(context.Background(), args, time.Now().Add(5*time.Second))
 
 	if errText != "" {
 		t.Fatalf("ошибок быть не должно: %s", errText)
@@ -147,7 +147,7 @@ func TestEmbeddedTwampy_NoReflectorFullLoss(t *testing.T) {
 	// Сессия ждёт ответов count*interval + 5 c (как оригинал), поэтому дедлайн с запасом,
 	// иначе таймаут сработает раньше печати NO STATS.
 	args := strings.Fields("sender 127.0.0.1:" + itoa(deadPort) + " :0 -c 3 -i 20")
-	output, _ := runEmbeddedTwampy(context.Background(), args, time.Now().Add(30*time.Second))
+	output, _, _ := runEmbeddedTwampy(context.Background(), args, time.Now().Add(30*time.Second))
 
 	if !strings.Contains(output, "NO STATS AVAILABLE") {
 		t.Errorf("ожидался NO STATS при полной потере:\n%s", output)
@@ -227,7 +227,7 @@ func TestEmbeddedTwampy_CancelStopsMeasurement(t *testing.T) {
 
 	done := make(chan string, 1)
 	go func() {
-		_, errText := runEmbeddedTwampy(ctx, args, time.Time{})
+		_, errText, _ := runEmbeddedTwampy(ctx, args, time.Time{})
 		done <- errText
 	}()
 
@@ -250,7 +250,7 @@ func TestEmbeddedTwampy_RespectsTaskTimeout(t *testing.T) {
 	args := []string{"127.0.0.1:20098", "-c", "1000", "-i", "100"}
 
 	started := time.Now()
-	_, errText := runEmbeddedTwampy(context.Background(), args, deadline)
+	_, errText, _ := runEmbeddedTwampy(context.Background(), args, deadline)
 
 	if !strings.Contains(errText, "таймауту") {
 		t.Errorf("замер завершился с «%s», ожидалось сообщение о таймауте", errText)

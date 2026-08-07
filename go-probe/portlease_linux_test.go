@@ -169,7 +169,7 @@ func TestLoad_PoolAgainstKernelEphemeral(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					for range leases / 50 {
-						port, ok := pool.Acquire(context.Background())
+						port, ok := pool.Acquire(context.Background(), "")
 						if !ok {
 							return
 						}
@@ -197,7 +197,7 @@ func TestLoad_PoolAgainstKernelEphemeral(t *testing.T) {
 						mu.Lock()
 						delete(held, port)
 						mu.Unlock()
-						pool.Release(port)
+						pool.Release("", port)
 					}
 				}()
 			}
@@ -234,6 +234,71 @@ func TestLoad_PoolAgainstKernelEphemeral(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoad_SamePortOnDifferentAddresses проверяет, ради чего порты считаются
+// по адресам: ядро различает сокеты по паре «адрес + порт», поэтому один и тот
+// же номер на разных адресах — не конфликт, а законные два сокета.
+//
+// Отсюда и ёмкость пробы: диапазон, умноженный на число локальных адресов.
+// Общий на всю машину счёт номеров отнимал бы ровно во столько же раз.
+func TestLoad_SamePortOnDifferentAddresses(t *testing.T) {
+	requireLoadTest(t)
+
+	// В Linux локален весь 127.0.0.0/8, поэтому разные адреса есть всегда —
+	// поднимать интерфейсы не нужно.
+	addresses := []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}
+	pool, err := NewPortPool(26000, 26099)
+	if err != nil {
+		t.Fatalf("пул не создался: %v", err)
+	}
+	defer pool.Close()
+
+	held := make([]*net.UDPConn, 0, len(addresses))
+	t.Cleanup(func() {
+		for _, conn := range held {
+			conn.Close()
+		}
+	})
+
+	ports := map[string]int{}
+	for _, addr := range addresses {
+		port, ok := pool.Acquire(context.Background(), addr)
+		if !ok {
+			t.Fatalf("пул отказал для адреса %s", addr)
+		}
+		ports[addr] = port
+
+		conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(addr), Port: port})
+		if err != nil {
+			t.Fatalf("не занять %s:%d — %v", addr, port, err)
+		}
+		held = append(held, conn)
+	}
+
+	// Каждому адресу выдан свой полный диапазон, поэтому номера совпадают:
+	// пул начинает отсчёт для каждого адреса заново.
+	t.Logf("выданы номера: %v", ports)
+
+	// Главное: занять один и тот же номер на другом адресе можно, и пул это
+	// разрешает — иначе замеры на .2 и .3 ждали бы освобождения из-за .1.
+	first := ports[addresses[0]]
+	conn, err := net.ListenUDP("udp4",
+		&net.UDPAddr{IP: net.ParseIP("127.0.0.9"), Port: first})
+	if err != nil {
+		t.Errorf("номер %d занят на 127.0.0.1, но и на 127.0.0.9 не даётся: %v", first, err)
+	} else {
+		conn.Close()
+	}
+
+	stats := pool.Stats()
+	if stats.Addresses != len(addresses) {
+		t.Errorf("пул ведёт %d адресов, ожидалось %d", stats.Addresses, len(addresses))
+	}
+	if want := len(addresses) * 100; stats.Capacity != want {
+		t.Errorf("ёмкость пула %d, ожидалось %d (диапазон × адреса)", stats.Capacity, want)
+	}
+	t.Logf("ёмкость: %d номеров на %d адресах", stats.Capacity, stats.Addresses)
 }
 
 // TestLoad_EverySocketInPoolRangeIsRegistered отвечает на главный вопрос:
@@ -285,10 +350,14 @@ func TestLoad_EverySocketInPoolRangeIsRegistered(t *testing.T) {
 		}
 
 		sockets := listUDPSockets(t)
+		// Номера числятся за адресами, но /proc/net/udp даёт плоский список
+		// портов, поэтому для сверки сводим аренду всех адресов воедино.
 		pool.mu.Lock()
-		leased := make(map[int]bool, len(pool.taken))
-		for port := range pool.taken {
-			leased[port] = true
+		leased := map[int]bool{}
+		for _, lease := range pool.byAddr {
+			for port := range lease.taken {
+				leased[port] = true
+			}
 		}
 		pool.mu.Unlock()
 

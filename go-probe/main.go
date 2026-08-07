@@ -106,10 +106,22 @@ func main() {
 	defer ports.Close()
 	if from, to := ports.Range(); from > 0 {
 		// Пул общий для всех режимов: twping и twampy берут номера отсюда и за
-		// порты друг с другом не конкурируют.
+		// порты друг с другом не конкурируют. Номера считаются по каждому
+		// локальному адресу отдельно, поэтому ёмкость кратна их числу.
+		addresses := localAddressCount()
 		logMain.Info("Порты зондов раздаёт проба — общий пул для TWamp и TWampy",
-			"диапазон", fmt.Sprintf("%d-%d", from, to), "всего", to-from+1,
+			"диапазон", fmt.Sprintf("%d-%d", from, to), "на_адрес", to-from+1,
+			"адресов", addresses, "всего", (to-from+1)*addresses,
 			"карантин", portQuarantine)
+
+		// Настройка, которая заведомо не сходится, обнаруживалась только по
+		// россыпи «address already in use» в журнале — и выглядела как проблема
+		// сети, а не как арифметика портов.
+		if budget := checkPortBudget(cfg.MaxParallel, from, to,
+			addresses, ephemeralPortsPerAddr()); budget != "" {
+			logMain.Warn("Портов может не хватить на настроенное число замеров",
+				"подробности", budget)
+		}
 		// Не «предупреждение», а описание расклада: перекрытие в поставляемых
 		// настройках сделано намеренно. Уровень оставлен предупреждающим, чтобы
 		// строка была видна при штатном Logging:Level = Warn — когда полезут
@@ -424,6 +436,10 @@ type ProbeState struct {
 	PortsBanned  int `json:"portsBanned"`
 	PortsWaited  int `json:"portsWaited"`
 	PortsHurried int `json:"portsHurried"`
+	// Номера считаются по каждому локальному адресу отдельно, поэтому ёмкость —
+	// это диапазон, умноженный на число адресов, с которых шли замеры.
+	PortsAddresses int `json:"portsAddresses"`
+	PortsCapacity  int `json:"portsCapacity"`
 
 	// Очереди.
 	QueueCapacity  int `json:"queueCapacity"`
@@ -449,6 +465,7 @@ func (a *apiServer) probeState(w http.ResponseWriter, r *http.Request) {
 		state.PortsFree, state.PortsTaken = pool.Free, pool.Taken
 		state.PortsBanned, state.PortsWaited = pool.Banned, pool.Waited
 		state.PortsCooling, state.PortsHurried = pool.Cooling, pool.Hurried
+		state.PortsAddresses, state.PortsCapacity = pool.Addresses, pool.Capacity
 	}
 
 	writeJSON(w, state)

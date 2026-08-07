@@ -21,7 +21,7 @@ func TestPortPool_GivesDistinctPorts(t *testing.T) {
 
 	seen := map[int]bool{}
 	for range 10 {
-		port, ok := pool.Acquire(context.Background())
+		port, ok := pool.Acquire(context.Background(), "")
 		if !ok {
 			t.Fatal("пул отказал, хотя свободные порты есть")
 		}
@@ -43,14 +43,14 @@ func TestPortPool_WaitsInsteadOfFailing(t *testing.T) {
 		t.Fatalf("пул не создался: %v", err)
 	}
 
-	first, ok := pool.Acquire(context.Background())
+	first, ok := pool.Acquire(context.Background(), "")
 	if !ok {
 		t.Fatal("не удалось занять единственный порт")
 	}
 
 	got := make(chan int, 1)
 	go func() {
-		port, ok := pool.Acquire(context.Background())
+		port, ok := pool.Acquire(context.Background(), "")
 		if ok {
 			got <- port
 		}
@@ -63,7 +63,7 @@ func TestPortPool_WaitsInsteadOfFailing(t *testing.T) {
 		// ожидаемо: второй замер ждёт
 	}
 
-	pool.Release(first)
+	pool.Release("", first)
 
 	select {
 	case port := <-got:
@@ -82,14 +82,14 @@ func TestPortPool_WaitsInsteadOfFailing(t *testing.T) {
 func TestPortPool_CancelStopsWaiting(t *testing.T) {
 	// Снятая задача не должна ждать порт вечно.
 	pool, _ := NewPortPool(20000, 20000)
-	if _, ok := pool.Acquire(context.Background()); !ok {
+	if _, ok := pool.Acquire(context.Background(), ""); !ok {
 		t.Fatal("не удалось занять единственный порт")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool, 1)
 	go func() {
-		_, ok := pool.Acquire(ctx)
+		_, ok := pool.Acquire(ctx, "")
 		done <- ok
 	}()
 
@@ -111,10 +111,10 @@ func TestPortPool_BlacklistRemovesPortFromRotation(t *testing.T) {
 	// иначе каждый следующий замер налетал бы на ту же ошибку.
 	pool, _ := NewPortPool(20000, 20001)
 
-	bad, _ := pool.Acquire(context.Background())
-	pool.Blacklist(bad)
+	bad, _ := pool.Acquire(context.Background(), "")
+	pool.Blacklist("", bad)
 
-	good, ok := pool.Acquire(context.Background())
+	good, ok := pool.Acquire(context.Background(), "")
 	if !ok {
 		t.Fatal("пул отказал, хотя один порт ещё свободен")
 	}
@@ -125,7 +125,7 @@ func TestPortPool_BlacklistRemovesPortFromRotation(t *testing.T) {
 	// Второй порт занят, исключённый не возвращается — свободных нет.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	if _, ok := pool.Acquire(ctx); ok {
+	if _, ok := pool.Acquire(ctx, ""); ok {
 		t.Error("выдан порт, хотя свободных не осталось")
 	}
 
@@ -140,20 +140,20 @@ func TestPortPool_QuarantineExpires(t *testing.T) {
 	pool, _ := NewPortPool(20000, 20000) // ровно один порт
 	pool.quarantine = 50 * time.Millisecond
 
-	bad, _ := pool.Acquire(context.Background())
-	pool.Blacklist(bad)
+	bad, _ := pool.Acquire(context.Background(), "")
+	pool.Blacklist("", bad)
 
 	// Пока карантин идёт, порта нет.
 	short, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	if _, ok := pool.Acquire(short); ok {
+	if _, ok := pool.Acquire(short, ""); ok {
 		t.Fatal("порт выдан во время карантина")
 	}
 
 	// А по его окончании ожидание завершается само — Release тут никого не будит.
 	ctx, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel2()
-	port, ok := pool.Acquire(ctx)
+	port, ok := pool.Acquire(ctx, "")
 	if !ok {
 		t.Fatal("порт не вернулся в пул после карантина")
 	}
@@ -171,12 +171,12 @@ func TestPortPool_QuarantineDoesNotDuplicateTakenPort(t *testing.T) {
 	pool, _ := NewPortPool(20000, 20000)
 	pool.quarantine = 20 * time.Millisecond
 
-	port, _ := pool.Acquire(context.Background())
-	pool.Blacklist(port)
+	port, _ := pool.Acquire(context.Background(), "")
+	pool.Blacklist("", port)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	again, ok := pool.Acquire(ctx) // порт вернулся и снова выдан
+	again, ok := pool.Acquire(ctx, "") // порт вернулся и снова выдан
 	if !ok {
 		t.Fatal("порт не вернулся из карантина")
 	}
@@ -200,12 +200,12 @@ func TestPortPool_DisabledPoolIsTransparent(t *testing.T) {
 		t.Fatal("пустая настройка должна выключать пул")
 	}
 
-	port, ok := pool.Acquire(context.Background())
+	port, ok := pool.Acquire(context.Background(), "")
 	if !ok || port != 0 {
 		t.Errorf("выключенный пул вернул порт %d (ok=%v), ожидался 0", port, ok)
 	}
-	pool.Release(port) // не должно паниковать
-	pool.Blacklist(port)
+	pool.Release("", port) // не должно паниковать
+	pool.Blacklist("", port)
 	pool.Close()
 }
 
@@ -224,18 +224,123 @@ func TestParsePortPool_Errors(t *testing.T) {
 	}
 }
 
+func TestPortPool_CountsPortsPerAddress(t *testing.T) {
+	// Ядро различает сокеты по паре «адрес + порт», поэтому номера считаются
+	// по каждому адресу отдельно: на 10.0.0.1 и 10.0.0.2 один и тот же номер —
+	// это два разных сокета, а не конфликт. Иначе проба теряла бы ёмкость
+	// ровно во столько раз, сколько адресов на машине.
+	pool, err := NewPortPool(20000, 20001) // два номера на адрес
+	if err != nil {
+		t.Fatalf("пул не создался: %v", err)
+	}
+	defer pool.Close()
+
+	first, ok := pool.Acquire(context.Background(), "10.0.0.1")
+	if !ok {
+		t.Fatal("пул отказал на первом адресе")
+	}
+	second, ok := pool.Acquire(context.Background(), "10.0.0.2")
+	if !ok {
+		t.Fatal("пул отказал на втором адресе — номера считаются общими на машину")
+	}
+	if first != second {
+		t.Logf("номера разошлись (%d и %d) — порядок выдачи перемешан, это нормально",
+			first, second)
+	}
+
+	// Занять номер повторно на том же адресе по-прежнему нельзя.
+	same, _ := pool.Acquire(context.Background(), "10.0.0.1")
+	if same == first {
+		t.Errorf("номер %d выдан дважды на одном адресе", first)
+	}
+
+	stats := pool.Stats()
+	if stats.Addresses != 2 {
+		t.Errorf("пул ведёт %d адресов, ожидалось 2", stats.Addresses)
+	}
+	if stats.Capacity != 4 {
+		t.Errorf("ёмкость %d, ожидалось 4 (2 номера × 2 адреса)", stats.Capacity)
+	}
+
+	// Возврат тоже адресный: освободив номер на одном адресе, второй не трогаем.
+	pool.Release("10.0.0.1", first)
+	if taken := pool.Stats().Taken; taken != 2 {
+		t.Errorf("после возврата одного номера в аренде %d, ожидалось 2", taken)
+	}
+}
+
+func TestCheckPortBudget(t *testing.T) {
+	// Настройка, которая заведомо не сходится, должна называться при старте,
+	// а не выясняться по россыпи «address already in use» в журнале.
+	const (
+		poolFrom = 25000
+		poolTo   = 65000 // 41 тысяча номеров на адрес
+		eph      = 24000 // столько эфемерных портов у ядра на адрес
+	)
+
+	// Замеров меньше, чем номеров, — говорить не о чем.
+	if got := checkPortBudget(20000, poolFrom, poolTo, 1, eph); got != "" {
+		t.Errorf("бюджет сходится, но выдано предупреждение: %s", got)
+	}
+
+	// Замеров больше, чем в пуле: лишние встанут в очередь за портом.
+	got := checkPortBudget(50000, poolFrom, poolTo, 1, eph)
+	if !strings.Contains(got, "в пуле") {
+		t.Errorf("переполнение пула не названо: %q", got)
+	}
+
+	// Пула хватает, а эфемерных портов ядра — нет: управляющие каналы twping
+	// живут там, и потолок оказывается ниже размера пула.
+	got = checkPortBudget(30000, poolFrom, poolTo, 1, eph)
+	if !strings.Contains(got, "эфемерных портов") {
+		t.Errorf("нехватка эфемерных портов не названа: %q", got)
+	}
+
+	// Несколько адресов умножают и то, и другое.
+	if got := checkPortBudget(60000, poolFrom, poolTo, 3, eph); got != "" {
+		t.Errorf("на трёх адресах бюджет сходится, но выдано предупреждение: %s", got)
+	}
+
+	// Про эфемерные портами ядра на не-Linux ничего не известно — молчим.
+	if got := checkPortBudget(60000, poolFrom, poolTo, 1, 0); got != "" &&
+		!strings.Contains(got, "в пуле") {
+		t.Errorf("без данных о ядре выдано лишнее предупреждение: %s", got)
+	}
+}
+
 func TestWithLocalPort(t *testing.T) {
 	// Каждой утилите порт передаётся её способом.
-	twamp, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 20005)
-	if len(twamp) < 2 || twamp[0] != "-P" || twamp[1] != "20005-20005" {
+	twamp, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, "10.0.0.9", 20005)
+	if len(twamp) < 4 || twamp[0] != "-P" || twamp[1] != "20005-20005" {
 		t.Errorf("twping получил %v, ожидался флаг -P 20005-20005", twamp)
+	}
+	// Адрес обязателен вместе с портом: номер арендован именно на нём, и учёт
+	// сойдётся с действительностью, только если зонд встанет туда же.
+	if len(twamp) < 4 || twamp[2] != "-S" || twamp[3] != "10.0.0.9" {
+		t.Errorf("twping получил %v, ожидался флаг -S 10.0.0.9", twamp)
 	}
 	if !applied {
 		t.Error("порт передан зонду, но withLocalPort сообщил обратное")
 	}
 
+	// Адрес определить не удалось — выбор остаётся за ядром, флага -S нет.
+	noAddr, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, "", 20005)
+	if slices.Contains(noAddr, "-S") {
+		t.Errorf("без известного адреса добавлен -S: %v", noAddr)
+	}
+	if !applied {
+		t.Error("порт передан зонду, но withLocalPort сообщил обратное")
+	}
+
+	// Задача выбрала адрес сама — не перебиваем.
+	ownAddr, applied := withLocalPort(ModeTWamp,
+		[]string{"-S", "10.0.0.5", "-c", "10", "10.0.0.1"}, "10.0.0.9", 20005)
+	if ownAddr[1] != "10.0.0.5" || applied {
+		t.Errorf("адрес задачи заменён: %v (применён=%v)", ownAddr, applied)
+	}
+
 	// Свой диапазон задачи не перебиваем.
-	own, applied := withLocalPort(ModeTWamp, []string{"-P", "9000-9100", "10.0.0.1"}, 20005)
+	own, applied := withLocalPort(ModeTWamp, []string{"-P", "9000-9100", "10.0.0.1"}, "10.0.0.9", 20005)
 	if own[1] != "9000-9100" {
 		t.Errorf("диапазон задачи заменён: %v", own)
 	}
@@ -243,11 +348,13 @@ func TestWithLocalPort(t *testing.T) {
 		t.Error("диапазон задан задачей — порт пула зонду не достался, а отмечен как применённый")
 	}
 
-	// near-end не задан — добавляем «:порт» сразу за адресом рефлектора.
+	// near-end не задан — добавляем «адрес:порт» сразу за адресом рефлектора.
+	// Адрес нужен не меньше порта: без него сокет встанет на 0.0.0.0 и займёт
+	// номер сразу на всех адресах машины, а арендован он только на одном.
 	twampy, applied := withLocalPort(ModeTWampy,
-		[]string{"-m", "twampy", "sender", "10.0.0.1", "-c", "10"}, 20006)
-	if len(twampy) < 5 || twampy[4] != ":20006" {
-		t.Errorf("twampy получил %v, ожидался near-end :20006 после узла", twampy)
+		[]string{"-m", "twampy", "sender", "10.0.0.1", "-c", "10"}, "10.0.0.9", 20006)
+	if len(twampy) < 5 || twampy[4] != "10.0.0.9:20006" {
+		t.Errorf("twampy получил %v, ожидался near-end 10.0.0.9:20006 после узла", twampy)
 	}
 	if !applied {
 		t.Error("порт передан twampy, но withLocalPort сообщил обратное")
@@ -258,7 +365,7 @@ func TestWithLocalPort(t *testing.T) {
 	// пошёл бы не с того интерфейса.
 	withNear, _ := withLocalPort(ModeTWampy,
 		[]string{"-m", "twampy", "sender", "10.93.47.146:5018", "10.123.20.140",
-			"-c", "150", "-i", "1000"}, 20006)
+			"-c", "150", "-i", "1000"}, "10.123.20.140", 20006)
 	want := []string{"-m", "twampy", "sender", "10.93.47.146:5018", "10.123.20.140:20006",
 		"-c", "150", "-i", "1000"}
 	if !slices.Equal(withNear, want) {
@@ -267,8 +374,7 @@ func TestWithLocalPort(t *testing.T) {
 
 	// Задача указала и адрес, и порт — её выбор важнее. Отвечать за такой порт
 	// пул не может: упадёт он — карантинить наш номер бессмысленно.
-	ownPort, applied := withLocalPort(ModeTWampy,
-		[]string{"-m", "twampy", "sender", "10.0.0.1", "10.123.20.140:5000"}, 20006)
+	ownPort, applied := withLocalPort(ModeTWampy, []string{"-m", "twampy", "sender", "10.0.0.1", "10.123.20.140:5000"}, "10.0.0.9", 20006)
 	if ownPort[4] != "10.123.20.140:5000" {
 		t.Errorf("порт задачи заменён: %v", ownPort)
 	}
@@ -277,26 +383,25 @@ func TestWithLocalPort(t *testing.T) {
 	}
 
 	// IPv6 в скобках: двоеточия внутри адреса за порт не считаются.
-	v6, _ := withLocalPort(ModeTWampy,
-		[]string{"-m", "twampy", "sender", "[2001:db8::1]:5018", "[2001:db8::2]"}, 20006)
+	v6, _ := withLocalPort(ModeTWampy, []string{"-m", "twampy", "sender", "[2001:db8::1]:5018", "[2001:db8::2]"}, "2001:db8::2", 20006)
 	if v6[4] != "[2001:db8::2]:20006" {
 		t.Errorf("IPv6 near-end получил %q, ожидался [2001:db8::2]:20006", v6[4])
 	}
 
 	// Вызов не похож на «sender <адрес>» — вмешиваться некуда.
-	odd, applied := withLocalPort(ModeTWampy, []string{"-m", "twampy", "responder"}, 20006)
+	odd, applied := withLocalPort(ModeTWampy, []string{"-m", "twampy", "responder"}, "10.0.0.9", 20006)
 	if len(odd) != 3 || applied {
 		t.Errorf("нестандартный вызов изменён: %v (применён=%v)", odd, applied)
 	}
 
 	// Для ping локальный порт бессмыслен.
-	ping, applied := withLocalPort(ModeWinPing, []string{"10.0.0.1", "-c", "2"}, 20007)
+	ping, applied := withLocalPort(ModeWinPing, []string{"10.0.0.1", "-c", "2"}, "10.0.0.9", 20007)
 	if len(ping) != 3 || applied {
 		t.Errorf("аргументы ping изменены: %v (применён=%v)", ping, applied)
 	}
 
 	// Выключенный пул ничего не добавляет.
-	off, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, 0)
+	off, applied := withLocalPort(ModeTWamp, []string{"-c", "10", "10.0.0.1"}, "10.0.0.9", 0)
 	if len(off) != 3 || applied {
 		t.Errorf("при выключенном пуле аргументы изменены: %v (применён=%v)", off, applied)
 	}

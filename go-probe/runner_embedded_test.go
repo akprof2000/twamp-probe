@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -141,7 +142,7 @@ func TestEmbeddedTwping_CancelStopsMeasurement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan string, 1)
 	go func() {
-		_, errText := runEmbeddedTwping(ctx, []string{"-c", "100", "192.0.2.1"}, time.Time{})
+		_, errText, _ := runEmbeddedTwping(ctx, []string{"-c", "100", "192.0.2.1"}, time.Time{})
 		done <- errText
 	}()
 
@@ -158,11 +159,39 @@ func TestEmbeddedTwping_CancelStopsMeasurement(t *testing.T) {
 	}
 }
 
+// silentServer принимает TCP-соединения и молчит — сервер, который «висит».
+//
+// Недостижимый адрес для этого не годится: где-то он даёт долгое ожидание,
+// а в контейнере маршрута до него нет вовсе, и соединение отбивается сразу —
+// тогда замер падает по своей ошибке, не дожив до таймаута задачи, и проверка
+// теряет смысл. Молчащий слушатель ведёт себя одинаково везде.
+func silentServer(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("не поднять слушатель: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Соединение принято и брошено открытым: клиент ждёт приветствия,
+			// которого не будет.
+			t.Cleanup(func() { conn.Close() })
+		}
+	}()
+	return ln.Addr().String()
+}
+
 func TestEmbeddedTwping_RespectsTaskTimeout(t *testing.T) {
 	// Индивидуальный таймаут задачи действует и во встроенном режиме.
 	started := time.Now()
-	_, errText := runEmbeddedTwping(context.Background(),
-		[]string{"-c", "100", "192.0.2.1"}, time.Now().Add(500*time.Millisecond))
+	_, errText, _ := runEmbeddedTwping(context.Background(),
+		[]string{"-c", "100", silentServer(t)}, time.Now().Add(500*time.Millisecond))
 
 	if !strings.Contains(errText, "таймауту") {
 		t.Errorf("замер завершился с «%s», ожидалось сообщение о таймауте", errText)

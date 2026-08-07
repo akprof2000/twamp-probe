@@ -53,7 +53,7 @@ func TestPool_ConcurrentLeasesNeverOverlap(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range rounds {
-				port, ok := pool.Acquire(context.Background())
+				port, ok := pool.Acquire(context.Background(), "")
 				if !ok {
 					t.Error("пул отказал, хотя портов достаточно")
 					return
@@ -81,7 +81,7 @@ func TestPool_ConcurrentLeasesNeverOverlap(t *testing.T) {
 				mu.Lock()
 				delete(inUse, port)
 				mu.Unlock()
-				pool.Release(port)
+				pool.Release("", port)
 			}
 		}()
 	}
@@ -111,19 +111,19 @@ func TestPool_ReleasedPortCoolsDownBeforeReuse(t *testing.T) {
 	pool := leasePool(t, 21200, 21203)
 	pool.cooldown = 300 * time.Millisecond
 
-	first, _ := pool.Acquire(context.Background())
-	pool.Release(first)
+	first, _ := pool.Acquire(context.Background(), "")
+	pool.Release("", first)
 
 	// Пока порт отлёживается, выдаются другие номера.
 	for range 3 {
-		port, ok := pool.Acquire(context.Background())
+		port, ok := pool.Acquire(context.Background(), "")
 		if !ok {
 			t.Fatal("пул отказал, хотя свободные порты есть")
 		}
 		if port == first {
 			t.Fatalf("порт %d выдан снова, не отлежав cooldown", first)
 		}
-		defer pool.Release(port)
+		defer pool.Release("", port)
 	}
 
 	if stats := pool.Stats(); stats.Cooling != 1 {
@@ -132,7 +132,7 @@ func TestPool_ReleasedPortCoolsDownBeforeReuse(t *testing.T) {
 
 	// А после cooldown он возвращается в очередь.
 	time.Sleep(400 * time.Millisecond)
-	again, ok := pool.Acquire(context.Background())
+	again, ok := pool.Acquire(context.Background(), "")
 	if !ok || again != first {
 		t.Errorf("после cooldown выдан порт %d (ok=%v), ожидался вернувшийся %d", again, ok, first)
 	}
@@ -144,12 +144,12 @@ func TestPool_CooldownYieldsUnderPressure(t *testing.T) {
 	pool := leasePool(t, 21210, 21210) // ровно один порт
 	pool.cooldown = time.Hour          // отлежаться заведомо не успеет
 
-	port, _ := pool.Acquire(context.Background())
-	pool.Release(port)
+	port, _ := pool.Acquire(context.Background(), "")
+	pool.Release("", port)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	again, ok := pool.Acquire(ctx)
+	again, ok := pool.Acquire(ctx, "")
 	if !ok {
 		t.Fatal("пул заставил замер ждать вместо того, чтобы выдать недолежавший порт")
 	}
@@ -420,7 +420,7 @@ func TestEmbeddedProbesBindExactlyThePooledPort(t *testing.T) {
 		const port = 21501
 		args := strings.Fields(fmt.Sprintf("-c 3 -i 0.02 -P %d-%d %s", port, port, refl.Addr()))
 
-		_, errText := runEmbeddedTwping(context.Background(), args, time.Now().Add(20*time.Second))
+		_, errText, _ := runEmbeddedTwping(context.Background(), args, time.Now().Add(20*time.Second))
 		if errText != "" {
 			t.Fatalf("замер не удался: %s", errText)
 		}
@@ -434,7 +434,7 @@ func TestEmbeddedProbesBindExactlyThePooledPort(t *testing.T) {
 		const port = 21502
 		args := strings.Fields(fmt.Sprintf("sender 127.0.0.1:%d :%d -c 3 -i 20", refl.port, port))
 
-		_, errText := runEmbeddedTwampy(context.Background(), args, time.Now().Add(20*time.Second))
+		_, errText, _ := runEmbeddedTwampy(context.Background(), args, time.Now().Add(20*time.Second))
 		if errText != "" {
 			t.Fatalf("замер не удался: %s", errText)
 		}

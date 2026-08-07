@@ -407,7 +407,8 @@ async function showProbeState(requestInfo) {
       : 'внешняя утилита';
 
     const ports = d.portRange
-      ? `${escHtml(d.portRange)}: свободно ${d.portsFree}, в аренде ${d.portsTaken}`
+      ? `${escHtml(d.portRange)} на ${d.portsAddresses || 1} адресах (${d.portsCapacity || 0} номеров): `
+        + `свободно ${d.portsFree}, в аренде ${d.portsTaken}`
         + (d.portsCooling ? `, отлёживается ${d.portsCooling}` : '')
         + (d.portsBanned ? `, в карантине ${d.portsBanned}` : '')
         + (d.portsWaited ? `, ожиданий ${d.portsWaited}` : '')

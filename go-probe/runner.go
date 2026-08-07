@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -138,7 +139,10 @@ func orDefault(params []string, def string) []string {
 
 // embeddedProbe — встроенный зонд: выполняет замер прямо в процессе пробы и
 // возвращает вывод и текст ошибки в том же виде, что и внешняя утилита.
-type embeddedProbe func(ctx context.Context, args []string, deadline time.Time) (output, errText string)
+// Третье значение — «зонд остался работать»: замер прекращён по таймауту или
+// отмене, но клиент внутри не остановился и держит свои сокеты. Порт такого
+// замера возвращать в пул нельзя — он всё ещё занят.
+type embeddedProbe func(ctx context.Context, args []string, deadline time.Time) (output, errText string, leaked bool)
 
 // runReport — итог одного прогона зонда для журнала и реестра статусов.
 //
@@ -154,6 +158,10 @@ type runReport struct {
 	exitCode *int // nil — процесса не было (встроенный зонд) либо он не запустился
 	summary  string
 	elapsed  time.Duration
+
+	// leakedPort — зонд не остановился и держит свои сокеты. Порт такого замера
+	// в пул не возвращается: он занят, сколько бы учёт ни думал иначе.
+	leakedPort bool
 }
 
 // report пишет итог замера в журнал и в реестр статусов — ровно один раз на
@@ -201,12 +209,16 @@ func (r *ProbeRunner) execute(
 	var result ActionData
 	var report runReport
 
+	// Номера считаются по локальному адресу: на разных адресах один и тот же
+	// порт занимают разные замеры, и это не конфликт.
+	localAddr := probeLocalAddr(task.Mode, args, node)
+
 	// Порт из пула может оказаться занят посторонним процессом: диапазон пробы
 	// пересекается с эфемерным диапазоном ядра, и чужое соединение способно
 	// встать на наш номер между выдачей и привязкой. Раньше такой замер просто
 	// пропадал; теперь берём другой порт и пробуем снова.
 	for attempt := 1; ; attempt++ {
-		port, ok := r.ports.Acquire(ctx)
+		port, ok := r.ports.Acquire(ctx, localAddr)
 		if !ok {
 			// Ждать смысла больше нет: задачу сняли или проба останавливается.
 			return ActionData{
@@ -216,7 +228,7 @@ func (r *ProbeRunner) execute(
 			}
 		}
 
-		attemptArgs, portApplied := withLocalPort(task.Mode, args, port)
+		attemptArgs, portApplied := withLocalPort(task.Mode, args, localAddr, port)
 		if probe, callLine, probeArgs := r.embeddedFor(task, attemptArgs); probe != nil {
 			result, report = r.executeEmbedded(ctx, task, node, callLine, probeArgs, probe)
 		} else {
@@ -230,14 +242,24 @@ func (r *ProbeRunner) execute(
 		// ничего не изменит: следующая попытка возьмёт ровно тот же чужой порт.
 		ourPortBusy := busy && portApplied
 		if !ourPortBusy {
-			r.ports.Release(port)
+			// Зонд, оставшийся работать после таймаута, держит свои сокеты:
+			// вернуть его номер в оборот — значит выдать занятый порт. Он
+			// отсидит карантин и вернётся сам, когда тот наконец закончит.
+			if report.leakedPort && portApplied {
+				r.ports.Blacklist(localAddr, port)
+				logRunner.Warn("Зонд не остановился по таймауту — порт остаётся занятым",
+					"порт", port, "адрес", localAddr, "режим", task.Mode,
+					"задача", task.Id, "узел", node)
+			} else {
+				r.ports.Release(localAddr, port)
+			}
 			r.report(task, node, report)
 			return result
 		}
 
 		// Порт занят: в оборот он временно не идёт, иначе следующий замер
 		// налетел бы на ту же ошибку. Сам замер повторяем с другим номером.
-		r.ports.Blacklist(port)
+		r.ports.Blacklist(localAddr, port)
 		pool := r.ports.Stats()
 
 		if attempt >= portRetries || result.Cancelled {
@@ -265,30 +287,97 @@ func (r *ProbeRunner) execute(
 // повторами.
 const portRetries = 10
 
-// withLocalPort добавляет зонду локальный порт, если проба раздаёт их сама
-// (port > 0) и задача не указала свой. Второе значение сообщает, достался ли
-// порт зонду: без него замер пойдёт с номером от ядра, и отвечать за него пул
-// не может.
+// probeLocalAddr сообщает, с какого адреса зонд выйдет на узел, — тот самый,
+// на котором и надо арендовать номер.
 //
-// У каждой утилиты свой способ: twping принимает диапазон флагом -P, а twampy —
-// адрес near-end вторым позиционным аргументом.
-func withLocalPort(mode TaskMode, args []string, port int) ([]string, bool) {
+// Обычно адрес выбирает маршрут, но задача может назвать его сама (near-end
+// у twampy, -S у twping). Её выбор важнее: арендуй мы номер на «маршрутном»
+// адресе, а зонд встань на указанный задачей — учёт разошёлся бы с
+// действительностью, и пул выдал бы этот номер второй раз.
+func probeLocalAddr(mode TaskMode, args []string, node string) string {
+	switch mode {
+	case ModeTWampy:
+		if idx := indexOf(args, "sender"); idx >= 0 {
+			near := idx + 2 // «sender <far-end> <near-end>»
+			if near < len(args) && !strings.HasPrefix(args[near], "-") {
+				host, _, err := net.SplitHostPort(args[near])
+				if err != nil {
+					host = args[near] // адрес без порта
+				}
+				if host != "" {
+					return host
+				}
+			}
+		}
+
+	case ModeTWamp:
+		if idx := indexOf(args, "-S"); idx >= 0 && idx+1 < len(args) {
+			return args[idx+1]
+		}
+	}
+	return localAddrFor(node)
+}
+
+// localAddrFor определяет, с какого адреса пойдёт замер на этот узел.
+//
+// Тем же способом, что и ядро: подключение UDP-сокета к адресу назначения
+// пакетов не шлёт, но заставляет ядро выбрать исходящий адрес по таблице
+// маршрутов — ровно тот, который потом возьмёт и сам зонд. Пустая строка
+// означает «определить не удалось»: тогда порт арендуется в общем наборе,
+// как было до учёта по адресам.
+func localAddrFor(node string) string {
+	target := node
+	if _, _, err := net.SplitHostPort(node); err != nil {
+		// Порт для выбора маршрута роли не играет, но SplitHostPort его требует.
+		target = net.JoinHostPort(node, "862")
+	}
+
+	conn, err := net.Dial("udp", target)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || addr.IP == nil || addr.IP.IsUnspecified() {
+		return ""
+	}
+	return addr.IP.String()
+}
+
+// withLocalPort добавляет зонду локальный адрес и порт, если проба раздаёт их
+// сама (port > 0) и задача не указала свои. Второе значение сообщает, достался
+// ли порт зонду: без него замер пойдёт с номером от ядра, и отвечать за него
+// пул не может.
+//
+// Адрес передаётся вместе с портом не для красоты: пул считает номера по
+// каждому адресу отдельно, и учёт сойдётся с действительностью только если
+// зонд встанет именно на тот адрес, для которого номер выдан. Пустой адрес
+// оставляет выбор ядру.
+//
+// У каждой утилиты свой способ: twping принимает адрес флагом -S и диапазон
+// портов флагом -P, а twampy — то и другое одним аргументом near-end.
+func withLocalPort(mode TaskMode, args []string, addr string, port int) ([]string, bool) {
 	if port <= 0 {
 		return args, false
 	}
 
 	switch mode {
 	case ModeTWamp:
-		if slices.Contains(args, "-P") {
-			return args, false // задача выбрала диапазон сама — не перебиваем
+		if slices.Contains(args, "-P") || slices.Contains(args, "-S") {
+			return args, false // задача выбрала сама — не перебиваем
 		}
 		// Диапазон из одного порта: именно его зонд и займёт. Перебирать номера
 		// внутри диапазона — дело пула, а не зонда, иначе два замера столкнулись
 		// бы на одном порту.
-		return append([]string{"-P", fmt.Sprintf("%d-%d", port, port)}, args...), true
+		prefix := []string{"-P", fmt.Sprintf("%d-%d", port, port)}
+		if addr != "" {
+			prefix = append(prefix, "-S", addr)
+		}
+		return append(prefix, args...), true
 
 	case ModeTWampy:
-		return withTwampyNearEnd(args, port)
+		return withTwampyNearEnd(args, addr, port)
 	}
 	return args, false
 }
@@ -302,7 +391,7 @@ func withLocalPort(mode TaskMode, args []string, port int) ([]string, bool) {
 //     аргументом здесь нельзя: адрес задачи съехал бы на третью позицию,
 //     где twampy его уже не ждёт, и замер пошёл бы не с того интерфейса;
 //   - near-end не задан — добавляем «:порт» сразу за far-end.
-func withTwampyNearEnd(args []string, port int) ([]string, bool) {
+func withTwampyNearEnd(args []string, addr string, port int) ([]string, bool) {
 	idx := indexOf(args, "sender")
 	if idx < 0 {
 		return args, false
@@ -318,12 +407,13 @@ func withTwampyNearEnd(args []string, port int) ([]string, bool) {
 		if hasPort(args[near]) {
 			return args, false // задача указала и адрес, и порт — её выбор важнее
 		}
+		// Адрес задачи важнее нашего: она могла выбрать интерфейс намеренно.
 		out := slices.Clone(args)
 		out[near] = fmt.Sprintf("%s:%d", args[near], port)
 		return out, true
 	}
 
-	return slices.Insert(slices.Clone(args), near, fmt.Sprintf(":%d", port)), true
+	return slices.Insert(slices.Clone(args), near, fmt.Sprintf("%s:%d", addr, port)), true
 }
 
 // hasPort сообщает, указан ли в адресе порт. Для IPv6 в квадратных скобках
@@ -394,7 +484,7 @@ func (r *ProbeRunner) executeEmbedded(ctx context.Context, task *TaskInfo, node,
 		deadline = started.Add(time.Duration(task.TimeoutSec) * time.Second)
 	}
 
-	output, errText := probe(runCtx, args, deadline)
+	output, errText, leaked := probe(runCtx, args, deadline)
 
 	// Отмена именно этого замера (задачу удалили), а не остановка всей пробы.
 	cancelled := runCtx.Err() != nil && ctx.Err() == nil
@@ -430,7 +520,9 @@ func (r *ProbeRunner) executeEmbedded(ctx context.Context, task *TaskInfo, node,
 	result.Console = output
 	result.ErrorConsole = errText
 
-	return result, runReport{outcome: outcome, summary: summary, elapsed: time.Since(started)}
+	return result, runReport{
+		outcome: outcome, summary: summary, elapsed: time.Since(started), leakedPort: leaked,
+	}
 }
 
 // indexOf возвращает позицию значения в срезе (-1, если его нет).

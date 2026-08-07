@@ -1,0 +1,12 @@
+# Образ для прогона тестов Go-пробы в той системе, где проба и работает.
+#
+# Базовый centos:stream9 идёт без ping, а часть проверок запускает внешний зонд
+# именно им (обрыв задачи убивает процесс — проверять это на встроенном зонде
+# бессмысленно, там нет процесса). iproute нужен, чтобы руками смотреть сокеты
+# при разборе: ss -uanp.
+FROM quay.io/centos/centos:stream9
+
+RUN dnf install -y --setopt=install_weak_deps=False iputils iproute \
+    && dnf clean all
+
+WORKDIR /work

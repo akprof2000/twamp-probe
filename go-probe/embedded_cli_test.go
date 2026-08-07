@@ -18,7 +18,7 @@ func TestEmbeddedTwampy_CompareWithOriginal(t *testing.T) {
 	}
 	args := append([]string{target}, strings.Fields(os.Getenv("EMBEDDED_ARGS"))...)
 
-	output, errText := runEmbeddedTwampy(context.Background(), args, time.Now().Add(60*time.Second))
+	output, errText, _ := runEmbeddedTwampy(context.Background(), args, time.Now().Add(60*time.Second))
 	if errText != "" {
 		t.Fatalf("замер не удался: %s", errText)
 	}
