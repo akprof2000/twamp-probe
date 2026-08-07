@@ -1,6 +1,11 @@
 # SPI TWamp — распределённая система зондирования сети
 
-[![build](https://github.com/akprof2000/twamp-probe/actions/workflows/build.yml/badge.svg)](https://github.com/akprof2000/twamp-probe/actions/workflows/build.yml)
+[![CI](https://github.com/akprof2000/twamp-probe/actions/workflows/build.yml/badge.svg)](https://github.com/akprof2000/twamp-probe/actions/workflows/build.yml)
+[![Релиз](https://img.shields.io/github/v/release/akprof2000/twamp-probe?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&color=blue)](https://github.com/akprof2000/twamp-probe/releases/latest)
+[![Загрузки](https://img.shields.io/github/downloads/akprof2000/twamp-probe/total?label=%D0%B7%D0%B0%D0%B3%D1%80%D1%83%D0%B7%D0%BA%D0%B8&color=success)](https://github.com/akprof2000/twamp-probe/releases)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8)](https://go.dev/)
+[![Лицензия](https://img.shields.io/github/license/akprof2000/twamp-probe?label=%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F&color=lightgrey)](LICENSE)
 
 Система измерения качества сети (задержки, потери, джиттер) по протоколу **TWAMP** и обычному **ICMP-ping**. Центральный сервер раздаёт задачи зондирования распределённым пробам, собирает результаты, разбирает их в статистику и складывает в **ClickHouse**.
 
