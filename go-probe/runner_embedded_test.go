@@ -188,9 +188,12 @@ func silentServer(t *testing.T) string {
 }
 
 func TestEmbeddedTwping_RespectsTaskTimeout(t *testing.T) {
-	// Индивидуальный таймаут задачи действует и во встроенном режиме.
+	// Индивидуальный таймаут задачи действует и во встроенном режиме — в том
+	// числе на сервере, который принял соединение и молчит. Раньше такой замер
+	// висел вечно: время было ограничено только у подключения, а чтение
+	// приветствия не ограничивалось ничем и не смотрело на отмену.
 	started := time.Now()
-	_, errText, _ := runEmbeddedTwping(context.Background(),
+	_, errText, leaked := runEmbeddedTwping(context.Background(),
 		[]string{"-c", "100", silentServer(t)}, time.Now().Add(500*time.Millisecond))
 
 	if !strings.Contains(errText, "таймауту") {
@@ -198,6 +201,11 @@ func TestEmbeddedTwping_RespectsTaskTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Errorf("замер шёл %v — таймаут не сработал вовремя", elapsed)
+	}
+	// Клиент обязан вернуться сам и отпустить сокеты — тогда порт уходит
+	// обратно в пул, а не в карантин как занятый.
+	if leaked {
+		t.Error("зонд не отпустил порт: клиент остался в чтении управляющего канала")
 	}
 }
 

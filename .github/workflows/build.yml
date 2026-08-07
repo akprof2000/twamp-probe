@@ -52,3 +52,47 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build ./...
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+
+  # Тот же набор, но в CentOS — системе, где проба и работает.
+  #
+  # Зачем отдельно от go-probe: половина проверок про сокеты и порты, а ведут
+  # они себя по-разному. На ubuntu-раннере это хотя бы Linux, но настройки ядра
+  # там свои, а на Windows проверки портов вовсе недостоверны — два UDP-сокета
+  # уживаются на одном номере. Здесь же и дистрибутив тот самый, и glibc та же,
+  # что на боевых пробах (CentOS Stream 9).
+  #
+  # --privileged нужен нагрузочным проверкам: они меняют
+  # net.ipv4.ip_local_port_range, чтобы измерить, что бывает при совмещении
+  # диапазона пула с эфемерным. Настройка сетевая, правится в своём
+  # пространстве имён и раннер не задевает; без прав проверки пропускают себя
+  # сами.
+  go-probe-centos:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/centos/centos:stream9
+      options: --privileged
+
+    steps:
+      - name: Зависимости CentOS
+        # iputils — внешний зонд ping для проверок обрыва задачи (у встроенного
+        # процесса нет, проверять нечего); iproute — ss для разбора вручную;
+        # tar и gzip нужны самому actions/setup-go.
+        run: dnf install -y --setopt=install_weak_deps=False iputils iproute tar gzip
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Установка Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: go-probe/go.sum
+
+      - name: Тесты в CentOS (включая нагрузочные)
+        working-directory: go-probe
+        env:
+          PROBE_LOADTEST: "1"
+        run: |
+          cat /etc/redhat-release
+          echo "ip_local_port_range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
+          go test -timeout 900s ./...

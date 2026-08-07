@@ -57,13 +57,24 @@ func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (
 	select {
 	case err = <-done:
 	case <-ctx.Done():
-		// Клиент остался в горутине вместе со своими сокетами. Порт из пула
-		// вернуть нельзя — он занят, пока тот не закончит; об этом говорит
-		// признак leaked, по нему execute уводит номер в карантин.
-		if ctx.Err() == context.Canceled {
+		// Отмена контекста закрывает управляющее соединение, и клиент сворачивается
+		// сам — но не мгновенно. Дадим ему это доделать: тогда сокеты закрыты,
+		// и порт возвращается в пул как обычно.
+		timedOut := ctx.Err() == context.DeadlineExceeded
+		select {
+		case <-done:
+		case <-time.After(probeWrapUp):
+			// Не успел — значит держит сокеты до сих пор. Порт занят, сколько бы
+			// учёт ни думал иначе: признак leaked уводит номер в карантин.
+			if timedOut {
+				return out.String(), errTimeout.Error(), true
+			}
 			return out.String(), errCancelled.Error(), true
 		}
-		return out.String(), errTimeout.Error(), true
+		if timedOut {
+			return out.String(), errTimeout.Error(), false
+		}
+		return out.String(), errCancelled.Error(), false
 	}
 
 	output = out.String()
@@ -86,6 +97,14 @@ func runEmbeddedTwping(ctx context.Context, args []string, deadline time.Time) (
 	}
 	return output, message + portExhaustionHint(message, args), false
 }
+
+// probeWrapUp — сколько ждать, пока прерванный клиент закроет свои сокеты.
+//
+// Отмена контекста закрывает управляющее соединение; клиенту остаётся выйти из
+// чтения и свернуть сессию — это доли секунды. Секунды хватает с запасом, а
+// дольше ждать незачем: замер всё равно уже не состоится, а порт лучше увести
+// в карантин, чем держать замер в очереди.
+const probeWrapUp = time.Second
 
 // portExhaustionHint добавляет подсказку, когда замеры упёрлись в порты. Сама
 // ошибка ядра об этом не говорит: «address already in use» при привязке к
