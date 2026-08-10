@@ -8,7 +8,7 @@
 #   4. при необходимости открывает порт в firewalld;
 #   5. проверяет, что сервер отвечает.
 #
-# Запуск от root:  ./install-centos.sh
+# Запуск от root:  ./install.sh
 # Повторный запуск безопасен: appsettings.json и база данных не затираются.
 
 set -euo pipefail

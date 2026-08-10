@@ -55,7 +55,7 @@ if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Nul
 
 # Конфигурацию и базу не трогаем: на работающем сервере там боевые данные.
 $keep = @('appsettings.json', 'TWamp.db', 'TWamp-log.db', 'spool')
-Get-ChildItem -Path $source -Exclude 'install-windows.ps1' | ForEach-Object {
+Get-ChildItem -Path $source -Exclude 'install.ps1','install.cmd','install.sh' | ForEach-Object {
     if ($keep -contains $_.Name -and (Test-Path (Join-Path $Path $_.Name))) {
         Write-Host "    $($_.Name) уже есть — оставляем"
         return

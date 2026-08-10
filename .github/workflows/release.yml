@@ -86,16 +86,18 @@ jobs:
             local out="publish/${name}-${variant}-${rid}"
             dotnet publish "$proj" -c Release -r "$rid" -o "$out" -p:Version="$NETVER" "$@"
 
-            # Установка службы — прямо в папке публикации: systemd для Linux,
-            # диспетчер служб для Windows.
+            # Установщики кладём в каждый архив, оба сразу: install.sh для Linux,
+            # install.cmd/install.ps1 для Windows. Архив нередко скачивают на
+            # одной машине, а разворачивают на другой, и разбираться, тот ли это
+            # архив, не нужно — команда установки всюду одна и та же.
             local deploy="$(dirname "$proj")/deploy"
+            install -m 0755 "$deploy"/install.sh "$out/"
+            install -m 0644 "$deploy"/install.ps1 "$deploy"/install.cmd "$out/"
             if [ "$rid" = "linux-x64" ]; then
-              install -m 0755 "$deploy"/*.sh "$out/"
               install -m 0644 "$deploy"/*.service "$out/"
               # Папка публикации целиком уходит в архив с сохранением прав на запуск.
               tar -C "$out" -czf "publish/${name}-${VERSION}-linux-x64-${variant}.tar.gz" .
             else
-              install -m 0644 "$deploy"/*.ps1 "$out/"
               (cd "$out" && zip -qr "../../publish/${name}-${VERSION}-windows-x64-${variant}.zip" .)
             fi
           }
@@ -164,15 +166,17 @@ jobs:
           assemble dist/twamp-probe-go twamp-probe appsettings.json
           # Зонд TWamp — рядом с пробой: настройка twamp:name по умолчанию как раз «./twping».
           install -m 0755 twping dist/twamp-probe-go/twping
-          # Готовая установка на CentOS/RHEL с лимитами под тысячи замеров.
-          install -m 0755 deploy/install-centos.sh dist/twamp-probe-go/
+          # Установщики — оба, как и у сервера: команда установки одна на все архивы.
+          install -m 0755 deploy/install.sh dist/twamp-probe-go/
+          install -m 0644 deploy/install.ps1 deploy/install.cmd dist/twamp-probe-go/
           install -m 0644 deploy/twamp-probe.service deploy/99-twamp-probe.conf dist/twamp-probe-go/
           tar -C dist -czf "../publish/twamp-probe-go-${VERSION}-linux-x64.tar.gz" twamp-probe-go
 
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o dist/twamp-probe-go-win/twamp-probe.exe .
           assemble dist/twamp-probe-go-win twamp-probe.exe appsettings.windows.json
-          # Установка пробы службой Windows.
-          install -m 0644 deploy/install-windows.ps1 dist/twamp-probe-go-win/
+          # Установка пробы службой Windows (плюс install.sh — см. выше).
+          install -m 0644 deploy/install.ps1 deploy/install.cmd dist/twamp-probe-go-win/
+          install -m 0755 deploy/install.sh dist/twamp-probe-go-win/
           (cd dist && zip -qr "../../publish/twamp-probe-go-${VERSION}-windows-x64.zip" twamp-probe-go-win)
 
           ls -lh ../publish/twamp-probe-go-*
@@ -203,16 +207,20 @@ jobs:
             Сборки для Linux x64 и Windows x64. В каждом архиве — папка приложения
             целиком вместе со скриптом установки службы.
 
-            **Установка одной командой:**
+            **Установка одной командой.** Установщики лежат в каждом архиве —
+            распакуйте и запустите тот, что подходит вашей системе:
 
             ```bash
-            # Linux (CentOS/RHEL): ставит службу systemd, лимиты и настройки ядра
-            sudo ./install-centos.sh
+            # Linux: служба systemd, лимиты и настройки ядра
+            sudo ./install.sh
             ```
-            ```powershell
-            # Windows: ставит службу, открывает порт в брандмауэре
-            powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+            ```bat
+            :: Windows: служба, порт в брандмауэре; права запросит сам
+            install.cmd
             ```
+
+            Повторный запуск обновляет версию и не трогает ваш
+            `appsettings.json` — им же и обновляются уже работающие установки.
 
             | Архив | Что это | Требования на хосте |
             |---|---|---|

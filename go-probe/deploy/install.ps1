@@ -45,7 +45,7 @@ if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Nul
 
 # Конфигурацию не затираем: на работающей пробе там свои настройки.
 $keepConfig = Test-Path (Join-Path $Path 'appsettings.json')
-Get-ChildItem -Path $source -Exclude 'install-windows.ps1' | ForEach-Object {
+Get-ChildItem -Path $source -Exclude 'install.ps1','install.cmd','install.sh' | ForEach-Object {
     if ($keepConfig -and $_.Name -eq 'appsettings.json') {
         Write-Host "    appsettings.json уже есть — оставляем"
         return
