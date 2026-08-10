@@ -17,6 +17,17 @@ using SPI.Twamp.Server.BackgroundServices;
 using SPI.Twamp.Server.Infrastructure;
 using System.Reflection;
 
+// Служебный режим — до всего остального: он работает с файлами по путям,
+// которые дал вызывающий, и ни веб-сервер, ни журнал ему не нужны. Этим
+// пользуется установщик при обновлении, чтобы дополнить настройки
+// администратора появившимися ключами, не затирая его значения.
+// Выходим через Environment.Exit, а не return: файл написан в виде операторов
+// верхнего уровня, и один return заставил бы возвращать значение отовсюду.
+if (args.Length > 0 && args[0] == ConfigMerger.CommandLineSwitch)
+{
+    System.Environment.Exit(ConfigMerger.RunCommandLine(args));
+}
+
 // Служба Windows стартует с рабочим каталогом C:\Windows\System32 — туда бы
 // легли база LiteDB, буфер ClickHouse и журналы, а appsettings.json не нашёлся
 // бы вовсе. Поэтому сразу переходим в папку с исполняемым файлом.

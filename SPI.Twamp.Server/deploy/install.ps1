@@ -53,17 +53,39 @@ if ($existing -and $existing.Status -ne 'Stopped') {
 
 if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Null }
 
-# Конфигурацию и базу не трогаем: на работающем сервере там боевые данные.
+# Базу и буфер не трогаем: на работающем сервере там боевые данные.
+# Файл настроек тоже не заменяем — ниже он дополняется новыми ключами.
 $keep = @('appsettings.json', 'TWamp.db', 'TWamp-log.db', 'spool')
+$mergeConfig = Test-Path (Join-Path $Path 'appsettings.json')
 Get-ChildItem -Path $source -Exclude 'install.ps1','install.cmd','install.sh' | ForEach-Object {
     if ($keep -contains $_.Name -and (Test-Path (Join-Path $Path $_.Name))) {
-        Write-Host "    $($_.Name) уже есть — оставляем"
+        if ($_.Name -ne 'appsettings.json') {
+            Write-Host "    $($_.Name) уже есть — оставляем"
+        }
         return
     }
     Copy-Item -Path $_.FullName -Destination $Path -Recurse -Force
 }
 
-Write-Host "=== 2. Служба $ServiceName"
+Write-Host "=== 2. Настройки"
+if ($mergeConfig) {
+    # Затирать чужой файл эталонным нельзя — там строка подключения, ключ API,
+    # адреса. Но и оставлять как есть мало: в новой версии появляются
+    # настройки, о которых иначе никто не узнает. Поэтому слияние: значения
+    # администратора остаются, новые ключи добавляются рядом.
+    $added = & $exe --merge-config (Join-Path $Path 'appsettings.json') (Join-Path $source 'appsettings.json')
+    if ($LASTEXITCODE -ne 0) { throw "не удалось дополнить appsettings.json" }
+    if ($added) {
+        Write-Host "    ваши значения сохранены, добавлены новые настройки:"
+        $added | ForEach-Object { Write-Host "        $_" }
+    } else {
+        Write-Host "    ваш appsettings.json уже полон — оставлен без изменений"
+    }
+} else {
+    Write-Host "    appsettings.json взят из пакета"
+}
+
+Write-Host "=== 3. Служба $ServiceName"
 if ($existing) {
     & sc.exe config $ServiceName binPath= "`"$exe`"" start= auto | Out-Null
     Write-Host "    служба уже зарегистрирована, параметры обновлены"
@@ -78,7 +100,7 @@ if ($existing) {
 # и поднимаем службу обратно, если она упала.
 & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
 
-Write-Host "=== 3. Порт в брандмауэре"
+Write-Host "=== 4. Порт в брандмауэре"
 $port = 9000
 $configPath = Join-Path $Path 'appsettings.json'
 if (Test-Path $configPath) {
@@ -94,7 +116,7 @@ if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContin
     Write-Host "    правило уже есть: TCP $port"
 }
 
-Write-Host "=== 4. Запуск"
+Write-Host "=== 5. Запуск"
 Start-Service -Name $ServiceName
 (Get-Service -Name $ServiceName).WaitForStatus('Running', '00:01:00')
 Start-Sleep -Seconds 3

@@ -9,7 +9,10 @@
 #   5. проверяет, что сервер отвечает.
 #
 # Запуск от root:  ./install.sh
-# Повторный запуск безопасен: appsettings.json и база данных не затираются.
+#
+# Первый запуск ставит, каждый следующий обновляет — отличать их самому не
+# нужно. При обновлении база и буфер не трогаются, а appsettings.json
+# дополняется появившимися настройками: ваши значения остаются как есть.
 
 set -euo pipefail
 
@@ -51,6 +54,13 @@ if systemctl is-active --quiet twamp-server 2>/dev/null; then
     echo "    останавливаем работающую службу"
     systemctl stop twamp-server
 fi
+if [ -f "$DEST/appsettings.json" ]; then
+    MODE=обновление
+else
+    MODE=установка
+fi
+echo "=== SPI TWamp Server: $MODE"
+
 mkdir -p "$DEST"
 # Конфигурацию и базу не трогаем: на работающем сервере там боевые данные.
 KEEP="appsettings.json TWamp.db TWamp-log.db spool"
@@ -59,7 +69,13 @@ for item in "$SRC"/*; do
     case " $KEEP " in
         *" $name "*)
             if [ -e "$DEST/$name" ]; then
-                echo "    $name уже есть — оставляем"
+                # appsettings.json ниже дополняется новыми ключами, остальное
+                # (база, буфер) — боевые данные, их не трогаем вовсе.
+                if [ "$name" = appsettings.json ]; then
+                    MERGE_CONFIG=1  # дополним ниже, значения администратора сохранив
+                else
+                    echo "    $name уже есть — оставляем"
+                fi
                 continue
             fi
             ;;
@@ -67,6 +83,22 @@ for item in "$SRC"/*; do
     cp -r "$item" "$DEST/"
 done
 chmod +x "$DEST/SPI.Twamp.Server"
+
+# Затирать чужой файл эталонным нельзя — там строка подключения, ключ API,
+# адреса. Но и оставлять как есть мало: в новой версии появляются настройки,
+# о которых иначе никто не узнает. Поэтому слияние: значения администратора
+# остаются, новые ключи добавляются рядом. Разбирает JSON сам сервер — jq на
+# минимальной системе может не быть, а исполняемый файл лежит рядом всегда.
+if [ -n "${MERGE_CONFIG:-}" ]; then
+    ADDED=$("$DEST/SPI.Twamp.Server" --merge-config "$DEST/appsettings.json" "$SRC/appsettings.json")
+    if [ -n "$ADDED" ]; then
+        echo "    ваши значения сохранены, добавлены новые настройки:"
+        echo "$ADDED" | sed 's/^/        /'
+    else
+        echo "    ваш appsettings.json уже полон — оставлен без изменений"
+    fi
+fi
+
 chown -R "$USER_NAME:$USER_NAME" "$DEST"
 
 echo "=== 3. Служба systemd"

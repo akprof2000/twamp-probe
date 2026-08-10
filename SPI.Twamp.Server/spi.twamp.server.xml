@@ -2672,6 +2672,58 @@
         <member name="M:SPI.Twamp.Server.Infrastructure.ClientRepository.RemoveIdentifyAsync(System.String)">
             <inheritdoc/>
         </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.ConfigMerger">
+            <summary>
+            Слияние конфигураций при обновлении.
+            </summary>
+            <remarks>
+            Задача простая на словах и неприятная на деле: в новой версии появляются
+            настройки, которых в файле администратора нет, — и он о них не узнает, пока
+            не полезет в документацию. А затирать его файл эталонным нельзя: там строки
+            подключения, адреса, ключ API и всё, ради чего сервер и настраивался.
+            <para>
+            Поэтому обновление делает слияние: значения администратора остаются как
+            есть, новые ключи из эталона добавляются рядом. Ничего не удаляется —
+            настройка, которой в новой версии больше нет, безвредна и может пригодиться
+            при откате.
+            </para>
+            <para>
+            Выполняет это сам сервер, а не установщик: разбирать JSON в shell-скрипте
+            нечем — jq на минимальной системе может не оказаться, а исполняемый файл
+            сервера лежит рядом всегда.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ConfigMerger.CommandLineSwitch">
+            <summary>Аргумент командной строки, включающий режим слияния.</summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.Merge(System.String,System.String)">
+            <summary>
+            Добавляет в текущий конфиг ключи, появившиеся в эталонном.
+            Возвращает пути добавленного — установщику есть что показать.
+            Текущего файла может не быть: это первая установка, тогда он просто
+            копируется из эталона.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.MergeInto(Newtonsoft.Json.Linq.JObject,Newtonsoft.Json.Linq.JObject,System.String,System.Collections.Generic.List{System.String})">
+            <summary>
+            Дополняет <paramref name="current"/> ключами из <paramref name="reference"/>,
+            не меняя существующие. Путь ключа копится в <paramref name="prefix"/>.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.Write(System.String,Newtonsoft.Json.Linq.JObject)">
+            <summary>
+            Записывает объект с отступами — файл читают и правят руками.
+            Пишем через временный файл рядом: обрыв на середине записи оставил бы
+            сервер вовсе без настроек, а так старый файл заменяется целиком и разом.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.RunCommandLine(System.String[])">
+            <summary>
+            Точка входа режима слияния: <c>SPI.Twamp.Server --merge-config текущий эталон</c>.
+            Возвращает код возврата процесса.
+            </summary>
+        </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.LiteDbContext">
             <summary>
             Контекст базы данных LiteDB: единственный владелец подключения к файлу БД.

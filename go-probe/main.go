@@ -42,6 +42,12 @@ var (
 )
 
 func main() {
+	// Служебные подкоманды — до всего остального: они работают с файлами по
+	// путям, которые дал вызывающий, и ни служба, ни журнал им не нужны.
+	if len(os.Args) > 1 && os.Args[1] == "--merge-config" {
+		os.Exit(runConfigMerge(os.Args[2:]))
+	}
+
 	// Служба Windows стартует в System32 — сначала переходим к своим файлам,
 	// иначе не найдётся даже appsettings.json.
 	prepareServiceEnvironment()
