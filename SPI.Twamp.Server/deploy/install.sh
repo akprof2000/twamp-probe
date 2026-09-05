@@ -4,9 +4,10 @@
 # Что делает:
 #   1. заводит системного пользователя twamp (сервер не требует root);
 #   2. копирует файлы в /opt/twamp-server;
-#   3. ставит службу systemd и включает автозапуск;
-#   4. при необходимости открывает порт в firewalld;
-#   5. проверяет, что сервер отвечает.
+#   3. сливает настройки: ваши значения остаются, новые ключи добавляются;
+#   4. ставит службу systemd и включает автозапуск;
+#   5. при необходимости открывает порт в firewalld;
+#   6. проверяет, что сервер отвечает.
 #
 # Запуск от root:  ./install.sh
 #
@@ -39,6 +40,15 @@ if ls "$SRC"/*.dll >/dev/null 2>&1 && [ ! -f "$SRC/libcoreclr.so" ]; then
     fi
 fi
 
+# Установка и обновление — один и тот же путь, разница только в том, что
+# сообщать человеку: при обновлении важно, что стало с его настройками.
+if [ -f "$DEST/appsettings.json" ]; then
+    MODE=обновление
+else
+    MODE=установка
+fi
+echo "=== SPI TWamp Server: $MODE"
+
 echo "=== 1. Пользователь $USER_NAME"
 if id "$USER_NAME" >/dev/null 2>&1; then
     echo "    уже есть"
@@ -54,13 +64,6 @@ if systemctl is-active --quiet twamp-server 2>/dev/null; then
     echo "    останавливаем работающую службу"
     systemctl stop twamp-server
 fi
-if [ -f "$DEST/appsettings.json" ]; then
-    MODE=обновление
-else
-    MODE=установка
-fi
-echo "=== SPI TWamp Server: $MODE"
-
 mkdir -p "$DEST"
 # Конфигурацию и базу не трогаем: на работающем сервере там боевые данные.
 KEEP="appsettings.json TWamp.db TWamp-log.db spool"
@@ -84,24 +87,36 @@ for item in "$SRC"/*; do
 done
 chmod +x "$DEST/SPI.Twamp.Server"
 
+echo "=== 3. Настройки"
 # Затирать чужой файл эталонным нельзя — там строка подключения, ключ API,
 # адреса. Но и оставлять как есть мало: в новой версии появляются настройки,
 # о которых иначе никто не узнает. Поэтому слияние: значения администратора
 # остаются, новые ключи добавляются рядом. Разбирает JSON сам сервер — jq на
 # минимальной системе может не быть, а исполняемый файл лежит рядом всегда.
+# Код возврата 3 — файл с комментариями: сервер их сохранить не умеет и
+# файл не трогает, а новые ключи перечисляет для ручного добавления.
 if [ -n "${MERGE_CONFIG:-}" ]; then
-    ADDED=$("$DEST/SPI.Twamp.Server" --merge-config "$DEST/appsettings.json" "$SRC/appsettings.json")
-    if [ -n "$ADDED" ]; then
+    STATUS=0
+    ADDED=$("$DEST/SPI.Twamp.Server" --merge-config "$DEST/appsettings.json" "$SRC/appsettings.json") || STATUS=$?
+    if [ "$STATUS" = 3 ]; then
+        echo "    в вашем appsettings.json есть комментарии — при переписывании они бы"
+        echo "    пропали, поэтому файл не тронут. Добавьте новые настройки вручную:"
+        echo "$ADDED" | sed 's/^/        /'
+    elif [ "$STATUS" != 0 ]; then
+        exit "$STATUS"
+    elif [ -n "$ADDED" ]; then
         echo "    ваши значения сохранены, добавлены новые настройки:"
         echo "$ADDED" | sed 's/^/        /'
     else
         echo "    ваш appsettings.json уже полон — оставлен без изменений"
     fi
+else
+    echo "    appsettings.json взят из пакета"
 fi
 
 chown -R "$USER_NAME:$USER_NAME" "$DEST"
 
-echo "=== 3. Служба systemd"
+echo "=== 4. Служба systemd"
 install -m 0644 "$SRC/twamp-server.service" /etc/systemd/system/twamp-server.service
 systemctl daemon-reload
 systemctl enable twamp-server >/dev/null
@@ -110,7 +125,7 @@ systemctl enable twamp-server >/dev/null
 systemctl restart twamp-server
 sleep 3
 
-echo "=== 4. Порт"
+echo "=== 5. Порт"
 PORT=$(grep -oE '"Urls"[^,]*' "$DEST/appsettings.json" | grep -oE '[0-9]+' | tail -1)
 PORT=${PORT:-9000}
 if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
@@ -121,7 +136,7 @@ else
     echo "    firewalld не запущен — порт $PORT открывать не потребовалось"
 fi
 
-echo "=== 5. Проверка"
+echo "=== 6. Проверка"
 if ! systemctl is-active --quiet twamp-server; then
     echo "    Служба не запустилась. Журнал:" >&2
     journalctl -u twamp-server -n 30 --no-pager >&2
@@ -135,5 +150,5 @@ if command -v curl >/dev/null; then
 fi
 
 echo
-echo "Готово. Веб-интерфейс: http://$(hostname -I | awk '{print $1}'):${PORT}/"
+echo "Готово ($MODE). Веб-интерфейс: http://$(hostname -I | awk '{print $1}'):${PORT}/"
 echo "Журнал: journalctl -u twamp-server -f"

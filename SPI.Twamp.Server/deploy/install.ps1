@@ -73,9 +73,16 @@ if ($mergeConfig) {
     # адреса. Но и оставлять как есть мало: в новой версии появляются
     # настройки, о которых иначе никто не узнает. Поэтому слияние: значения
     # администратора остаются, новые ключи добавляются рядом.
+    # Код возврата 3 — файл с комментариями: сервер их сохранить не умеет и
+    # файл не трогает, а новые ключи перечисляет для ручного добавления.
     $added = & $exe --merge-config (Join-Path $Path 'appsettings.json') (Join-Path $source 'appsettings.json')
-    if ($LASTEXITCODE -ne 0) { throw "не удалось дополнить appsettings.json" }
-    if ($added) {
+    if ($LASTEXITCODE -eq 3) {
+        Write-Host "    в вашем appsettings.json есть комментарии — при переписывании они бы"
+        Write-Host "    пропали, поэтому файл не тронут. Добавьте новые настройки вручную:"
+        $added | ForEach-Object { Write-Host "        $_" }
+    } elseif ($LASTEXITCODE -ne 0) {
+        throw "не удалось дополнить appsettings.json"
+    } elseif ($added) {
         Write-Host "    ваши значения сохранены, добавлены новые настройки:"
         $added | ForEach-Object { Write-Host "        $_" }
     } else {

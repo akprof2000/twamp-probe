@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -46,15 +47,24 @@ type Config struct {
 	PortRange string
 }
 
+// readConfigFile читает файл настроек в память. В файле от Windows может быть
+// UTF-8 BOM — encoding/json его не переваривает, поэтому срезаем здесь; этим же
+// чтением пользуется слияние настроек при обновлении (configmerge.go).
+func readConfigFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.TrimPrefix(data, []byte("\uFEFF")), nil
+}
+
 // LoadConfig читает appsettings.json рядом с исполняемым файлом.
 func LoadConfig(path string) (*Config, error) {
 	raw := map[string]any{}
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось прочитать %s: %w", path, err)
 	}
-	// В файле от Windows может быть UTF-8 BOM — json.Unmarshal его не переваривает.
-	data = []byte(strings.TrimPrefix(string(data), "\uFEFF"))
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("не удалось разобрать %s: %w", path, err)
 	}

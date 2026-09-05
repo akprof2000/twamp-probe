@@ -2688,6 +2688,14 @@
             при откате.
             </para>
             <para>
+            Файл правят руками, поэтому бережём и его вид: порядок ключей сохраняется,
+            строки не переосмысливаются (Json.NET иначе счёл бы «2025-01-01T10:00:00+05:00»
+            датой и переписал в локальном времени), права на файл остаются прежними.
+            Единственное, чего Json.NET сохранить не умеет, — комментарии, а .NET их в
+            appsettings.json допускает. Такой файл не переписываем вовсе: перечисляем
+            недостающие ключи, чтобы администратор добавил их сам.
+            </para>
+            <para>
             Выполняет это сам сервер, а не установщик: разбирать JSON в shell-скрипте
             нечем — jq на минимальной системе может не оказаться, а исполняемый файл
             сервера лежит рядом всегда.
@@ -2697,10 +2705,34 @@
         <member name="F:SPI.Twamp.Server.Infrastructure.ConfigMerger.CommandLineSwitch">
             <summary>Аргумент командной строки, включающий режим слияния.</summary>
         </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ConfigMerger.ExitNotWritten">
+            <summary>
+            Код возврата: новые ключи есть, но файл не переписан — в нём комментарии.
+            Установщик по нему меняет подпись к списку: «добавьте вручную».
+            </summary>
+        </member>
+        <member name="T:SPI.Twamp.Server.Infrastructure.ConfigMerger.Result">
+            <summary>Итог слияния.</summary>
+            <param name="Added">Пути новых ключей вида <c>Probe:MinParallel</c>, по алфавиту.</param>
+            <param name="Written">Записаны ли они в файл. Ложь — в файле комментарии, добавлять руками.</param>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.Result.#ctor(System.Collections.Generic.IReadOnlyList{System.String},System.Boolean)">
+            <summary>Итог слияния.</summary>
+            <param name="Added">Пути новых ключей вида <c>Probe:MinParallel</c>, по алфавиту.</param>
+            <param name="Written">Записаны ли они в файл. Ложь — в файле комментарии, добавлять руками.</param>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ConfigMerger.Result.Added">
+            <summary>Пути новых ключей вида <c>Probe:MinParallel</c>, по алфавиту.</summary>
+        </member>
+        <member name="P:SPI.Twamp.Server.Infrastructure.ConfigMerger.Result.Written">
+            <summary>Записаны ли они в файл. Ложь — в файле комментарии, добавлять руками.</summary>
+        </member>
+        <member name="F:SPI.Twamp.Server.Infrastructure.ConfigMerger.Result.Nothing">
+            <summary>Нечего добавлять — файл не тронут.</summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.Merge(System.String,System.String)">
             <summary>
             Добавляет в текущий конфиг ключи, появившиеся в эталонном.
-            Возвращает пути добавленного — установщику есть что показать.
             Текущего файла может не быть: это первая установка, тогда он просто
             копируется из эталона.
             </summary>
@@ -2711,17 +2743,32 @@
             не меняя существующие. Путь ключа копится в <paramref name="prefix"/>.
             </summary>
         </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.ReadObject(System.String)">
+            <summary>
+            Разбирает текст в объект. Строки остаются строками: по умолчанию Json.NET
+            распознаёт в них даты и при записи переводит в локальное время.
+            </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.HasComments(System.String)">
+            <summary>
+            Есть ли в тексте комментарии. JObject их не хранит, так что после записи
+            они бы пропали — а .NET-конфигурация комментарии в appsettings.json разрешает.
+            </summary>
+        </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.Write(System.String,Newtonsoft.Json.Linq.JObject)">
             <summary>
             Записывает объект с отступами — файл читают и правят руками.
             Пишем через временный файл рядом: обрыв на середине записи оставил бы
             сервер вовсе без настроек, а так старый файл заменяется целиком и разом.
+            Права прежнего файла переносятся на новый: администратор мог закрыть его
+            от чужих глаз из-за ключа API и пароля ClickHouse.
             </summary>
         </member>
         <member name="M:SPI.Twamp.Server.Infrastructure.ConfigMerger.RunCommandLine(System.String[])">
             <summary>
             Точка входа режима слияния: <c>SPI.Twamp.Server --merge-config текущий эталон</c>.
-            Возвращает код возврата процесса.
+            Печатает новые ключи по одному в строке; код возврата — 0, если они
+            записаны, <see cref="F:SPI.Twamp.Server.Infrastructure.ConfigMerger.ExitNotWritten"/>, если их нужно добавить руками.
             </summary>
         </member>
         <member name="T:SPI.Twamp.Server.Infrastructure.LiteDbContext">

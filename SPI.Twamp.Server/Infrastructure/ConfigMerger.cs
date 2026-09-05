@@ -18,6 +18,14 @@ namespace SPI.Twamp.Server.Infrastructure;
 /// при откате.
 /// </para>
 /// <para>
+/// Файл правят руками, поэтому бережём и его вид: порядок ключей сохраняется,
+/// строки не переосмысливаются (Json.NET иначе счёл бы «2025-01-01T10:00:00+05:00»
+/// датой и переписал в локальном времени), права на файл остаются прежними.
+/// Единственное, чего Json.NET сохранить не умеет, — комментарии, а .NET их в
+/// appsettings.json допускает. Такой файл не переписываем вовсе: перечисляем
+/// недостающие ключи, чтобы администратор добавил их сам.
+/// </para>
+/// <para>
 /// Выполняет это сам сервер, а не установщик: разбирать JSON в shell-скрипте
 /// нечем — jq на минимальной системе может не оказаться, а исполняемый файл
 /// сервера лежит рядом всегда.
@@ -29,33 +37,53 @@ public static class ConfigMerger
     public const string CommandLineSwitch = "--merge-config";
 
     /// <summary>
+    /// Код возврата: новые ключи есть, но файл не переписан — в нём комментарии.
+    /// Установщик по нему меняет подпись к списку: «добавьте вручную».
+    /// </summary>
+    public const int ExitNotWritten = 3;
+
+    /// <summary>Итог слияния.</summary>
+    /// <param name="Added">Пути новых ключей вида <c>Probe:MinParallel</c>, по алфавиту.</param>
+    /// <param name="Written">Записаны ли они в файл. Ложь — в файле комментарии, добавлять руками.</param>
+    public sealed record Result(IReadOnlyList<string> Added, bool Written)
+    {
+        /// <summary>Нечего добавлять — файл не тронут.</summary>
+        public static readonly Result Nothing = new([], Written: true);
+    }
+
+    /// <summary>
     /// Добавляет в текущий конфиг ключи, появившиеся в эталонном.
-    /// Возвращает пути добавленного — установщику есть что показать.
     /// Текущего файла может не быть: это первая установка, тогда он просто
     /// копируется из эталона.
     /// </summary>
-    public static IReadOnlyList<string> Merge(string currentPath, string referencePath)
+    public static Result Merge(string currentPath, string referencePath)
     {
-        JObject reference = ReadObject(referencePath);
+        JObject reference = ReadObject(File.ReadAllText(referencePath));
 
         if (!File.Exists(currentPath))
         {
             Write(currentPath, reference);
-            return [];
+            return Result.Nothing;
         }
 
-        JObject current = ReadObject(currentPath);
+        string currentText = File.ReadAllText(currentPath);
+        JObject current = ReadObject(currentText);
         List<string> added = [];
         MergeInto(current, reference, prefix: string.Empty, added);
 
         if (added.Count == 0)
         {
-            return []; // всё на месте — файл не трогаем
+            return Result.Nothing; // всё на месте — файл не трогаем
         }
 
         added.Sort(StringComparer.Ordinal);
+        if (HasComments(currentText))
+        {
+            return new Result(added, Written: false);
+        }
+
         Write(currentPath, current);
-        return added;
+        return new Result(added, Written: true);
     }
 
     /// <summary>
@@ -87,30 +115,61 @@ public static class ConfigMerger
         }
     }
 
-    private static JObject ReadObject(string path)
+    /// <summary>
+    /// Разбирает текст в объект. Строки остаются строками: по умолчанию Json.NET
+    /// распознаёт в них даты и при записи переводит в локальное время.
+    /// </summary>
+    private static JObject ReadObject(string text)
     {
-        // В файле, правленном под Windows, может оказаться UTF-8 BOM —
-        // StreamReader снимает его сам, а вот разбор JSON им бы подавился.
-        using StreamReader reader = new(path, detectEncodingFromByteOrderMarks: true);
-        using JsonTextReader json = new(reader);
+        using JsonTextReader json = new(new StringReader(text))
+        {
+            DateParseHandling = DateParseHandling.None
+        };
         return JObject.Load(json);
+    }
+
+    /// <summary>
+    /// Есть ли в тексте комментарии. JObject их не хранит, так что после записи
+    /// они бы пропали — а .NET-конфигурация комментарии в appsettings.json разрешает.
+    /// </summary>
+    private static bool HasComments(string text)
+    {
+        using JsonTextReader json = new(new StringReader(text))
+        {
+            DateParseHandling = DateParseHandling.None
+        };
+        while (json.Read())
+        {
+            if (json.TokenType == JsonToken.Comment)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
     /// Записывает объект с отступами — файл читают и правят руками.
     /// Пишем через временный файл рядом: обрыв на середине записи оставил бы
     /// сервер вовсе без настроек, а так старый файл заменяется целиком и разом.
+    /// Права прежнего файла переносятся на новый: администратор мог закрыть его
+    /// от чужих глаз из-за ключа API и пароля ClickHouse.
     /// </summary>
     private static void Write(string path, JObject document)
     {
         string temp = path + ".new";
         File.WriteAllText(temp, document.ToString(Formatting.Indented) + System.Environment.NewLine);
+        if (!OperatingSystem.IsWindows() && File.Exists(path))
+        {
+            File.SetUnixFileMode(temp, File.GetUnixFileMode(path));
+        }
         File.Move(temp, path, overwrite: true);
     }
 
     /// <summary>
     /// Точка входа режима слияния: <c>SPI.Twamp.Server --merge-config текущий эталон</c>.
-    /// Возвращает код возврата процесса.
+    /// Печатает новые ключи по одному в строке; код возврата — 0, если они
+    /// записаны, <see cref="ExitNotWritten"/>, если их нужно добавить руками.
     /// </summary>
     public static int RunCommandLine(string[] args)
     {
@@ -123,11 +182,12 @@ public static class ConfigMerger
 
         try
         {
-            foreach (string key in Merge(args[1], args[2]))
+            Result result = Merge(args[1], args[2]);
+            foreach (string key in result.Added)
             {
                 Console.WriteLine(key);
             }
-            return 0;
+            return result.Written ? 0 : ExitNotWritten;
         }
         catch (Exception ex)
         {

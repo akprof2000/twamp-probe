@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -159,5 +161,72 @@ func TestMergeConfig_BadJSONKeepsFile(t *testing.T) {
 	data, _ := os.ReadFile(current)
 	if string(data) != broken {
 		t.Errorf("испорченный файл изменён:\n%s", data)
+	}
+}
+
+func TestMergeConfig_KeepsKeyOrderAndValueText(t *testing.T) {
+	// Файл правят руками, и его вид — тоже чья-то работа. После слияния ключи
+	// должны идти в прежнем порядке (новые — в конце своей секции), а значения
+	// остаться тем же текстом: без сортировки по алфавиту, без escape-кодов
+	// вместо «&», «<», «>» и без переписывания чисел.
+	current := writeConfig(t, "appsettings.json", `{
+	  "Urls": "http://0.0.0.0:9443",
+	  "Probe": { "MaxParallel": 5e2, "PortRange": "40000-45000" },
+	  "Auth": { "ApiKey": "a&b<c>" },
+	  "ping": { "name": "ping" }
+	}`)
+	reference := writeConfig(t, "reference.json", `{
+	  "Auth": { "ApiKey": "" },
+	  "Logging": { "Level": "Warn" },
+	  "Probe": { "MinParallel": 16, "MaxParallel": 20000 },
+	  "Urls": "http://0.0.0.0:8443",
+	  "ping": { "name": "ping" }
+	}`)
+
+	if _, err := mergeConfigFiles(current, reference); err != nil {
+		t.Fatalf("слияние не удалось: %v", err)
+	}
+
+	data, _ := os.ReadFile(current)
+	text := string(data)
+	order := []string{`"Urls"`, `"Probe"`, `"MaxParallel"`, `"PortRange"`, `"MinParallel"`, `"Auth"`, `"ping"`, `"Logging"`}
+	last := -1
+	for _, key := range order {
+		at := strings.Index(text, key)
+		if at < last {
+			t.Fatalf("порядок ключей нарушен, %s не на месте:\n%s", key, text)
+		}
+		last = at
+	}
+	if !strings.Contains(text, `"a&b<c>"`) {
+		t.Errorf("значение с «&<>» заэкранировано:\n%s", text)
+	}
+	if !strings.Contains(text, "5e2") {
+		t.Errorf("текст числа переписан:\n%s", text)
+	}
+}
+
+func TestMergeConfig_KeepsFileMode(t *testing.T) {
+	// Администратор мог закрыть файл от чужих глаз из-за ключа API — после
+	// слияния права должны остаться прежними, а не сброситься в 0644.
+	if runtime.GOOS == "windows" {
+		t.Skip("права POSIX на Windows не действуют")
+	}
+	current := writeConfig(t, "appsettings.json", `{"Urls": "http://0.0.0.0:9443"}`)
+	reference := writeConfig(t, "reference.json", `{"Urls": "x", "New": 1}`)
+	if err := os.Chmod(current, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := mergeConfigFiles(current, reference); err != nil {
+		t.Fatalf("слияние не удалось: %v", err)
+	}
+
+	info, err := os.Stat(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("права файла стали %o, ожидалось 600", info.Mode().Perm())
 	}
 }
