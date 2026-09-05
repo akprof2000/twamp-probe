@@ -120,7 +120,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-          cache-dependency-path: go-probe/go.sum
+          cache: false
 
       # Go-проба: один статический бинарник ~6 МБ без зависимостей. Linux-вариант
       # работает на любом дистрибутиве x86-64 (CentOS 7+, Rocky, Alma, Ubuntu…),
@@ -190,7 +190,7 @@ jobs:
           path: |
             publish/*.tar.gz
             publish/*.zip
-          retention-days: 14
+          retention-days: 1
 
       # Выпуск версии: создаётся GitHub Release с четырьмя архивами. При запуске
       # по изменению версии в main тег v<версия> создаётся здесь же.
