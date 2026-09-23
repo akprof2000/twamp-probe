@@ -318,8 +318,29 @@ async function pageProbeTasks(dir) {
   await loadProbeTasks(null, currentProbe);
 }
 
+// Автообновление карточки задач пробы ходит на саму пробу, поэтому его надо
+// сдерживать: события сервера приходят с каждой пачкой результатов (десятки
+// в минуту), и без ограничения запросы к пробе накладывались бы друг на друга,
+// а перегруженная проба переставала бы отвечать. Ручные действия (кнопки,
+// страницы) идут без задержки, но тоже не поверх ещё идущего запроса.
+const PROBE_TASKS_AUTO_INTERVAL_MS = 5000;
+let probeTasksBusy = false;
+let probeTasksLoadedAt = 0;
+
+function autoRefreshProbeTasks() {
+  if (!currentProbe || probeTasksBusy) return;
+  if (Date.now() - probeTasksLoadedAt < PROBE_TASKS_AUTO_INTERVAL_MS) return;
+  loadProbeTasks(null, currentProbe);
+}
+
 async function loadProbeTasks(btn, probe) {
-  if (!probe) return;
+  if (!probe || probeTasksBusy) return;
+  probeTasksBusy = true;
+  try { await loadProbeTasksNow(btn, probe); }
+  finally { probeTasksBusy = false; probeTasksLoadedAt = Date.now(); }
+}
+
+async function loadProbeTasksNow(btn, probe) {
   await withBusy(btn, async () => {
     try {
       const q = new URLSearchParams({ probe, skip: probeTaskSkip, take: PROBE_PAGE });
@@ -329,7 +350,9 @@ async function loadProbeTasks(btn, probe) {
       const data = await jget('probetaskstatus?' + q.toString());
       currentProbe = probe;
       probeTaskTotal = data.total;
-      if (probeTaskSkip >= probeTaskTotal && probeTaskTotal > 0) { probeTaskSkip = 0; return loadProbeTasks(null, probe); }
+      // Страница ушла за конец списка — перечитываем с начала, минуя защиту от
+      // повторного входа: мы и есть тот самый идущий запрос.
+      if (probeTaskSkip >= probeTaskTotal && probeTaskTotal > 0) { probeTaskSkip = 0; return loadProbeTasksNow(null, probe); }
       $('#cardProbeTasks').style.display = '';
       $('#probeTasksAddr').textContent = probe;
       $('#tblProbeTasks tbody').innerHTML = data.items.map(t => `<tr>
@@ -776,7 +799,7 @@ function refreshActiveTab() {
   const tab = document.querySelector('nav button.active')?.dataset.tab;
   if (tab === 'status') {
     loadStatus();
-    if (currentProbe) loadProbeTasks(null, currentProbe);
+    autoRefreshProbeTasks();
   } else if (tab === 'tasks') {
     loadTasks();
   } else if (tab === 'storage') {

@@ -1,7 +1,9 @@
 ﻿// Ignore Spelling: SPI Twamp
 
+using Flurl.Http;
 using Microsoft.AspNetCore.Mvc;
 using NLog;
+using spi.twamp.server.Environment;
 using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.Contracts;
 using System.ComponentModel.DataAnnotations;
@@ -25,6 +27,41 @@ namespace SPI.Twamp.Server.Controllers
         private readonly IProbeStatusProvider _probeStatus = probeStatus;
         private readonly IProbeClient _probeClient = probeClient;
         private readonly IChangeNotifier _changeNotifier = changeNotifier;
+
+        /// <summary>
+        /// Выполняет действие, которое обращается к пробе по HTTP, и переводит её
+        /// недоступность в понятный ответ: 504, если проба не уложилась в
+        /// «Probe:HttpTimeoutSec», и 502 при любом другом сбое связи.
+        /// <para>
+        /// Без этого оператор видел голый 500 с «An error occurred while processing your
+        /// request» и не мог понять, что дело не в сервере, а в пробе. Разрыв со стороны
+        /// самого оператора (закрыл вкладку) пробрасывается как есть — отвечать уже некому.
+        /// </para>
+        /// </summary>
+        /// <param name="probe">Адрес пробы — для журнала и текста ответа.</param>
+        /// <param name="action">Обращение к пробе.</param>
+        /// <param name="cancellationToken">Токен отмены запроса оператора.</param>
+        private async Task<ActionResult> CallProbeAsync(
+            string probe, Func<Task<ActionResult>> action, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await action();
+            }
+            catch (FlurlHttpTimeoutException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.Warn("Проба {Probe} не ответила за отведённое время: {Reason}", probe, ErrorText.ShortReason(ex));
+                return StatusCode(StatusCodes.Status504GatewayTimeout,
+                    $"Проба {probe} не ответила за отведённое время. Проверьте, что она запущена и не перегружена.");
+            }
+            catch (FlurlHttpException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                string reason = ErrorText.ShortReason(ex);
+                _logger.Warn("Проба {Probe} недоступна: {Reason}", probe, reason);
+                _logger.Debug(ex, "Подробности обращения к пробе {Probe}", probe);
+                return StatusCode(StatusCodes.Status502BadGateway, $"Проба {probe} недоступна: {reason}");
+            }
+        }
 
         /// <summary>Возвращает список неопознанных проб (ожидающих подтверждения).</summary>
         [HttpGet("[action]")]
@@ -56,11 +93,12 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="client">Базовый адрес пробы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         [HttpPost("[action]")]
-        public async Task<ActionResult> CheckIn([FromQuery][Required] string client, CancellationToken cancellationToken)
-        {
-            await _clientService.CheckInAsync(client, cancellationToken);
-            return Ok();
-        }
+        public Task<ActionResult> CheckIn([FromQuery][Required] string client, CancellationToken cancellationToken) =>
+            CallProbeAsync(client, async () =>
+            {
+                await _clientService.CheckInAsync(client, cancellationToken);
+                return Ok();
+            }, cancellationToken);
 
         /// <summary>
         /// Удаляет подтверждённую пробу: останавливает опрос, убирает из списка;
@@ -139,7 +177,7 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="outcome">Фильтр по исходу запуска.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         [HttpGet("[action]")]
-        public async Task<ActionResult> ProbeTaskStatus(
+        public Task<ActionResult> ProbeTaskStatus(
             [FromQuery][Required] string probe,
             [FromQuery] int skip = 0, [FromQuery] int take = 100,
             [FromQuery] string? title = null, [FromQuery] string? outcome = null,
@@ -149,8 +187,11 @@ namespace SPI.Twamp.Server.Controllers
             string query = $"skip={skip}&take={take}" +
                 (string.IsNullOrEmpty(title) ? "" : $"&title={Uri.EscapeDataString(title)}") +
                 (string.IsNullOrEmpty(outcome) ? "" : $"&outcome={Uri.EscapeDataString(outcome)}");
-            string json = await _probeClient.GetTaskStatusRawAsync(probe, query, cancellationToken);
-            return Content(json, "application/json");
+            return CallProbeAsync(probe, async () =>
+            {
+                string json = await _probeClient.GetTaskStatusRawAsync(probe, query, cancellationToken);
+                return Content(json, "application/json");
+            }, cancellationToken);
         }
 
         /// <summary>
@@ -165,12 +206,13 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="probe">Адрес пробы (RequestInfo).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
         [HttpGet("[action]")]
-        public async Task<ActionResult> ProbeState(
-            [FromQuery][Required] string probe, CancellationToken cancellationToken = default)
-        {
-            string json = await _probeClient.GetProbeStateRawAsync(probe, cancellationToken);
-            return Content(json, "application/json");
-        }
+        public Task<ActionResult> ProbeState(
+            [FromQuery][Required] string probe, CancellationToken cancellationToken = default) =>
+            CallProbeAsync(probe, async () =>
+            {
+                string json = await _probeClient.GetProbeStateRawAsync(probe, cancellationToken);
+                return Content(json, "application/json");
+            }, cancellationToken);
 
         /// <summary>
         /// Возвращает состояние всех проб: связь (последний успешный опрос, ошибки,

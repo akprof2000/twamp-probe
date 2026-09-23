@@ -1397,13 +1397,6 @@
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.MarkPollFailure(System.String,System.Exception,System.Int64,System.Int32)">
             <summary>Фиксирует ошибку опроса пробы и обновляет её состояние для страницы статуса.</summary>
         </member>
-        <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.ShortReason(System.Exception)">
-            <summary>
-            Короткая причина ошибки: сообщение самого внутреннего исключения. Для сетевых
-            сбоев (Flurl оборачивает HttpRequestException → SocketException) это и есть суть,
-            а стек вызовов лишь засоряет журнал.
-            </summary>
-        </member>
         <member name="M:SPI.Twamp.Server.BackgroundServices.ProbePollingService.DelayBackoffAsync(System.Int32,System.Threading.CancellationToken)">
             <summary>Ждёт backoff-паузу; возвращает <c>false</c>, если сервис остановлен во время ожидания.</summary>
         </member>
@@ -2274,6 +2267,21 @@
             Пробы и мониторинг: регистрация/подтверждение проб, состояние связи, статус
             выполнения задач, «длинный опрос» изменений. Часть API оператора (<c>api/userinterface</c>).
             </summary>
+        </member>
+        <member name="M:SPI.Twamp.Server.Controllers.ProbesController.CallProbeAsync(System.String,System.Func{System.Threading.Tasks.Task{Microsoft.AspNetCore.Mvc.ActionResult}},System.Threading.CancellationToken)">
+            <summary>
+            Выполняет действие, которое обращается к пробе по HTTP, и переводит её
+            недоступность в понятный ответ: 504, если проба не уложилась в
+            «Probe:HttpTimeoutSec», и 502 при любом другом сбое связи.
+            <para>
+            Без этого оператор видел голый 500 с «An error occurred while processing your
+            request» и не мог понять, что дело не в сервере, а в пробе. Разрыв со стороны
+            самого оператора (закрыл вкладку) пробрасывается как есть — отвечать уже некому.
+            </para>
+            </summary>
+            <param name="probe">Адрес пробы — для журнала и текста ответа.</param>
+            <param name="action">Обращение к пробе.</param>
+            <param name="cancellationToken">Токен отмены запроса оператора.</param>
         </member>
         <member name="M:SPI.Twamp.Server.Controllers.ProbesController.ListNotIdentifyClients">
             <summary>Возвращает список неопознанных проб (ожидающих подтверждения).</summary>
@@ -3614,6 +3622,16 @@
             </summary>
             <param name="input">Исходная дата со временем.</param>
             <returns>Дата без времени или <c>null</c>, если вход был <c>null</c>.</returns>
+        </member>
+        <member name="T:spi.twamp.server.Environment.ErrorText">
+            <summary>Короткие человекочитаемые описания исключений для журнала и ответов API.</summary>
+        </member>
+        <member name="M:spi.twamp.server.Environment.ErrorText.ShortReason(System.Exception)">
+            <summary>
+            Короткая причина ошибки: сообщение самого внутреннего исключения. Для сетевых
+            сбоев (Flurl оборачивает HttpRequestException → SocketException) это и есть суть,
+            например «Connection refused» или «No route to host».
+            </summary>
         </member>
         <member name="T:spi.twamp.server.Environment.StringConversion">
             <summary>
