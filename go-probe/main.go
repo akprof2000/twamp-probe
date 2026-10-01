@@ -100,6 +100,15 @@ func main() {
 
 	results := NewResultStore(cfg.MaxPendingResults, cfg.PersistIntervalSec)
 	results.Load()
+	// Локальный архив — после Load: восстановленные с диска результаты уже
+	// попали в архив до перезапуска.
+	archive := NewResultArchive(cfg.ArchiveDir, cfg.ArchiveIntervalMin,
+		cfg.ArchiveRetentionDays, cfg.MaxPendingResults)
+	results.AttachArchive(archive)
+	if archive != nil {
+		logMain.Info("Локальный архив результатов включён", "папка", cfg.ArchiveDir,
+			"период_мин", cfg.ArchiveIntervalMin, "хранение_дней", cfg.ArchiveRetentionDays)
+	}
 	runReg := NewRunRegistry()
 	cancels := NewRunCancelRegistry()
 	// Локальные порты зондов проба раздаёт сама: два замера не возьмут один и
@@ -191,6 +200,7 @@ func main() {
 	waitForRuns(limiter, shutdownWait)
 
 	results.Close() // финальный снимок недоставленных результатов
+	archive.Close() // последний архив — накопленное с прошлой записи
 	logMain.Info("Проба остановлена")
 }
 

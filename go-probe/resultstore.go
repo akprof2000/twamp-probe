@@ -26,6 +26,7 @@ type ResultStore struct {
 	inFlight   []ActionData
 	maxPending int
 	dropped    int64
+	archive    *ResultArchive // локальный архив всех результатов (nil — выключен)
 
 	signal  chan struct{} // сигнал «появились данные» для длинного опроса
 	dirty   bool
@@ -45,8 +46,14 @@ func NewResultStore(maxPending, persistSec int) *ResultStore {
 	return s
 }
 
+// AttachArchive подключает локальный архив: в него попадает каждый результат.
+// Вызывается до начала замеров.
+func (s *ResultStore) AttachArchive(archive *ResultArchive) { s.archive = archive }
+
 // Add ставит результат в очередь (с вытеснением самых старых при переполнении).
 func (s *ResultStore) Add(result ActionData) {
+	s.archive.Add(result)
+
 	s.mu.Lock()
 	s.pending = append(s.pending, result)
 	if len(s.pending) > s.maxPending {

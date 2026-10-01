@@ -45,6 +45,11 @@ type Config struct {
 	// PortRange — диапазон локальных портов, который проба раздаёт зондам сама
 	// (Probe:PortRange, «нижний-верхний»). Пусто — порт выбирает ядро.
 	PortRange string
+
+	// Локальный архив результатов (resultarchive.go): копия всех замеров в zip.
+	ArchiveDir           string // Probe:ArchiveDir — папка архивов; пусто — архив выключен
+	ArchiveIntervalMin   int    // Probe:ArchiveIntervalMin — период записи архива, минут
+	ArchiveRetentionDays int    // Probe:ArchiveRetentionDays — срок хранения архивов, дней (0 — не удалять)
 }
 
 // readConfigFile читает файл настроек в память. В файле от Windows может быть
@@ -97,6 +102,10 @@ func LoadConfig(path string) (*Config, error) {
 		PortRange:      str(raw, "Probe:PortRange", defaultPortRange),
 		TwampEmbedded:  flag(raw, "twamp:embedded", false),
 		TwampyEmbedded: flag(raw, "twampy:embedded", false),
+
+		ArchiveDir:           str(raw, "Probe:ArchiveDir", ""),
+		ArchiveIntervalMin:   num(raw, "Probe:ArchiveIntervalMin", 5),
+		ArchiveRetentionDays: num(raw, "Probe:ArchiveRetentionDays", 3),
 	}
 	return cfg, nil
 }
