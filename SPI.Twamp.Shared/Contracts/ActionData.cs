@@ -30,6 +30,8 @@ namespace SPI.Twamp.Server.Contracts
         /// Идентификатор задачи, к которой относится результат.
         /// </summary>
         public Guid TaskId { get; set; }
+        /// <summary>Название задания в момент запуска. Старые пробы его не передавали.</summary>
+        public string? TaskTitle { get; set; }
 
         /// <summary>
         /// Конечный узел (адрес), для которого выполнялся зонд.
@@ -39,6 +41,8 @@ namespace SPI.Twamp.Server.Contracts
         /// <summary>
         /// Идентификатор запроса (адрес пробы-источника).
         /// </summary>
+        public string IPAddress { get; set; } = "";
+
         public string RequestInfo { get; set; } = "0.0.0.0";
 
         /// <summary>

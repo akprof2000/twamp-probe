@@ -1,218 +1,262 @@
-// Хранилище результатов с подтверждением доставки (ACK) — аналог C# ResultStore.
-//
-// Результаты копятся в очереди; сервер забирает их пачкой (TakeBatch), пачка
-// «в полёте» хранится до подтверждения (Confirm) и при потере связи выдаётся
-// повторно — дубликаты сервер отбрасывает по ResultId. Очередь ограничена:
-// при переполнении вытесняются самые старые. Снимок недоставленного пишется
-// на диск по таймеру (не на каждый результат) — дисковая нагрузка минимальна.
+// Дисковая очередь пробы. Данные, граница пачки и её ACK меняются транзакционно.
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
-	"slices"
+	"path/filepath"
 	"sync"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
-// resultsFileName — файл недоставленных результатов между перезапусками.
-const resultsFileName = "JobResult.json"
+var rowsBucket = []byte("results")
+var metaBucket = []byte("delivery")
 
-// ResultStore — очередь результатов с подтверждением и сохранением на диск.
 type ResultStore struct {
-	mu         sync.Mutex
-	pending    []ActionData
-	inFlightId string
-	inFlight   []ActionData
-	maxPending int
-	dropped    int64
-	archive    *ResultArchive // локальный архив всех результатов (nil — выключен)
-
-	signal  chan struct{} // сигнал «появились данные» для длинного опроса
-	dirty   bool
-	persist time.Duration
-	stop    chan struct{}
+	db         *bolt.DB
+	batchSize  int
+	signal     chan struct{}
+	legacyPath string
+	closeOnce  sync.Once
 }
 
-// NewResultStore создаёт хранилище и запускает фоновый цикл сохранения.
-func NewResultStore(maxPending, persistSec int) *ResultStore {
-	s := &ResultStore{
-		maxPending: maxPending,
-		signal:     make(chan struct{}, 1),
-		persist:    time.Duration(persistSec) * time.Second,
-		stop:       make(chan struct{}),
+func number(n uint64) []byte { return binary.BigEndian.AppendUint64(nil, n) }
+func readNumber(b []byte) uint64 {
+	if len(b) == 0 {
+		return 0
 	}
-	go s.persistLoop()
-	return s
+	return binary.BigEndian.Uint64(b)
 }
 
-// AttachArchive подключает локальный архив: в него попадает каждый результат.
-// Вызывается до начала замеров.
-func (s *ResultStore) AttachArchive(archive *ResultArchive) { s.archive = archive }
-
-// Add ставит результат в очередь (с вытеснением самых старых при переполнении).
-func (s *ResultStore) Add(result ActionData) {
-	s.archive.Add(result)
-
-	s.mu.Lock()
-	s.pending = append(s.pending, result)
-	if len(s.pending) > s.maxPending {
-		s.pending = s.pending[1:]
-		s.dropped++
-		if s.dropped == 1 || s.dropped%1000 == 0 {
-			logResults.Error("Очередь результатов переполнена — старые записи вытесняются",
-				"лимит", s.maxPending, "всего_вытеснено", s.dropped)
-		}
-	}
-	s.dirty = true
-	s.mu.Unlock()
-
-	select {
-	case s.signal <- struct{}{}:
-	default: // сигнал уже стоит — потребитель и так проснётся
-	}
-}
-
-// TakeBatch выдаёт пачку результатов, ожидая появления данных до timeout
-// («длинный опрос»). Неподтверждённая пачка выдаётся повторно.
-func (s *ResultStore) TakeBatch(timeout time.Duration) ResultBatch {
-	deadline := time.After(timeout)
-	for {
-		s.mu.Lock()
-		if s.inFlight != nil {
-			batch := ResultBatch{BatchId: s.inFlightId, Items: slices.Clone(s.inFlight)} // slices.Clone — Go 1.21
-			s.mu.Unlock()
-			return batch
-		}
-		if len(s.pending) > 0 {
-			s.inFlight = s.pending
-			s.pending = nil
-			s.inFlightId = NewGuid()
-			batch := ResultBatch{BatchId: s.inFlightId, Items: slices.Clone(s.inFlight)}
-			s.mu.Unlock()
-			return batch
-		}
-		s.mu.Unlock()
-
-		select {
-		case <-s.signal: // появились данные — попробуем снова
-		case <-deadline:
-			return ResultBatch{BatchId: EmptyGuid, Items: []ActionData{}}
-		}
-	}
-}
-
-// Confirm подтверждает запись пачки сервером — только теперь она удаляется.
-func (s *ResultStore) Confirm(batchId string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.inFlight == nil || s.inFlightId != batchId {
-		return false
-	}
-	s.inFlight = nil
-	s.inFlightId = ""
-	s.dirty = true
-	return true
-}
-
-// Clear полностью очищает накопленные результаты (очередь, неподтверждённую пачку
-// и файл на диске). Используется сторожем связи при «удалении» пробы.
-func (s *ResultStore) Clear() {
-	s.mu.Lock()
-	s.pending = nil
-	s.inFlight = nil
-	s.inFlightId = ""
-	s.dirty = false
-	s.mu.Unlock()
-	_ = os.Remove(resultsFileName)
-}
-
-// Load восстанавливает недоставленные результаты после перезапуска.
-func (s *ResultStore) Load() {
-	data, err := os.ReadFile(resultsFileName)
+func OpenResultStore(dir string, batchSize int) (*ResultStore, error) {
+	db, err := bolt.Open(filepath.Join(dir, "results.db"), 0600, &bolt.Options{Timeout: time.Second})
 	if err != nil {
-		return // файла нет — чистый старт
+		return nil, err
 	}
-	var saved []ActionData
-	if err := json.Unmarshal(data, &saved); err != nil {
-		logResults.Error("Не удалось загрузить недоставленные результаты", "файл", resultsFileName, "ошибка", err)
-		return
+	s := &ResultStore{db: db, batchSize: max(1, batchSize), signal: make(chan struct{}, 1), legacyPath: filepath.Join(dir, "JobResult.json")}
+	err = db.Update(func(tx *bolt.Tx) error {
+		rows, err := tx.CreateBucketIfNotExists(rowsBucket)
+		if err != nil {
+			return err
+		}
+		meta, err := tx.CreateBucketIfNotExists(metaBucket)
+		if err != nil {
+			return err
+		}
+		if meta.Get([]byte("legacyEnd")) != nil {
+			return nil
+		}
+		data, err := os.ReadFile(s.legacyPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var items []json.RawMessage
+		if err = json.Unmarshal(data, &items); err != nil {
+			return fmt.Errorf("JobResult.json: %w", err)
+		}
+		for _, raw := range items {
+			var record ActionData
+			if err = json.Unmarshal(raw, &record); err != nil {
+				return err
+			}
+			if record.ResultId == "" || record.ResultId == EmptyGuid {
+				record.ResultId = NewGuid()
+				raw, err = json.Marshal(record)
+				if err != nil {
+					return err
+				}
+			}
+			if err = appendRow(rows, raw); err != nil {
+				return err
+			}
+		}
+		hash := sha256.Sum256(data)
+		if err := meta.Put([]byte("legacyHash"), hash[:]); err != nil {
+			return err
+		}
+		return meta.Put([]byte("legacyEnd"), number(rows.Sequence()))
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
 	}
-	s.mu.Lock()
-	s.pending = append(saved, s.pending...)
-	s.mu.Unlock()
-	if len(saved) > 0 {
-		logResults.Info("Недоставленные результаты восстановлены с диска", "результатов", len(saved), "файл", resultsFileName)
+	s.cleanupLegacy()
+	return s, nil
+}
+
+func appendRow(rows *bolt.Bucket, data []byte) error {
+	key, err := rows.NextSequence()
+	if err != nil {
+		return err
+	}
+	return rows.Put(number(key), data)
+}
+
+// Batch groups concurrent producers into a single fsync. A successful return means durable.
+func (s *ResultStore) Add(result ActionData) error {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	err = s.db.Batch(func(tx *bolt.Tx) error { return appendRow(tx.Bucket(rowsBucket), data) })
+	if err == nil {
 		select {
 		case s.signal <- struct{}{}:
 		default:
 		}
 	}
+	return err
 }
 
-// persistLoop периодически пишет снимок недоставленного на диск (только при изменениях).
-//
-// Probe:PersistIntervalSec = 0 означает «по таймеру не сохранять»: снимок делается
-// только при остановке. Без этой проверки нулевой интервал ронял бы пробу при
-// старте — таймер с неположительным периодом в Go паникует.
-func (s *ResultStore) persistLoop() {
-	if s.persist <= 0 {
-		<-s.stop
-		s.flush() // финальный снимок при остановке
-		return
-	}
-
-	ticker := time.NewTicker(s.persist)
-	defer ticker.Stop()
+func (s *ResultStore) readBatch(timeout time.Duration) (ResultBatch, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
 	for {
+		empty := ResultBatch{BatchId: EmptyGuid, Items: []ActionData{}}
+		var pending bool
+		err := s.db.View(func(tx *bolt.Tx) error {
+			key, _ := tx.Bucket(rowsBucket).Cursor().First()
+			pending = key != nil
+			return nil
+		})
+		if err != nil {
+			return empty, err
+		}
+		if pending {
+			// Persist the upper key before exposing the batch, so retries after restart are identical.
+			err = s.db.Update(func(tx *bolt.Tx) error {
+				rows, meta := tx.Bucket(rowsBucket), tx.Bucket(metaBucket)
+				if meta.Get([]byte("batch")) != nil {
+					return nil
+				}
+				c := rows.Cursor()
+				k, _ := c.First()
+				if k == nil {
+					return nil
+				}
+				end := min(rows.Sequence(), readNumber(k)+uint64(s.batchSize)-1)
+				if err := meta.Put([]byte("end"), number(end)); err != nil {
+					return err
+				}
+				return meta.Put([]byte("batch"), []byte(NewGuid()))
+			})
+			if err != nil {
+				return empty, err
+			}
+			batch := empty
+			err = s.db.View(func(tx *bolt.Tx) error {
+				meta := tx.Bucket(metaBucket)
+				id := meta.Get([]byte("batch"))
+				if id == nil {
+					return nil
+				}
+				batch.BatchId = string(id)
+				end := meta.Get([]byte("end"))
+				c := tx.Bucket(rowsBucket).Cursor()
+				for k, v := c.First(); k != nil && bytes.Compare(k, end) <= 0; k, v = c.Next() {
+					var item ActionData
+					if err := json.Unmarshal(v, &item); err != nil {
+						return err
+					}
+					batch.Items = append(batch.Items, item)
+				}
+				return nil
+			})
+			if err != nil {
+				return empty, err
+			}
+			if len(batch.Items) > 0 {
+				return batch, nil
+			}
+			continue
+		}
 		select {
-		case <-ticker.C:
-			s.flush()
-		case <-s.stop:
-			s.flush() // финальный снимок при остановке
-			return
+		case <-s.signal:
+		case <-deadline.C:
+			return empty, nil
 		}
 	}
 }
 
-// flush атомарно записывает снимок «в полёте + очередь» через временный файл.
-func (s *ResultStore) flush() {
-	s.mu.Lock()
-	if !s.dirty {
-		s.mu.Unlock()
-		return
+func (s *ResultStore) confirm(id string) (bool, error) {
+	confirmed := false
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		rows, meta := tx.Bucket(rowsBucket), tx.Bucket(metaBucket)
+		if id == "" || string(meta.Get([]byte("batch"))) != id {
+			return nil
+		}
+		end := meta.Get([]byte("end"))
+		// Copy the key before mutating the bucket.
+		last := readNumber(end)
+		first, _ := rows.Cursor().First()
+		if first != nil {
+			for n := readNumber(first); n <= last; n++ {
+				if err := rows.Delete(number(n)); err != nil {
+					return err
+				}
+			}
+		}
+		if err := meta.Put([]byte("acked"), number(last)); err != nil {
+			return err
+		}
+		if err := meta.Delete([]byte("end")); err != nil {
+			return err
+		}
+		confirmed = true
+		return meta.Delete([]byte("batch"))
+	})
+	if err == nil && confirmed {
+		s.cleanupLegacy()
 	}
-	s.dirty = false
-	snapshot := slices.Concat(s.inFlight, s.pending) // slices.Concat — Go 1.22
-	s.mu.Unlock()
+	return confirmed && err == nil, err
+}
 
-	if len(snapshot) == 0 {
-		_ = os.Remove(resultsFileName)
-		return
-	}
-	data, err := json.Marshal(snapshot)
+func (s *ResultStore) cleanupLegacy() {
+	// Keep the import marker until the old file is unlinked. If the process
+	// exits between unlink and commit, retrying is safe.
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		m := tx.Bucket(metaBucket)
+		end := m.Get([]byte("legacyEnd"))
+		if end == nil || readNumber(m.Get([]byte("acked"))) < readNumber(end) {
+			return nil
+		}
+		data, err := os.ReadFile(s.legacyPath)
+		if err == nil {
+			hash := sha256.Sum256(data)
+			if !bytes.Equal(hash[:], m.Get([]byte("legacyHash"))) {
+				return fmt.Errorf("файл JobResult.json изменён после импорта, сохранён на диске")
+			}
+			err = os.Remove(s.legacyPath)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err = m.Delete([]byte("legacyHash")); err != nil {
+			return err
+		}
+		return m.Delete([]byte("legacyEnd"))
+	})
 	if err != nil {
-		logResults.Error("Не удалось сериализовать результаты", "ошибка", err)
-		return
-	}
-	tmp := resultsFileName + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		logResults.Error("Не удалось сохранить результаты", "ошибка", err)
-		return
-	}
-	if err := os.Rename(tmp, resultsFileName); err != nil {
-		logResults.Error("Не удалось заменить файл результатов", "файл", resultsFileName, "ошибка", err)
+		logResults.Error("Очистка старого снимка", "ошибка", err)
 	}
 }
 
-// PendingCount сообщает, сколько результатов ждёт отправки серверу.
-// Число видно в веб-интерфейсе: растущая очередь означает, что сервер
-// перестал их забирать.
 func (s *ResultStore) PendingCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.pending)
+	count := 0
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		count = int(tx.Bucket(rowsBucket).Sequence() - readNumber(tx.Bucket(metaBucket).Get([]byte("acked"))))
+		return nil
+	})
+	return count
 }
-
-// Close останавливает фоновый цикл и делает финальный снимок.
-func (s *ResultStore) Close() { close(s.stop) }
+func (s *ResultStore) Close() { s.closeOnce.Do(func() { _ = s.db.Close() }) }

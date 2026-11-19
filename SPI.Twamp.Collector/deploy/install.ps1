@@ -1,0 +1,145 @@
+# Установка SPI TWamp Collector как службы Windows.
+#
+# Что делает:
+#   1. копирует файлы в C:\Program Files\TwampCollector (или в -Path);
+#   2. регистрирует службу TwampCollector с автозапуском;
+#   3. открывает порт сервера в брандмауэре;
+#   4. запускает службу и проверяет, что веб-интерфейс отвечает.
+#
+# Запуск в PowerShell от имени администратора:
+#   powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+#
+# Повторный запуск обновляет версию: служба останавливается, файлы заменяются,
+# служба стартует снова. Конфигурация и база данных при этом не затираются.
+
+[CmdletBinding()]
+param(
+    [string]$Path = "$env:ProgramFiles\TwampCollector",
+    [string]$ServiceName = "TwampCollector"
+)
+
+$ErrorActionPreference = 'Stop'
+
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "Нужны права администратора: запустите PowerShell «от имени администратора»"
+}
+
+$source = Split-Path -Parent $MyInvocation.MyCommand.Path
+$exe = Join-Path $Path 'SPI.Twamp.Collector.exe'
+
+if (-not (Test-Path (Join-Path $source 'SPI.Twamp.Collector.exe'))) {
+    throw "Рядом со скриптом нет SPI.Twamp.Collector.exe — запускайте его из распакованной папки"
+}
+
+# Вариант framework требует установленного .NET; самодостаточному он не нужен.
+if (-not (Test-Path (Join-Path $source 'hostpolicy.dll')) -and
+    -not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    throw @"
+Это сборка framework — нужен .NET 10 Runtime (ASP.NET Core):
+  https://dotnet.microsoft.com/download/dotnet/10.0
+Либо возьмите архив selfcontained — ему .NET не нужен.
+"@
+}
+
+Write-Host "=== 1. Файлы съёмника -> $Path"
+$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existing -and $existing.Status -ne 'Stopped') {
+    # Файл работающей службы заменить нельзя — Windows держит его заблокированным.
+    Write-Host "    останавливаем работающую службу"
+    Stop-Service -Name $ServiceName -Force
+    $existing.WaitForStatus('Stopped', '00:01:00')
+}
+
+if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Null }
+
+# Базу и буфер не трогаем: на работающем сервере там боевые данные.
+# Файл настроек тоже не заменяем — ниже он дополняется новыми ключами.
+$keep = @('appsettings.json', 'spool')
+$mergeConfig = Test-Path (Join-Path $Path 'appsettings.json')
+Get-ChildItem -Path $source -Exclude 'install.ps1','install.cmd','install.sh' | ForEach-Object {
+    if ($keep -contains $_.Name -and (Test-Path (Join-Path $Path $_.Name))) {
+        if ($_.Name -ne 'appsettings.json') {
+            Write-Host "    $($_.Name) уже есть — оставляем"
+        }
+        return
+    }
+    Copy-Item -Path $_.FullName -Destination $Path -Recurse -Force
+}
+
+Write-Host "=== 2. Настройки"
+if ($mergeConfig) {
+    # Затирать чужой файл эталонным нельзя — там строка подключения, ключ API,
+    # адреса. Но и оставлять как есть мало: в новой версии появляются
+    # настройки, о которых иначе никто не узнает. Поэтому слияние: значения
+    # администратора остаются, новые ключи добавляются рядом.
+    # Код возврата 3 — файл с комментариями: сервер их сохранить не умеет и
+    # файл не трогает, а новые ключи перечисляет для ручного добавления.
+    $added = & $exe --merge-config (Join-Path $Path 'appsettings.json') (Join-Path $source 'appsettings.json')
+    if ($LASTEXITCODE -eq 3) {
+        Write-Host "    в вашем appsettings.json есть комментарии — при переписывании они бы"
+        Write-Host "    пропали, поэтому файл не тронут. Добавьте новые настройки вручную:"
+        $added | ForEach-Object { Write-Host "        $_" }
+    } elseif ($LASTEXITCODE -ne 0) {
+        throw "не удалось дополнить appsettings.json"
+    } elseif ($added) {
+        Write-Host "    ваши значения сохранены, добавлены новые настройки:"
+        $added | ForEach-Object { Write-Host "        $_" }
+    } else {
+        Write-Host "    ваш appsettings.json уже полон — оставлен без изменений"
+    }
+} else {
+    Write-Host "    appsettings.json взят из пакета"
+}
+
+Write-Host "=== 3. Служба $ServiceName"
+if ($existing) {
+    & sc.exe config $ServiceName binPath= "`"$exe`"" start= auto | Out-Null
+    Write-Host "    служба уже зарегистрирована, параметры обновлены"
+} else {
+    New-Service -Name $ServiceName -BinaryPathName "`"$exe`"" `
+        -DisplayName 'SPI TWamp Collector' -StartupType Automatic `
+        -Description 'Сервер SPI TWamp: задания пробам, отчёты, веб-интерфейс' | Out-Null
+    Write-Host "    служба создана"
+}
+
+# Перед выходом сервер дописывает буфер результатов — даём ему время
+# и поднимаем службу обратно, если она упала.
+& sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+
+Write-Host "=== 4. Порт в брандмауэре"
+$port = 9001
+$configPath = Join-Path $Path 'appsettings.json'
+if (Test-Path $configPath) {
+    $urls = (Get-Content $configPath -Raw | ConvertFrom-Json).Urls
+    if ($urls -match ':(\d+)') { $port = [int]$Matches[1] }
+}
+$ruleName = "SPI TWamp Collector ($port)"
+if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP `
+        -LocalPort $port -Action Allow | Out-Null
+    Write-Host "    правило добавлено: TCP $port"
+} else {
+    Write-Host "    правило уже есть: TCP $port"
+}
+
+Write-Host "=== 5. Запуск"
+Start-Service -Name $ServiceName
+(Get-Service -Name $ServiceName).WaitForStatus('Running', '00:01:00')
+Start-Sleep -Seconds 3
+
+Write-Host "    состояние службы: $((Get-Service -Name $ServiceName).Status)"
+try {
+    $answer = Invoke-WebRequest -Uri "http://127.0.0.1:$port/storage" -UseBasicParsing -TimeoutSec 15
+    Write-Host "    ответ API съёмника: HTTP $($answer.StatusCode)"
+} catch {
+    if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) {
+        Write-Host "    API съёмника доступен и требует ключ"
+    } else {
+        Write-Warning "    проверка API съёмника на порту $port завершилась ошибкой: $_"
+    }
+}
+
+Write-Host ""
+Write-Host "Готово. Состояние съёмника: http://localhost:$port/storage"
+Write-Host "Управление: Start-Service $ServiceName | Stop-Service $ServiceName"

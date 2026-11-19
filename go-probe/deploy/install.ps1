@@ -46,6 +46,7 @@ if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Nul
 # Файл настроек копируем отдельно — ниже он не заменяется, а дополняется.
 $keepConfig = Test-Path (Join-Path $Path 'appsettings.json')
 Get-ChildItem -Path $source -Exclude 'install.ps1','install.cmd','install.sh' | ForEach-Object {
+    if ($_.Name -in @('results.db', 'JobResult.json', 'TaskInfo.json')) { return }
     if ($keepConfig -and $_.Name -eq 'appsettings.json') { return }
     Copy-Item -Path $_.FullName -Destination $Path -Recurse -Force
 }

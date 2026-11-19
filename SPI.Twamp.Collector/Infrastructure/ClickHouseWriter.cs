@@ -22,7 +22,7 @@ namespace SPI.Twamp.Server.Infrastructure
     {
         /// <summary>Настройки вставки: не падать на незнакомых полях и понимать любые формы дат.</summary>
         private const string InsertSettings =
-            "&input_format_skip_unknown_fields=1&date_time_input_format=best_effort";
+            "&async_insert=0&wait_end_of_query=1&date_time_input_format=best_effort";
 
         private readonly Logger _logger;
         private readonly HttpClient _http;
@@ -36,12 +36,12 @@ namespace SPI.Twamp.Server.Infrastructure
         public ClickHouseWriter(Logger logger, IConfiguration configuration)
         {
             _logger = logger;
-            Enabled = configuration["ClickHouse:Enabled"].ConvertTo(false);
+            Enabled = configuration["ClickHouse:Enabled"].ConvertTo(true);
             _baseUrl = (configuration["ClickHouse:Url"] ?? "http://localhost:8123").TrimEnd('/');
             _database = configuration["ClickHouse:Database"] ?? "twamp";
             _table = configuration["ClickHouse:Table"] ?? "results";
 
-            _http = new HttpClient
+            _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
             {
                 // Вставка большого сегмента может идти долго — таймаут щедрый.
                 Timeout = TimeSpan.FromSeconds(configuration["ClickHouse:TimeoutSec"].ConvertTo(300))
@@ -70,6 +70,7 @@ namespace SPI.Twamp.Server.Infrastructure
         {
             await ExecuteAsync($"CREATE DATABASE IF NOT EXISTS `{_database}`", cancellationToken);
             await ExecuteAsync(ExportRow.CreateTableDdl(_database, _table), cancellationToken);
+            await ExecuteAsync($"ALTER TABLE `{_database}`.`{_table}` ADD COLUMN IF NOT EXISTS SourceProbe String, ADD COLUMN IF NOT EXISTS RequestInfo String, ADD COLUMN IF NOT EXISTS IPAddress String", cancellationToken);
             _logger.Info("ClickHouse: таблица {Database}.{Table} готова", _database, _table);
         }
 
@@ -92,7 +93,7 @@ namespace SPI.Twamp.Server.Infrastructure
         private async Task ExecuteAsync(string sql, CancellationToken cancellationToken)
         {
             using StringContent content = new(sql, Encoding.UTF8, "text/plain");
-            using HttpResponseMessage response = await _http.PostAsync(_baseUrl + "/", content, cancellationToken);
+            using HttpResponseMessage response = await _http.PostAsync(_baseUrl + "/?wait_end_of_query=1", content, cancellationToken);
             await EnsureSuccessAsync(response, cancellationToken);
         }
 
@@ -102,12 +103,12 @@ namespace SPI.Twamp.Server.Infrastructure
         /// </summary>
         private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
         {
-            if (response.IsSuccessStatusCode)
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.OK && string.IsNullOrWhiteSpace(body))
             {
                 return;
             }
 
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new HttpRequestException($"ClickHouse ответил {(int)response.StatusCode}: {body.Trim()}");
         }
 

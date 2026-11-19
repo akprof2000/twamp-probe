@@ -2,8 +2,7 @@
 //
 // Если сервер не обращался к пробе дольше Probe:ServerTimeoutHours часов
 // (0 — сторож выключен), проба считает себя удалённой: останавливает все задачи
-// по расписанию, удаляет реестр (TaskInfo.json) и очищает кэш недоставленных
-// результатов (JobResult.json). HTTP продолжает слушаться: если сервер вернётся,
+// по расписанию, удаляет реестр (TaskInfo.json). HTTP продолжает слушаться: если сервер вернётся,
 // его фоновая сверка восстановит задачи автоматически.
 package main
 
@@ -35,9 +34,9 @@ func (t *ContactTracker) Mark() { t.lastContact.Store(time.Now().UnixNano()) }
 func (t *ContactTracker) Last() time.Time { return time.Unix(0, t.lastContact.Load()) }
 
 // RunWatchdog — цикл сторожа: молчание сервера дольше timeoutHours приводит
-// к остановке всех задач и очистке кэша (однократно до следующего контакта).
+// к остановке всех задач (однократно до следующего контакта).
 func RunWatchdog(ctx context.Context, timeoutHours int, tracker *ContactTracker,
-	tasks *TaskRegistry, results *ResultStore) {
+	tasks *TaskRegistry) {
 
 	if timeoutHours <= 0 {
 		logWatchdog.Info("Сторож связи выключен (Probe:ServerTimeoutHours = 0)")
@@ -62,9 +61,8 @@ func RunWatchdog(ctx context.Context, timeoutHours int, tracker *ContactTracker,
 			}
 
 			stopped := tasks.ClearAll()
-			results.Clear()
 			lastCleared = time.Now()
-			logWatchdog.Warn("Сервер молчит дольше порога — проба считает себя удалённой, всё очищено",
+			logWatchdog.Warn("Сервер молчит дольше порога — проба считает себя удалённой, расписание снято",
 				"последний_контакт", last.Format("02.01.2006 15:04"),
 				"порог_ч", timeoutHours, "остановлено_задач", stopped)
 		}

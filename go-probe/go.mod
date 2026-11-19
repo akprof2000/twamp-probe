@@ -7,3 +7,5 @@ require github.com/robfig/cron/v3 v3.0.1
 require golang.org/x/sys v0.47.0
 
 require github.com/akprof2000/twping-go v1.2.0
+
+require go.etcd.io/bbolt v1.4.3

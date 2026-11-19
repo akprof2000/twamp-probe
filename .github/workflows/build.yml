@@ -96,3 +96,34 @@ jobs:
           cat /etc/redhat-release
           echo "ip_local_port_range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
           go test -timeout 900s ./...
+
+  delivery:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8-alpine
+        env:
+          CLICKHOUSE_PASSWORD: delivery-test
+        ports:
+          - 8123:8123
+    env:
+      TWAMP_CLICKHOUSE_URL: http://127.0.0.1:8123
+      TWAMP_CLICKHOUSE_PASSWORD: delivery-test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+          cache-dependency-path: go-probe/go.sum
+      - run: dotnet build SPI.TWamp.slnx -c Release
+      - run: go build -o "$RUNNER_TEMP/twamp-probe" .
+        working-directory: go-probe
+      - name: Проверка трёх служб при сбоях базы и связи
+        run: |
+          python3 tests/delivery_smoke.py --clickhouse "$TWAMP_CLICKHOUSE_URL" \
+            --probe "$RUNNER_TEMP/twamp-probe" \
+            --configurator SPI.Twamp.Server/bin/Release/net10.0/SPI.Twamp.Server \
+            --collector SPI.Twamp.Collector/bin/Release/net10.0/SPI.Twamp.Collector

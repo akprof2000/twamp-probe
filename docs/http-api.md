@@ -52,7 +52,7 @@
 | POST | `/api/userinterface/UploadCsv` | загрузить готовый CSV задач |
 | GET | `/api/userinterface/downloadfile` | потоковая выгрузка CSV: результаты, ещё не перенесённые в ClickHouse (параметров периода нет) |
 
-### Проба (используется сервером)
+### Проба (конфигуратор управляет расписанием, съёмник забирает результаты)
 
 | Метод | Путь | Назначение |
 |---|---|---|
@@ -63,7 +63,11 @@
 | GET | `/api/probeinterface/taskstatus` | состояние выполнения задач (running, старт/финиш, следующий запуск, ошибка) |
 | GET | `/api/probeinterface/probestate` | снимок состояния пробы: предел и число идущих замеров, режимы зондов, пул портов, очередь результатов |
 | GET | `/api/probeinterface/checkdata` | длинный опрос: пачка результатов с `batchId` |
-| POST | `/api/probeinterface/confirmdata?batchId=…` | подтвердить запись пачки (проба удаляет её) |
+| POST | `/api/probeinterface/confirmdata?batchId=…` | после успешной вставки в ClickHouse съёмник передаёт `X-Twamp-Commit: clickhouse`; без заголовка ответ 428. Проба удаляет только совпадающую пачку |
+
+Для регистрации съёмника интерфейс вызывает `POST /api/userinterface/collectors` с полем `url`. Конфигуратор читает его `GET /identity` и запоминает адрес. `GET /api/userinterface/collectors` возвращает список. У пробы назначение хранится в `collectorId` при подтверждении через `SetInfoClient`.
+
+Конфигуратор предоставляет съёмнику `GET /api/collector/catalog?collectorId=…` и `POST /api/collector/titles` для разрешения имён задач старых проб. На съёмнике доступны `GET /snapshot`, `GET /storage` и `GET /report`; веб-интерфейс обращается к ним через конфигуратор.
 
 #### Снимок состояния пробы (`probestate`)
 

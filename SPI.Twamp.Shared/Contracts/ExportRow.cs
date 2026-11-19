@@ -106,6 +106,9 @@ namespace SPI.Twamp.Server.Contracts
         // --- Служебные поля дедупликации ---
 
         /// <summary>Идентификатор результата (присвоен пробой) — ключ дедупликации.</summary>
+        public string SourceProbe { get; set; } = "";
+        public string RequestInfo { get; set; } = "";
+        public string IPAddress { get; set; } = "";
         public string ResultId { get; set; } = "";
         /// <summary>Номер блока статистики внутри одного результата (0, 1, …).</summary>
         public int RowNo { get; set; }
@@ -119,7 +122,7 @@ namespace SPI.Twamp.Server.Contracts
         /// <param name="title">Название задачи.</param>
         public static ExportRow Create(ActionData action, TwPingStats stats, int rowNo, string title) => new()
         {
-            Started = (action.Creation ?? DateTime.Now).ToString(TimeFormat, CultureInfo.InvariantCulture),
+            Started = (action.Creation ?? DateTime.UnixEpoch).ToString(TimeFormat, CultureInfo.InvariantCulture),
             Title = title,
             Id = action.TaskId.ToString(),
             Mode = action.Mode ?? "",
@@ -156,6 +159,8 @@ namespace SPI.Twamp.Server.Contracts
             ExitCode = action.ExitCode,
             Console = action.Console ?? "",
             ErrorConsole = action.ErrorConsole ?? "",
+            RequestInfo = action.RequestInfo ?? "",
+            IPAddress = action.IPAddress ?? "",
             ResultId = action.ResultId.ToString(),
             RowNo = rowNo
         };
@@ -265,6 +270,9 @@ namespace SPI.Twamp.Server.Contracts
                 ExitCode Nullable(Int32),
                 Console String,
                 ErrorConsole String,
+                SourceProbe String,
+                RequestInfo String,
+                IPAddress String,
                 ResultId String,
                 RowNo Int32
             )

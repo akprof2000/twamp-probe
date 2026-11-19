@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -21,10 +22,10 @@ func longRunningProbe() (string, string) {
 func newTestRunner(t *testing.T, exec, args string) (*ProbeRunner, *ResultStore, *RunCancelRegistry) {
 	t.Helper()
 	cfg := &Config{
-		MaxPendingResults: 1000,
-		Ping:              ProbeToolConfig{Name: exec, Default: args},
+		ResultBatchSize: 1000,
+		Ping:            ProbeToolConfig{Name: exec, Default: args},
 	}
-	results := NewResultStore(cfg.MaxPendingResults, 60)
+	results := newTestStore(t, cfg.ResultBatchSize)
 	cancels := NewRunCancelRegistry()
 	return NewProbeRunner(cfg, results, NewRunRegistry(), cancels, nil), results, cancels
 }
@@ -166,7 +167,7 @@ func TestDeletedTask_CancelsRunThroughRegistry(t *testing.T) {
 	// не только снять расписание, но и оборвать выполняющийся зонд.
 	exec, args := longRunningProbe()
 	runner, _, cancels := newTestRunner(t, exec, args)
-	registry := NewTaskRegistry(&fakeEnqueuer{}, NewRunRegistry(), cancels)
+	registry := NewTaskRegistry(filepath.Join(t.TempDir(), tasksFileName), &fakeEnqueuer{}, NewRunRegistry(), cancels)
 
 	task := probeTask("dddddddd-0000-0000-0000-000000000004")
 	done := make(chan struct{})

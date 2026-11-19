@@ -64,8 +64,9 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <inheritdoc/>
         public async Task ConfirmResultsAsync(string probeUrl, Guid batchId, CancellationToken cancellationToken) =>
             _ = await Request(probeUrl, "api/ProbeInterface/ConfirmData")
+                .WithHeader("X-Twamp-Commit", "clickhouse")
                 .SetQueryParam("batchId", batchId)
-                .PostAsync(cancellationToken: cancellationToken);
+                .PostAsync(cancellationToken: cancellationToken).ReceiveJson<bool>();
 
         /// <inheritdoc/>
         public Task<Guid[]> GetTaskIdsAsync(string probeUrl, CancellationToken cancellationToken) =>

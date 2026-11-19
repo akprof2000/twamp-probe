@@ -44,6 +44,7 @@ type Enqueuer interface {
 
 // TaskRegistry — реестр задач по расписанию.
 type TaskRegistry struct {
+	file       string
 	mu         sync.Mutex
 	tasks      map[string]*scheduledTask
 	dispatcher Enqueuer
@@ -52,23 +53,23 @@ type TaskRegistry struct {
 }
 
 // NewTaskRegistry создаёт пустой реестр.
-func NewTaskRegistry(dispatcher Enqueuer, registry *RunRegistry, cancels *RunCancelRegistry) *TaskRegistry {
-	return &TaskRegistry{tasks: map[string]*scheduledTask{}, dispatcher: dispatcher, registry: registry, cancels: cancels}
+func NewTaskRegistry(file string, dispatcher Enqueuer, registry *RunRegistry, cancels *RunCancelRegistry) *TaskRegistry {
+	return &TaskRegistry{file: file, tasks: map[string]*scheduledTask{}, dispatcher: dispatcher, registry: registry, cancels: cancels}
 }
 
 // Load восстанавливает реестр из TaskInfo.json после перезапуска.
 func (r *TaskRegistry) Load() {
-	data, err := os.ReadFile(tasksFileName)
+	data, err := os.ReadFile(r.file)
 	if err != nil {
 		return // файла нет — чистая проба, задачи дошлёт сверка сервера
 	}
 	var saved []TaskInfo
 	if err := json.Unmarshal(data, &saved); err != nil {
-		logRegistry.Error("Не удалось загрузить реестр задач", "файл", tasksFileName, "ошибка", err)
+		logRegistry.Error("Не удалось загрузить реестр задач", "файл", r.file, "ошибка", err)
 		return
 	}
 	r.MergeJobs(saved)
-	logRegistry.Info("Реестр задач восстановлен с диска", "файл", tasksFileName, "задач", len(saved))
+	logRegistry.Info("Реестр задач восстановлен с диска", "файл", r.file, "задач", len(saved))
 }
 
 // MergeJobs применяет инкрементальные изменения задач (добавить/обновить/удалить).
@@ -223,7 +224,7 @@ func (r *TaskRegistry) ClearAll() int {
 		delete(r.tasks, id)
 		r.registry.Remove(id)
 	}
-	_ = os.Remove(tasksFileName)
+	_ = os.Remove(r.file)
 	// Заодно обрываем всё, что выполняется прямо сейчас.
 	if stopped := r.cancels.CancelAll(); stopped > 0 {
 		logRegistry.Info("Оборваны выполняющиеся запуски", "запусков", stopped)
@@ -242,7 +243,7 @@ func (r *TaskRegistry) persist() {
 		logRegistry.Error("Не удалось сериализовать реестр задач", "ошибка", err)
 		return
 	}
-	if err := os.WriteFile(tasksFileName, data, 0o644); err != nil {
-		logRegistry.Error("Не удалось сохранить реестр задач", "файл", tasksFileName, "ошибка", err)
+	if err := os.WriteFile(r.file, data, 0o644); err != nil {
+		logRegistry.Error("Не удалось сохранить реестр задач", "файл", r.file, "ошибка", err)
 	}
 }

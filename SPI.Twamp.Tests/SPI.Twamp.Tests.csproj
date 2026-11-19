@@ -26,4 +26,7 @@
     <ProjectReference Include="..\SPI.Twamp.Server\SPI.Twamp.Server.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../SPI.Twamp.Collector/SPI.Twamp.Collector.csproj" />
+  </ItemGroup>
 </Project>

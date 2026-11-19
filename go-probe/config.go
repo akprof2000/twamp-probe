@@ -22,10 +22,9 @@ type Config struct {
 	ListenAddr         string    // из Urls: "http://0.0.0.0:8443" → "0.0.0.0:8443"
 	ApiKey             string    // Auth:ApiKey; пусто — аутентификация выключена
 	MaxParallel        int       // Probe:MaxParallel — размер пула воркеров
-	MaxPendingResults  int       // Probe:MaxPendingResults — лимит очереди результатов
+	ResultBatchSize    int       // Probe:ResultBatchSize — число результатов в пачке
 	QueueCapacity      int       // Probe:QueueCapacity — ёмкость очереди задач диспетчера
-	PersistIntervalSec int       // Probe:PersistIntervalSec — период снимка очереди на диск
-	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба чистит всё (0 — выключено)
+	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба снимает расписание (0 — выключено)
 	MinParallel        int       // Probe:MinParallel — ниже этого предел не опускается даже при нехватке памяти
 	StartParallel      int       // Probe:StartParallel — с какого предела начинаем разгон после запуска
 	MemoryHighPercent  float64   // Probe:MemoryHighPercent — выше этой занятости памяти предел сжимается
@@ -45,11 +44,6 @@ type Config struct {
 	// PortRange — диапазон локальных портов, который проба раздаёт зондам сама
 	// (Probe:PortRange, «нижний-верхний»). Пусто — порт выбирает ядро.
 	PortRange string
-
-	// Локальный архив результатов (resultarchive.go): копия всех замеров в zip.
-	ArchiveDir           string // Probe:ArchiveDir — папка архивов; пусто — архив выключен
-	ArchiveIntervalMin   int    // Probe:ArchiveIntervalMin — период записи архива, минут
-	ArchiveRetentionDays int    // Probe:ArchiveRetentionDays — срок хранения архивов, дней (0 — не удалять)
 }
 
 // readConfigFile читает файл настроек в память. В файле от Windows может быть
@@ -78,9 +72,8 @@ func LoadConfig(path string) (*Config, error) {
 		ListenAddr:         parseUrls(str(raw, "Urls", "http://0.0.0.0:8443")),
 		ApiKey:             str(raw, "Auth:ApiKey", ""),
 		MaxParallel:        resolveParallel(num(raw, "Probe:MaxParallel", 0)),
-		MaxPendingResults:  num(raw, "Probe:MaxPendingResults", 100000),
+		ResultBatchSize:    num(raw, "Probe:ResultBatchSize", 1000),
 		QueueCapacity:      num(raw, "Probe:QueueCapacity", 100000),
-		PersistIntervalSec: num(raw, "Probe:PersistIntervalSec", 5),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
 		MinParallel:        num(raw, "Probe:MinParallel", 16),
 		StartParallel:      num(raw, "Probe:StartParallel", 64),
@@ -102,10 +95,6 @@ func LoadConfig(path string) (*Config, error) {
 		PortRange:      str(raw, "Probe:PortRange", defaultPortRange),
 		TwampEmbedded:  flag(raw, "twamp:embedded", false),
 		TwampyEmbedded: flag(raw, "twampy:embedded", false),
-
-		ArchiveDir:           str(raw, "Probe:ArchiveDir", ""),
-		ArchiveIntervalMin:   num(raw, "Probe:ArchiveIntervalMin", 5),
-		ArchiveRetentionDays: num(raw, "Probe:ArchiveRetentionDays", 3),
 	}
 	return cfg, nil
 }

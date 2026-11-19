@@ -17,7 +17,7 @@ func newEmbeddedRunner(t *testing.T, embedded bool) (*ProbeRunner, *ResultStore)
 		// проба попытается запустить внешний процесс, и это будет видно по исходу.
 		Twampy: ProbeToolConfig{Name: "python3-не-существует", Default: ""},
 	}
-	results := NewResultStore(100, 0)
+	results := newTestStore(t, 100)
 	return NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), nil), results
 }
 
@@ -87,7 +87,7 @@ func TestRunner_EmbeddedTwpingRunsWithoutExternalProcess(t *testing.T) {
 		// это сразу видно по исходу «зонд не запустился».
 		Twamp: ProbeToolConfig{Name: "twping-не-существует"},
 	}
-	results := NewResultStore(100, 0)
+	results := newTestStore(t, 100)
 	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), nil)
 
 	task := &TaskInfo{
@@ -114,7 +114,7 @@ func TestRunner_EmbeddedTwpingRunsWithoutExternalProcess(t *testing.T) {
 func TestRunner_ExternalTwpingUsedWhenEmbeddedDisabled(t *testing.T) {
 	// Без настройки режим TWamp по-прежнему выполняется внешней утилитой.
 	cfg := &Config{Twamp: ProbeToolConfig{Name: "twping-не-существует"}}
-	results := NewResultStore(100, 0)
+	results := newTestStore(t, 100)
 	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), nil)
 
 	task := &TaskInfo{

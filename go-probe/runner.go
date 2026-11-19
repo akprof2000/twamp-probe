@@ -81,10 +81,18 @@ func (r *ProbeRunner) runSingleNode(ctx context.Context, task *TaskInfo, node st
 				return
 			}
 			result := r.execute(ctx, task, node, execName, args, env)
+			result.TaskTitle = task.Title
 			if result.Cancelled {
 				return // задачу удалили — прекращаем циклы, результат не отправляем
 			}
-			r.results.Add(result)
+			for {
+				if err := r.results.Add(result); err == nil {
+					break
+				} else {
+					logRunner.Error("Запись результата на диск не удалась, повтор через секунду", "результат", result.ResultId, "ошибка", err)
+				}
+				time.Sleep(time.Second)
+			}
 		}
 		// Пауза между циклами (кроме последнего).
 		if circle != task.Circles-1 && task.PauseSec > 0 {

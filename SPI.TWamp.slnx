@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="SPI.Twamp.Server/SPI.Twamp.Server.csproj" />
   <Project Path="SPI.Twamp.Tests/SPI.Twamp.Tests.csproj" />
+  <Project Path="SPI.Twamp.Shared/SPI.Twamp.Shared.csproj" />
+  <Project Path="SPI.Twamp.Collector/SPI.Twamp.Collector.csproj" />
 </Solution>

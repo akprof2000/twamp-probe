@@ -26,7 +26,7 @@ flowchart LR
 Сервер не отличает её от обычной пробы: тот же протокол (CheckIn / SetJobs / TaskIds /
 TaskStatus / CheckData / ConfirmData), тот же формат JSON, та же ACK-доставка
 результатов, инкрементальное слияние задач, cron-расписания (включая секунды),
-пул воркеров `Probe:MaxParallel`, персист `TaskInfo.json`/`JobResult.json`, ключ API.
+пул воркеров `Probe:MaxParallel`, расписание в `TaskInfo.json` и транзакционная очередь `results.db`, ключ API.
 В списке проб она видна с версией вида `1.8.0-go`. Конфигурация — тот же `appsettings.json`.
 
 Проверено сквозным тестом против настоящего сервера: подтверждение, автодоставка

@@ -166,13 +166,13 @@ func TestPool_CooldownYieldsUnderPressure(t *testing.T) {
 func embeddedMixRunner(t *testing.T, pool *PortPool) (*ProbeRunner, *ResultStore) {
 	t.Helper()
 	cfg := &Config{
-		MaxPendingResults: 1000,
-		TwampEmbedded:     true,
-		TwampyEmbedded:    true,
-		Twamp:             ProbeToolConfig{Name: "twping-не-существует"},
-		Twampy:            ProbeToolConfig{Name: "python-не-существует"},
+		ResultBatchSize: 1000,
+		TwampEmbedded:   true,
+		TwampyEmbedded:  true,
+		Twamp:           ProbeToolConfig{Name: "twping-не-существует"},
+		Twampy:          ProbeToolConfig{Name: "python-не-существует"},
 	}
-	results := NewResultStore(cfg.MaxPendingResults, 0)
+	results := newTestStore(t, cfg.ResultBatchSize)
 	return NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), pool), results
 }
 

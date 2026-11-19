@@ -446,7 +446,7 @@ func TestExecute_RetriesOnBusyPort(t *testing.T) {
 	})
 
 	cfg := &Config{TwampyEmbedded: true, Twampy: ProbeToolConfig{Name: "python-не-существует"}}
-	results := NewResultStore(10, 0)
+	results := newTestStore(t, 10)
 	runner := NewProbeRunner(cfg, results, NewRunRegistry(), NewRunCancelRegistry(), pool)
 
 	task := &TaskInfo{

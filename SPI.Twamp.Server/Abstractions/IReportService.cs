@@ -20,8 +20,9 @@ namespace SPI.Twamp.Server.Abstractions
         /// <param name="decimalSeparator">Десятичный разделитель чисел.</param>
         /// <param name="writer">Куда писать CSV (тело HTTP-ответа).</param>
         /// <param name="cancellationToken">Токен отмены.</param>
+        /// <param name="collectorId">Идентификатор съёмника.</param>
         Task StreamCsvAsync(
-            char separator, char decimalSeparator, TextWriter writer, CancellationToken cancellationToken);
+            char separator, char decimalSeparator, TextWriter writer, CancellationToken cancellationToken, string? collectorId = null);
 
         /// <summary>
         /// Импортирует задачи из CSV-потока и ставит их на выполнение.

@@ -67,6 +67,7 @@ namespace SPI.Twamp.Server.Application
                 // незаполненные поля берём из существующей записи, чтобы не затереть
                 // версию, адреса и описание пустыми значениями.
                 client.Id = existing.Id;
+                client.CollectorId ??= existing.CollectorId;
                 client.Version = string.IsNullOrEmpty(client.Version) ? existing.Version : client.Version;
                 client.HostName = string.IsNullOrEmpty(client.HostName) ? existing.HostName : client.HostName;
                 client.IPAddress = client.IPAddress is null or "" or "0.0.0.0" ? existing.IPAddress : client.IPAddress;

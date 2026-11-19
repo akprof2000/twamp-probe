@@ -54,7 +54,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.MaxParallel != defaultMaxParallel {
 		t.Errorf("MaxParallel по умолчанию = %d, ожидалось %d", cfg.MaxParallel, defaultMaxParallel)
 	}
-	if cfg.PersistIntervalSec != 5 || cfg.ServerTimeoutHours != 24 {
+	if cfg.ResultBatchSize != 1000 || cfg.ServerTimeoutHours != 24 {
 		t.Errorf("значения по умолчанию: %+v", cfg)
 	}
 }

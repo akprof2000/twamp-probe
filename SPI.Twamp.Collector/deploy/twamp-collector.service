@@ -1,0 +1,31 @@
+[Unit]
+Description=SPI TWamp Collector
+Documentation=https://github.com/akprof2000/twamp-probe
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=twamp
+Group=twamp
+WorkingDirectory=/opt/twamp-collector
+ExecStart=/opt/twamp-collector/SPI.Twamp.Collector
+Restart=always
+RestartSec=5
+
+# Длинный опрос проб и соединения с ClickHouse.
+LimitNOFILE=1048576
+
+# Остановку не торопим: перед выходом сервер дописывает буфер результатов,
+# чтобы ничего не потерять по дороге в ClickHouse.
+TimeoutStopSec=60
+KillSignal=SIGTERM
+
+# Каталог рабочий, но системные пути сервер не трогает.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

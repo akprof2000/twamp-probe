@@ -17,38 +17,25 @@ namespace SPI.Twamp.Server.Application
     /// Реализация <see cref="IReportService"/>: потоковая выгрузка результатов в CSV
     /// и импорт задач из CSV.
     /// </summary>
-    public sealed class ReportService(Logger logger, IResultSpool spool, ITaskService taskService)
+    public sealed class ReportService(Logger logger, SPI.Twamp.Server.Infrastructure.CollectorRegistry collectors, ITaskService taskService)
         : IReportService
     {
-        /// <summary>Как часто сбрасывать накопленное в поток ответа, строк.</summary>
-        private const int FlushEvery = 5000;
-
         private readonly Logger _logger = logger;
-        private readonly IResultSpool _spool = spool;
         private readonly ITaskService _taskService = taskService;
 
         /// <inheritdoc/>
         public async Task StreamCsvAsync(
-            char separator, char decimalSeparator, TextWriter writer, CancellationToken cancellationToken)
+            char separator, char decimalSeparator, TextWriter writer, CancellationToken cancellationToken, string? collectorId = null)
         {
-            _logger.Info("Потоковая выгрузка CSV из буфера: сегментов в очереди {Queued}, строк в текущем {Rows}",
-                _spool.SealedCount, _spool.CurrentRows);
-
-            await writer.WriteLineAsync(ExportRow.CsvHeader(separator));
-
-            int written = 0;
-            await foreach (ExportRow row in _spool.ReadPendingAsync(cancellationToken))
-            {
-                await writer.WriteLineAsync(row.ToCsvLine(separator, decimalSeparator));
-
-                if (++written % FlushEvery == 0)
-                {
-                    await writer.FlushAsync(cancellationToken);
-                }
-            }
-
-            await writer.FlushAsync(cancellationToken);
-            _logger.Info("Выгружено строк: {Count}", written);
+            using HttpClient client = await collectors.ConnectAsync(collectorId);
+            string url = $"report?separator={Uri.EscapeDataString(separator.ToString())}&decimalSeparator={Uri.EscapeDataString(decimalSeparator.ToString())}";
+            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cancellationToken));
+            char[] buffer = new char[16384];
+            int count;
+            while ((count = await reader.ReadAsync(buffer, cancellationToken)) != 0)
+                await writer.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
         }
 
         /// <inheritdoc/>

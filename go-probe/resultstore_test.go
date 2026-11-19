@@ -6,16 +6,9 @@ import (
 	"time"
 )
 
-func newTestStore(maxPending int) *ResultStore {
-	s := NewResultStore(maxPending, 3600) // персист раз в час — в тестах не мешает
-	t := s
-	return t
-}
-
 // Пачка выдаётся повторно до подтверждения; после подтверждения — удаляется.
 func TestResultStore_AckRedelivery(t *testing.T) {
-	s := newTestStore(100)
-	defer s.Close()
+	s := newTestStore(t, 100)
 
 	s.Add(ActionData{ResultId: "r1"})
 	first := s.TakeBatch(time.Second)
@@ -41,52 +34,18 @@ func TestResultStore_AckRedelivery(t *testing.T) {
 	}
 }
 
-// При переполнении вытесняются самые старые результаты.
-func TestResultStore_DropOldest(t *testing.T) {
-	s := newTestStore(2)
-	defer s.Close()
-
-	s.Add(ActionData{ResultId: "old"})
-	s.Add(ActionData{ResultId: "mid"})
-	s.Add(ActionData{ResultId: "new"})
-
-	batch := s.TakeBatch(time.Second)
-	if len(batch.Items) != 2 {
-		t.Fatalf("лимит 2: ожидалось 2 результата, получено %d", len(batch.Items))
+// Test helpers fail immediately on storage errors.
+func (s *ResultStore) TakeBatch(timeout time.Duration) ResultBatch {
+	batch, err := s.readBatch(timeout)
+	if err != nil {
+		panic(err)
 	}
-	if batch.Items[0].ResultId != "mid" || batch.Items[1].ResultId != "new" {
-		t.Errorf("должны остаться два самых новых, получено %s, %s",
-			batch.Items[0].ResultId, batch.Items[1].ResultId)
-	}
+	return batch
 }
-
-// Clear убирает и очередь, и неподтверждённую пачку.
-func TestResultStore_Clear(t *testing.T) {
-	s := newTestStore(100)
-	defer s.Close()
-
-	s.Add(ActionData{ResultId: "r1"})
-	_ = s.TakeBatch(time.Second) // пачка «в полёте»
-	s.Add(ActionData{ResultId: "r2"})
-
-	s.Clear()
-
-	empty := s.TakeBatch(50 * time.Millisecond)
-	if len(empty.Items) != 0 {
-		t.Errorf("после Clear результатов быть не должно, получено %d", len(empty.Items))
+func (s *ResultStore) Confirm(id string) bool {
+	ok, err := s.confirm(id)
+	if err != nil {
+		panic(err)
 	}
-}
-
-func TestResultStore_ZeroPersistIntervalDoesNotPanic(t *testing.T) {
-	// Probe:PersistIntervalSec = 0 — допустимая настройка «не сохранять по
-	// таймеру». Раньше она роняла пробу при старте: таймер с нулевым периодом
-	// в Go паникует, а цикл сохранения запускается сразу из конструктора.
-	store := NewResultStore(10, 0)
-	defer store.Close()
-
-	store.Add(ActionData{ResultId: "r-1", TaskId: "t-1"})
-
-	if got := store.TakeBatch(10).Items; len(got) != 1 {
-		t.Errorf("получено результатов: %d, ожидался 1", len(got))
-	}
+	return ok
 }

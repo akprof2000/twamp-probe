@@ -22,6 +22,7 @@ namespace SPI.Twamp.Server.Contracts
     /// <param name="BatchRows">Порог строк, по которому сегмент запечатывается.</param>
     /// <param name="FlushMinutes">Срок, по которому сегмент запечатывается, минут.</param>
     /// <param name="Backpressured">Приём результатов с проб приостановлен: буфер полон.</param>
+    /// <param name="AwaitingConfirmation">Пачки, записанные в ClickHouse и ожидающие ответа пробы на ACK.</param>
     public record ClickHouseState(
         bool Enabled,
         string Url,
@@ -38,5 +39,6 @@ namespace SPI.Twamp.Server.Contracts
         int MaxSegments,
         int BatchRows,
         int FlushMinutes,
-        bool Backpressured);
+        bool Backpressured,
+        int AwaitingConfirmation = 0);
 }

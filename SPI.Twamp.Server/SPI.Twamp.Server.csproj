@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-	<DocumentationFile>spi.twamp.server.xml</DocumentationFile>
+	<DocumentationFile>$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/spi.twamp.server.xml</DocumentationFile>
 	<PublishAot>False</PublishAot>
 	<PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
@@ -41,4 +41,7 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../SPI.Twamp.Shared/SPI.Twamp.Shared.csproj" />
+  </ItemGroup>
 </Project>

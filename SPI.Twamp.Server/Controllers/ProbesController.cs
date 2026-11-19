@@ -82,9 +82,12 @@ namespace SPI.Twamp.Server.Controllers
         /// <summary>Подтверждает пробу и запускает её опрос.</summary>
         /// <param name="client">Данные пробы.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
+        /// <param name="collectors">Каталог допустимых съёмников.</param>
         [HttpPost("[action]")]
-        public async Task<ActionResult> SetInfoClient([FromBody][Required] Client client, CancellationToken cancellationToken)
+        public async Task<ActionResult> SetInfoClient([FromBody][Required] Client client, [FromServices] SPI.Twamp.Server.Infrastructure.CollectorRegistry collectors, CancellationToken cancellationToken)
         {
+            if (client.CollectorId is { } id && (await collectors.ListAsync()).All(c => c.Id != id))
+                return BadRequest("Съёмник не зарегистрирован.");
             await _clientService.SetInfoAsync(client, cancellationToken);
             return Ok();
         }
@@ -242,6 +245,7 @@ namespace SPI.Twamp.Server.Controllers
                 return new
                 {
                     c.RequestInfo,
+                    CollectorId = c.CollectorId ?? "default",
                     c.Name,
                     c.HostName,
                     c.IPAddress,

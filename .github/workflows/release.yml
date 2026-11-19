@@ -3,6 +3,8 @@
 #     выпускается автоматически, тег v<версия> создаётся сам (обычный путь);
 #   * пуш тега v* — то же самое, если тег ставят руками;
 #   * вручную (workflow_dispatch) — только артефакты, без релиза.
+#   * [manual release] в сообщении коммита пропускает автоматический выпуск,
+#     когда к релизу прикладываются уже собранные и проверенные архивы.
 # Собираются архивы для Linux x64 и Windows x64 — сервер и проба.
 # Сервер идёт в двух вариантах под каждую систему:
 #   * framework — маленький дистрибутив, требует установленного .NET Runtime на хосте;
@@ -31,6 +33,7 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message || '', '[manual release]') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -114,6 +117,11 @@ jobs:
           publish_one "$SRV" twamp-server selfcontained win-x64 \
             --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
+          COL=SPI.Twamp.Collector/SPI.Twamp.Collector.csproj
+          for rid in linux-x64 win-x64; do
+            publish_one "$COL" twamp-collector framework "$rid" --self-contained false
+            publish_one "$COL" twamp-collector selfcontained "$rid" --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          done
           ls -lh publish/*.tar.gz publish/*.zip
 
       - name: Установка Go
@@ -124,7 +132,7 @@ jobs:
 
       # Go-проба: один статический бинарник ~6 МБ без зависимостей. Linux-вариант
       # работает на любом дистрибутиве x86-64 (CentOS 7+, Rocky, Alma, Ubuntu…),
-      # Windows-вариант — на Windows 10+/Server. Итого в релизе 6 архивов.
+      # Windows-вариант — на Windows 10+/Server.
       # twping для режима TWamp кладём прямо в linux-пакет пробы, чтобы на хосте
       # ничего не доустанавливать. Берём готовый бинарник из релиза perfSONAR для
       # el7 (CentOS 7): он собран под glibc 2.14 и тянет только libm, libc и libcap —
@@ -134,7 +142,7 @@ jobs:
           set -e
           RPM=twamp-client-5.0.8-1.el7.x86_64.rpm
           curl -fsSL --retry 3 -o "$RPM" \
-            "http://software.internet2.edu/rpms/el7/x86_64/main/RPMS/$RPM"
+            "https://software.internet2.edu/rpms/el7/x86_64/main/RPMS/$RPM"
           command -v rpm2cpio >/dev/null || sudo apt-get install -y -qq rpm
           rpm2cpio "$RPM" | cpio -idm ./usr/bin/twping
           install -m 0755 usr/bin/twping go-probe/twping
@@ -231,5 +239,6 @@ jobs:
             | `twamp-server-*-linux-x64-selfcontained.tar.gz` | сервер для Linux, самодостаточный | нет — распаковал и запустил |
             | `twamp-server-*-windows-x64-framework.zip` | сервер для Windows, маленький | .NET 10 Runtime (ASP.NET Core) |
             | `twamp-server-*-windows-x64-selfcontained.zip` | сервер для Windows, самодостаточный | нет — распаковал и запустил |
+            | `twamp-collector-*` | съёмник для Linux или Windows | framework — ASP.NET Core 10, selfcontained — без рантайма |
             | `twamp-probe-go-*-linux-x64.tar.gz` | **проба (Go)** для Linux — один статический бинарник, twping в комплекте | нет; для TWampy — Python 3.8+ |
             | `twamp-probe-go-*-windows-x64.zip` | **проба (Go)** для Windows | нет; для TWampy — Python 3.8+ |

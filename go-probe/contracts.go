@@ -168,6 +168,7 @@ type TaskInfo struct {
 
 // ActionData — результат одного замера зонда, передаваемый серверу.
 type ActionData struct {
+	TaskTitle    string `json:"taskTitle,omitempty"`
 	ResultId     string `json:"resultId"`
 	Creation     CsTime `json:"creation"`
 	TaskId       string `json:"taskId"`

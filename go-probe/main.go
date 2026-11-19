@@ -86,7 +86,7 @@ func main() {
 		"адрес", cfg.ListenAddr,
 		"воркеров", cfg.MaxParallel,
 		"очередь_задач", cfg.QueueCapacity,
-		"очередь_результатов", cfg.MaxPendingResults,
+		"размер_пачки", cfg.ResultBatchSize,
 		"уровень_журнала", cfg.Log.Level,
 		"журнал", filepath.Join(cfg.Log.Dir, cfg.Log.FileName))
 
@@ -98,16 +98,10 @@ func main() {
 	// сообщать диспетчеру, что она остановлена.
 	defer markProbeFinished()
 
-	results := NewResultStore(cfg.MaxPendingResults, cfg.PersistIntervalSec)
-	results.Load()
-	// Локальный архив — после Load: восстановленные с диска результаты уже
-	// попали в архив до перезапуска.
-	archive := NewResultArchive(cfg.ArchiveDir, cfg.ArchiveIntervalMin,
-		cfg.ArchiveRetentionDays, cfg.MaxPendingResults)
-	results.AttachArchive(archive)
-	if archive != nil {
-		logMain.Info("Локальный архив результатов включён", "папка", cfg.ArchiveDir,
-			"период_мин", cfg.ArchiveIntervalMin, "хранение_дней", cfg.ArchiveRetentionDays)
+	results, err := OpenResultStore(".", cfg.ResultBatchSize)
+	if err != nil {
+		logMain.Error("Не удалось открыть очередь результатов", "ошибка", err)
+		os.Exit(1)
 	}
 	runReg := NewRunRegistry()
 	cancels := NewRunCancelRegistry()
@@ -161,13 +155,13 @@ func main() {
 	})
 
 	dispatcher := NewDispatcher(ctx, cfg.MaxParallel, cfg.QueueCapacity, runner, runReg, limiter)
-	tasks := NewTaskRegistry(dispatcher, runReg, cancels)
+	tasks := NewTaskRegistry(tasksFileName, dispatcher, runReg, cancels)
 	tasks.Load()
 
 	// Сторож связи: молчание сервера дольше Probe:ServerTimeoutHours означает,
-	// что пробу удалили, — задачи останавливаются, реестр и кэш чистятся.
+	// что пробу удалили, — задачи останавливаются, расписание снимается.
 	tracker := NewContactTracker()
-	go RunWatchdog(ctx, cfg.ServerTimeoutHours, tracker, tasks, results)
+	go RunWatchdog(ctx, cfg.ServerTimeoutHours, tracker, tasks)
 
 	api := &apiServer{cfg: cfg, results: results, tasks: tasks, runReg: runReg,
 		tracker: tracker, limiter: limiter, ports: ports}
@@ -199,8 +193,8 @@ func main() {
 	}
 	waitForRuns(limiter, shutdownWait)
 
-	results.Close() // финальный снимок недоставленных результатов
-	archive.Close() // последний архив — накопленное с прошлой записи
+	results.Close()
+
 	logMain.Info("Проба остановлена")
 }
 
@@ -388,14 +382,26 @@ func (a *apiServer) taskStatus(w http.ResponseWriter, r *http.Request) {
 
 // checkData выдаёт пачку результатов длинным опросом (до 30 секунд).
 func (a *apiServer) checkData(w http.ResponseWriter, _ *http.Request) {
-	batch := a.results.TakeBatch(30 * time.Second)
+	batch, err := a.results.readBatch(30 * time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	writeJSON(w, batch)
 }
 
 // confirmData подтверждает запись пачки сервером — проба удаляет её.
 func (a *apiServer) confirmData(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Twamp-Commit") != "clickhouse" {
+		http.Error(w, "ClickHouse commit required", http.StatusPreconditionRequired)
+		return
+	}
 	batchId := queryParam(r, "batchId")
-	confirmed := a.results.Confirm(strings.ToLower(batchId))
+	confirmed, err := a.results.confirm(strings.ToLower(batchId))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	writeJSON(w, confirmed)
 }
 

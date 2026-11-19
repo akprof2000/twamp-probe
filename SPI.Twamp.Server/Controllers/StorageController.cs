@@ -11,15 +11,18 @@ namespace SPI.Twamp.Server.Controllers
     /// </summary>
     [ApiController]
     [Route("api/userinterface")]
-    public class StorageController(IClickHouseStatusProvider status) : ControllerBase
+    public class StorageController(SPI.Twamp.Server.Infrastructure.CollectorRegistry collectors) : ControllerBase
     {
-        private readonly IClickHouseStatusProvider _status = status;
-
-        /// <summary>
-        /// Возвращает состояние переноса результатов в ClickHouse: объёмы очереди,
-        /// сколько уже выгружено, доступность базы и текст последней ошибки.
-        /// </summary>
+        /// <summary>Возвращает состояние ClickHouse и буфера съёмника.</summary>
         [HttpGet("[action]")]
-        public ActionResult<ClickHouseState> ClickHouseStatus() => Ok(_status.GetState());
+        public async Task<ActionResult<ClickHouseState>> ClickHouseStatus(CancellationToken ct, string? collectorId = null)
+        {
+            try
+            {
+                using var client = await collectors.ConnectAsync(collectorId);
+                return Ok(await client.GetFromJsonAsync<ClickHouseState>("storage", ct));
+            }
+            catch (HttpRequestException) { return StatusCode(503, "Съёмник недоступен"); }
+        }
     }
 }

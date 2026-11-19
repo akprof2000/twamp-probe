@@ -1,5 +1,5 @@
 [Unit]
-Description=SPI TWamp Server
+Description=SPI TWamp Configurator
 Documentation=https://github.com/akprof2000/twamp-probe
 After=network-online.target
 Wants=network-online.target
@@ -13,12 +13,10 @@ ExecStart=/opt/twamp-server/SPI.Twamp.Server
 Restart=always
 RestartSec=5
 
-# Сервер держит по соединению на каждую пробу (длинный опрос), плюс база
-# LiteDB, файлы буфера ClickHouse и веб-интерфейс.
+# Конфигуратор обслуживает веб-интерфейс, LiteDB и сверку расписаний.
 LimitNOFILE=1048576
 
-# Остановку не торопим: перед выходом сервер дописывает буфер результатов,
-# чтобы ничего не потерять по дороге в ClickHouse.
+# Даём завершить текущие операции с LiteDB.
 TimeoutStopSec=60
 KillSignal=SIGTERM
 

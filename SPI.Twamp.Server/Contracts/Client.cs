@@ -21,5 +21,8 @@ namespace SPI.Twamp.Server.Contracts
         /// Отображаемое имя пробы.
         /// </summary>
         public string Name { get; set; } = "New One";
+
+        /// <summary>Съёмник, которому назначена проба. Старые записи относятся к default.</summary>
+        public string? CollectorId { get; set; }
     }
 }

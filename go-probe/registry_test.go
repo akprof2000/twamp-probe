@@ -3,6 +3,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -14,15 +15,8 @@ func (f *fakeEnqueuer) Enqueue(task *TaskInfo) { f.enqueued = append(f.enqueued,
 // newTestRegistry — реестр во временном каталоге (не трогает рабочие файлы).
 func newTestRegistry(t *testing.T) (*TaskRegistry, *fakeEnqueuer) {
 	t.Helper()
-	dir := t.TempDir()
-	cwd, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
-
 	sink := &fakeEnqueuer{}
-	return NewTaskRegistry(sink, NewRunRegistry(), NewRunCancelRegistry()), sink
+	return NewTaskRegistry(filepath.Join(t.TempDir(), tasksFileName), sink, NewRunRegistry(), NewRunCancelRegistry()), sink
 }
 
 func schedulerTask(id string) TaskInfo {
@@ -40,7 +34,7 @@ func TestRegistry_MergeAddAndDelete(t *testing.T) {
 	if ids := reg.KnownTaskIds(); len(ids) != 2 {
 		t.Fatalf("ожидалось 2 задачи, получено %d", len(ids))
 	}
-	if _, err := os.Stat(tasksFileName); err != nil {
+	if _, err := os.Stat(reg.file); err != nil {
 		t.Errorf("реестр должен сохраниться в %s: %v", tasksFileName, err)
 	}
 
@@ -106,7 +100,7 @@ func TestRegistry_ClearAll(t *testing.T) {
 	if len(reg.KnownTaskIds()) != 0 {
 		t.Error("после ClearAll реестр должен быть пуст")
 	}
-	if _, err := os.Stat(tasksFileName); !os.IsNotExist(err) {
+	if _, err := os.Stat(reg.file); !os.IsNotExist(err) {
 		t.Error("файл реестра должен быть удалён")
 	}
 }

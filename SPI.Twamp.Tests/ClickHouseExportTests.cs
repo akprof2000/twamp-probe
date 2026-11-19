@@ -27,6 +27,7 @@ namespace SPI.Twamp.Tests
 
         /// <summary>Код ответа заглушки — меняется тестом, чтобы сыграть недоступность базы.</summary>
         private int _statusCode = 200;
+        private string _responseBody = "";
 
         /// <summary>Поднимает заглушку ClickHouse на свободном порту.</summary>
         public ClickHouseExportTests()
@@ -71,7 +72,7 @@ namespace SPI.Twamp.Tests
                 }
 
                 context.Response.StatusCode = _statusCode;
-                context.Response.Close();
+                context.Response.Close(Encoding.UTF8.GetBytes(_responseBody), false);
             }
         }
 
@@ -156,6 +157,36 @@ namespace SPI.Twamp.Tests
 
             // Файл сегмента удалён с диска.
             Assert.Empty(Directory.GetFiles(_directory, "seg-*.ndjson"));
+        }
+
+        [Theory]
+        [InlineData(503, "unavailable")]
+        [InlineData(200, "Code: 241. DB::Exception: insert failed")]
+        [InlineData(202, "")]
+        public async Task UncommittedBatchSurvivesRestart(int status, string body)
+        {
+            var ct = TestContext.Current.CancellationToken;
+            (var spool, var writer, _) = CreateStack();
+            using var spoolScope = spool;
+            using var writerScope = writer;
+            const string probe = "http://localhost:8443";
+            var batch = new ProbeResultBatch { BatchId = Guid.NewGuid(), Items = [
+                new ActionData { ResultId = Guid.NewGuid(), TaskId = Guid.NewGuid(), Mode = "TWampy", Console = "raw" }
+            ] };
+            string path;
+            using (var buffer = new SPI.Twamp.Collector.DeliveryBuffer(_directory))
+            {
+                path = await buffer.StageAsync(probe, batch, new Dictionary<Guid,string>(), ct);
+                _statusCode = status;
+                _responseBody = body;
+                await Assert.ThrowsAsync<HttpRequestException>(() => SPI.Twamp.Collector.DeliveryBuffer.StoreAsync(path, writer, ct));
+            }
+            using var recovered = new SPI.Twamp.Collector.DeliveryBuffer(_directory);
+            Assert.Equal(path, recovered.Peek(probe));
+            Assert.Equal(0, recovered.AwaitingConfirmation);
+            Assert.Equal(1, SPI.Twamp.Collector.DeliveryBuffer.RowCount(path));
+            var row = System.Text.Json.JsonSerializer.Deserialize<ExportRow>(await File.ReadAllTextAsync(path, ct));
+            Assert.Equal("raw", row!.Console);
         }
 
         [Fact(DisplayName = "При ошибке базы сегмент остаётся в очереди и не теряется")]

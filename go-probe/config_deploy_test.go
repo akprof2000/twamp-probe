@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,7 +22,7 @@ import (
 // упёрлось бы в размер этого участка. Плата за совмещение — редкие коллизии
 // по UDP с чужими сокетами машины, их отрабатывает карантин.
 func TestDeployConfig_PortRangeMatchesKernelSetting(t *testing.T) {
-	pool, err := os.ReadFile("deploy/appsettings.json")
+	pool, err := os.ReadFile(filepath.Join(testSources, "deploy/appsettings.json"))
 	if err != nil {
 		t.Fatalf("не удалось прочитать appsettings.json: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestDeployConfig_PortRangeMatchesKernelSetting(t *testing.T) {
 			config.Probe.PortRange, defaultPortRange)
 	}
 
-	sysctl, err := os.ReadFile("deploy/99-twamp-probe.conf")
+	sysctl, err := os.ReadFile(filepath.Join(testSources, "deploy/99-twamp-probe.conf"))
 	if err != nil {
 		t.Fatalf("не удалось прочитать 99-twamp-probe.conf: %v", err)
 	}
@@ -101,7 +102,7 @@ func parseRange(value, sep string) (int, int, error) {
 // и в документации, но не в файле, и очередь задач осталась стотысячной, когда
 // все остальные величины уже понизили.
 func TestDeployConfig_ContainsEveryProbeSetting(t *testing.T) {
-	source, err := os.ReadFile("config.go")
+	source, err := os.ReadFile(filepath.Join(testSources, "config.go"))
 	if err != nil {
 		t.Fatalf("не удалось прочитать config.go: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestDeployConfig_ContainsEveryProbeSetting(t *testing.T) {
 
 	for _, file := range []string{"deploy/appsettings.json", "deploy/appsettings.windows.json"} {
 		t.Run(file, func(t *testing.T) {
-			data, err := os.ReadFile(file)
+			data, err := os.ReadFile(filepath.Join(testSources, file))
 			if err != nil {
 				t.Fatalf("не удалось прочитать %s: %v", file, err)
 			}

@@ -31,17 +31,18 @@ namespace SPI.Twamp.Server.Controllers
         /// <param name="separator">Разделитель полей.</param>
         /// <param name="decimalSeparator">Десятичный разделитель.</param>
         /// <param name="cancellationToken">Токен отмены (разрыв соединения клиентом).</param>
+        /// <param name="collectorId">Съёмник для выгрузки отчёта.</param>
         [HttpGet("[action]")]
         public async Task DownloadFile(
             [FromQuery] char separator = ';', [FromQuery] char decimalSeparator = ',',
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, [FromQuery] string? collectorId = null)
         {
             Response.ContentType = "text/csv; charset=utf-8";
             Response.Headers.ContentDisposition =
                 $"attachment; filename=data_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
 
             await using StreamWriter writer = new(Response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
-            await _reportService.StreamCsvAsync(separator, decimalSeparator, writer, cancellationToken);
+            await _reportService.StreamCsvAsync(separator, decimalSeparator, writer, cancellationToken, collectorId);
         }
 
         /// <summary>Загружает задачи из CSV-файла.</summary>

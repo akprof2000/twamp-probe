@@ -22,6 +22,9 @@ namespace SPI.Twamp.Server.Infrastructure
             _db = new LiteDatabaseAsync(new ConnectionString(path));
         }
 
+        /// <summary>Коллекция съёмников.</summary>
+        public ILiteCollectionAsync<CollectorRegistration> Collectors => _db.GetCollection<CollectorRegistration>("collectors");
+
         /// <summary>Коллекция задач.</summary>
         public ILiteCollectionAsync<TaskInfo> Tasks => _db.GetCollection<TaskInfo>("tasksinfo");
 

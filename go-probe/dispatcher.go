@@ -33,7 +33,7 @@ type Dispatcher struct {
 
 // NewDispatcher создаёт диспетчер и поднимает пул воркеров.
 // queueCapacity — ёмкость очереди задач (Probe:QueueCapacity); это не та же
-// величина, что лимит очереди результатов (Probe:MaxPendingResults).
+// величина, что размер выдаваемой съёмнику пачки (Probe:ResultBatchSize).
 func NewDispatcher(ctx context.Context, workers, queueCapacity int, runner Executor,
 	registry *RunRegistry, limiter *AdaptiveLimiter) *Dispatcher {
 

@@ -108,9 +108,6 @@ try
     _ = builder.Services.AddSingleton<IStatRepository, StatRepository>();
     _ = builder.Services.AddSingleton<IProbeClient, ProbeClient>();
 
-    // Путь результатов: буфер-сегменты на диске → выгрузка в ClickHouse.
-    _ = builder.Services.AddSingleton<IResultSpool, ResultSpool>();
-    _ = builder.Services.AddSingleton<IClickHouseWriter, ClickHouseWriter>();
     // Шина изменений для «длинного опроса» веб-интерфейса (WaitChanges).
     _ = builder.Services.AddSingleton<IChangeNotifier, ChangeNotifier>();
 
@@ -118,22 +115,22 @@ try
     _ = builder.Services.AddSingleton<ITaskService, TaskService>();
     _ = builder.Services.AddSingleton<IClientService, ClientService>();
     _ = builder.Services.AddSingleton<IReportService, ReportService>();
-    _ = builder.Services.AddSingleton<IResultIngestService, ResultIngestService>();
     _ = builder.Services.AddSingleton<ITemplateRepository, TemplateRepository>();
     _ = builder.Services.AddSingleton<IProvisioningService, ProvisioningService>();
 
-    // --- Фоновый опрос проб: один синглтон, доступный как IProbePoller, IProbeStatusProvider и хостед-сервис ---
-    _ = builder.Services.AddSingleton<ProbePollingService>();
-    _ = builder.Services.AddSingleton<IProbePoller>(provider => provider.GetRequiredService<ProbePollingService>());
-    _ = builder.Services.AddSingleton<IProbeStatusProvider>(provider => provider.GetRequiredService<ProbePollingService>());
-    _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<ProbePollingService>());
-
-    // --- Фоновая выгрузка накопленных результатов в ClickHouse ---
-    // Один синглтон: он же хостед-сервис и поставщик состояния для вкладки «Хранилище».
-    _ = builder.Services.AddSingleton<ClickHouseExportService>();
-    _ = builder.Services.AddSingleton<IClickHouseStatusProvider>(
-        provider => provider.GetRequiredService<ClickHouseExportService>());
-    _ = builder.Services.AddHostedService(provider => provider.GetRequiredService<ClickHouseExportService>());
+    builder.Services.AddSingleton<ProbeConfigurationService>();
+    builder.Services.AddSingleton<IProbePoller>(sp => sp.GetRequiredService<ProbeConfigurationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ProbeConfigurationService>());
+    builder.Services.AddSingleton<CollectorRegistry>();
+    builder.Services.AddHttpClient("collector", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(10);
+        if (builder.Configuration["Auth:ApiKey"] is { Length: > 0 } key)
+            client.DefaultRequestHeaders.Add("X-Api-Key", key);
+    });
+    builder.Services.AddSingleton<CollectorMonitor>();
+    builder.Services.AddSingleton<IProbeStatusProvider>(sp => sp.GetRequiredService<CollectorMonitor>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<CollectorMonitor>());
 
     // --- Фоновая очистка БД (ретенция) ---
     _ = builder.Services.AddHostedService<MaintenanceService>();

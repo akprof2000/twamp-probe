@@ -40,7 +40,7 @@ if systemctl is-active --quiet twamp-probe 2>/dev/null; then
 fi
 mkdir -p "$DEST"
 # Файл настроек копируем отдельно — ниже он не заменяется, а дополняется.
-find "$SRC" -maxdepth 1 -mindepth 1 ! -name appsettings.json -exec cp -r {} "$DEST/" \;
+find "$SRC" -maxdepth 1 -mindepth 1 ! -name appsettings.json ! -name results.db ! -name JobResult.json ! -name TaskInfo.json -exec cp -r {} "$DEST/" \;
 chmod +x "$DEST/twamp-probe"
 [ -f "$DEST/twping" ] && chmod +x "$DEST/twping"
 
