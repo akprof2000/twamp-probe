@@ -1,6 +1,7 @@
 """Exercise the three release binaries against a disposable local ClickHouse instance."""
 import argparse
 from datetime import datetime, timedelta, timezone
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -220,6 +221,78 @@ def run(args, root):
         wait(lambda: sql(f"SELECT count() FROM default.{table} FINAL WHERE Title='loopback' AND Id='{live_task}'").strip() == "1",
              "live probe measurement delivered to ClickHouse")
         print("PASS: durable replay, committed rows, ACK after restart and no duplicate INSERT")
+        if args.failover:
+            backend = urlsplit(args.clickhouse)
+            primary_down = threading.Event()
+            rejected = threading.Event()
+            primary_inserts = set()
+
+            class SwitchableAddress(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    if primary_down.is_set():
+                        rejected.set()
+                        self.send_error(503, "Primary route unavailable")
+                        return
+                    body = self.rfile.read(int(self.headers["Content-Length"]))
+                    forward = {key: self.headers[key] for key in ("X-ClickHouse-User", "X-ClickHouse-Key", "Content-Type")
+                               if key in self.headers}
+                    connection = HTTPConnection(backend.hostname, backend.port, timeout=10)
+                    try:
+                        connection.request("POST", self.path, body=body, headers=forward)
+                        response = connection.getresponse()
+                        content = response.read()
+                        if response.status == 200 and "JSONEachRow" in self.path and not content:
+                            primary_inserts.update(json.loads(line)["Id"] for line in body.splitlines())
+                        self.send_response(response.status)
+                        self.send_header("Content-Length", str(len(content)))
+                        self.end_headers()
+                        self.wfile.write(content)
+                    finally:
+                        connection.close()
+
+                def log_message(self, *_):
+                    pass
+
+            def active_url():
+                status = request(server + "/api/userinterface/ClickHouseStatus?collectorId=site-a", headers=headers)
+                state = json.loads(status)
+                return state["url"] if state["online"] else None
+
+            def submit(label):
+                job_id = str(uuid4())
+                payload = dict(job, id=job_id, title=label)
+                request(server + "/api/userinterface/tasks", json.dumps(payload).encode(), headers)
+                wait(lambda: sql(f"SELECT count() FROM default.{table} WHERE Id='{job_id}'").strip() == "1",
+                     label + " inserted once in ClickHouse")
+                wait(lambda: json.loads(request(state_url, headers=headers))["pendingResults"] == 0,
+                     label + " acknowledged and removed from the probe")
+                return job_id
+
+            with ThreadingHTTPServer(("127.0.0.1", 0), SwitchableAddress) as route:
+                proxy = threading.Thread(target=route.serve_forever, daemon=True)
+                proxy.start()
+                try:
+                    primary = "http://127.0.0.1:" + str(route.server_port)
+                    stop("collector")
+                    collector_config["ClickHouse"].update(Urls=[primary, args.clickhouse],
+                                                           FailoverRetrySeconds=4, TimeoutSec=4)
+                    start("collector", args.collector, collector_config)
+                    wait(lambda: active_url() == primary, "primary connected")
+                    assert submit("primary") in primary_inserts
+
+                    primary_down.set()
+                    reserved = submit("reserve")
+                    assert rejected.is_set() and reserved not in primary_inserts
+                    wait(lambda: active_url() == args.clickhouse, "reserve selected")
+
+                    primary_down.clear()
+                    wait(lambda: active_url() == primary, "primary recovered while queue empty")
+                    assert submit("primary recovered") in primary_inserts
+                    print("PASS: primary -> reserve -> primary against one live ClickHouse, all batches acknowledged")
+                finally:
+                    stop("collector")
+                    route.shutdown()
+                    proxy.join()
     except BaseException:
         for log in logs:
             log.flush()
@@ -239,6 +312,7 @@ if __name__ == "__main__":
     for name in ("configurator", "collector", "probe"):
         parser.add_argument("--" + name, type=lambda p: str(Path(p).resolve(strict=True)), required=True)
     parser.add_argument("--legacy", type=lambda p: str(Path(p).resolve(strict=True)))
+    parser.add_argument("--failover", action="store_true", help="test primary recovery using an interruptible route")
     parser.add_argument("--clickhouse", required=True)
     args = parser.parse_args()
     if urlsplit(args.clickhouse).hostname not in ("127.0.0.1", "localhost"):

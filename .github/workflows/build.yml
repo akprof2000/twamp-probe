@@ -123,7 +123,7 @@ jobs:
         working-directory: go-probe
       - name: Проверка трёх служб при сбоях базы и связи
         run: |
-          python3 tests/delivery_smoke.py --clickhouse "$TWAMP_CLICKHOUSE_URL" \
+          python3 tests/delivery_smoke.py --failover --clickhouse "$TWAMP_CLICKHOUSE_URL" \
             --probe "$RUNNER_TEMP/twamp-probe" \
             --configurator SPI.Twamp.Server/bin/Release/net10.0/SPI.Twamp.Server \
             --collector SPI.Twamp.Collector/bin/Release/net10.0/SPI.Twamp.Collector

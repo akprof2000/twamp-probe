@@ -26,18 +26,37 @@ namespace SPI.Twamp.Server.Infrastructure
 
         private readonly Logger _logger;
         private readonly HttpClient _http;
-        private readonly string _baseUrl;
+        private readonly Endpoint[] _endpoints;
+        private readonly TimeProvider _clock;
+        private readonly TimeSpan _retryInterval;
+        private string _activeUrl;
+
+        private sealed class Endpoint(string url)
+        {
+            public string Url { get; } = url;
+            public SemaphoreSlim SchemaGate { get; } = new(1, 1);
+            public volatile bool SchemaReady;
+            public long RetryAtTicks;
+        }
         private readonly string _database;
         private readonly string _table;
 
         /// <summary>Создаёт писателя по конфигурации (секция <c>ClickHouse</c>).</summary>
         /// <param name="logger">Логгер.</param>
         /// <param name="configuration">Конфигурация приложения.</param>
-        public ClickHouseWriter(Logger logger, IConfiguration configuration)
+        /// <param name="clock">Часы для отсчёта паузы после отказа адреса.</param>
+        public ClickHouseWriter(Logger logger, IConfiguration configuration, TimeProvider? clock = null)
         {
             _logger = logger;
             Enabled = configuration["ClickHouse:Enabled"].ConvertTo(true);
-            _baseUrl = (configuration["ClickHouse:Url"] ?? "http://localhost:8123").TrimEnd('/');
+            _clock = clock ?? TimeProvider.System;
+            _retryInterval = TimeSpan.FromSeconds(Math.Max(1, configuration.GetValue("ClickHouse:FailoverRetrySeconds", 30)));
+            var urls = configuration.GetSection("ClickHouse:Urls").GetChildren().Select(c => c.Value).ToArray();
+            if (urls.Length == 0)
+                urls = [configuration["ClickHouse:Url"] ?? "http://localhost:8123"];
+            _endpoints = urls.Select(ValidateAddress).Distinct(StringComparer.Ordinal)
+                .Select(url => new Endpoint(url)).ToArray();
+            _activeUrl = _endpoints[0].Url;
             _database = configuration["ClickHouse:Database"] ?? "twamp";
             _table = configuration["ClickHouse:Table"] ?? "results";
 
@@ -60,47 +79,93 @@ namespace SPI.Twamp.Server.Infrastructure
         public bool Enabled { get; }
 
         /// <inheritdoc/>
-        public string Url => _baseUrl;
+        public string Url => Volatile.Read(ref _activeUrl);
 
         /// <inheritdoc/>
         public string Target => $"{_database}.{_table}";
 
         /// <inheritdoc/>
-        public async Task EnsureTableAsync(CancellationToken cancellationToken)
-        {
-            await ExecuteAsync($"CREATE DATABASE IF NOT EXISTS `{_database}`", cancellationToken);
-            await ExecuteAsync(ExportRow.CreateTableDdl(_database, _table), cancellationToken);
-            await ExecuteAsync($"ALTER TABLE `{_database}`.`{_table}` ADD COLUMN IF NOT EXISTS SourceProbe String, ADD COLUMN IF NOT EXISTS RequestInfo String, ADD COLUMN IF NOT EXISTS IPAddress String", cancellationToken);
-            _logger.Info("ClickHouse: таблица {Database}.{Table} готова", _database, _table);
-        }
+        public Task EnsureTableAsync(CancellationToken cancellationToken) =>
+            WithFailoverAsync(EnsureEndpointAsync, cancellationToken);
 
         /// <inheritdoc/>
-        public async Task InsertSegmentAsync(string path, CancellationToken cancellationToken)
+        public Task InsertSegmentAsync(string path, CancellationToken cancellationToken) =>
+            WithFailoverAsync(async (endpoint, ct) =>
+            {
+                await EnsureEndpointAsync(endpoint, ct);
+                string query = Uri.EscapeDataString($"INSERT INTO `{_database}`.`{_table}` FORMAT JSONEachRow");
+                using FileStream file = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using StreamContent content = new(file);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/x-ndjson");
+                using var response = await _http.PostAsync($"{endpoint.Url}/?query={query}{InsertSettings}", content, ct);
+                await EnsureSuccessAsync(response, ct);
+            }, cancellationToken);
+
+        private async Task WithFailoverAsync(Func<Endpoint, CancellationToken, Task> operation, CancellationToken ct)
         {
-            string query = Uri.EscapeDataString($"INSERT INTO `{_database}`.`{_table}` FORMAT JSONEachRow");
+            long now = _clock.GetUtcNow().UtcTicks;
+            // After a cooldown, the next operation tries the primary first again.
+            var candidates = _endpoints.OrderBy(ep => Interlocked.Read(ref ep.RetryAtTicks) > now).ToArray();
+            List<Exception> failures = [];
+            foreach (var endpoint in candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    await operation(endpoint, ct);
+                    Interlocked.Exchange(ref endpoint.RetryAtTicks, 0);
+                    Volatile.Write(ref _activeUrl, endpoint.Url);
+                    return;
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested &&
+                    ex is (HttpRequestException or OperationCanceledException or System.Net.Http.HttpIOException))
+                {
+                    endpoint.SchemaReady = false;
+                    Interlocked.Exchange(ref endpoint.RetryAtTicks, (_clock.GetUtcNow() + _retryInterval).UtcTicks);
+                    failures.Add(new HttpRequestException($"{endpoint.Url}: {ex.Message}", ex));
+                }
+            }
 
-            using FileStream file = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using StreamContent content = new(file);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/x-ndjson");
-
-            using HttpResponseMessage response = await _http.PostAsync(
-                $"{_baseUrl}/?query={query}{InsertSettings}", content, cancellationToken);
-
-            await EnsureSuccessAsync(response, cancellationToken);
+            ct.ThrowIfCancellationRequested();
+            throw new HttpRequestException("Запись в ClickHouse не подтверждена. " +
+                string.Join("; ", failures.Select(failure => failure.Message)), new AggregateException(failures));
         }
 
-        /// <summary>Выполняет запрос без данных (DDL).</summary>
-        private async Task ExecuteAsync(string sql, CancellationToken cancellationToken)
+        private async Task EnsureEndpointAsync(Endpoint endpoint, CancellationToken ct)
+        {
+            if (endpoint.SchemaReady) return;
+            await endpoint.SchemaGate.WaitAsync(ct);
+            try
+            {
+                if (endpoint.SchemaReady) return;
+                await ExecuteAsync(endpoint.Url, $"CREATE DATABASE IF NOT EXISTS `{_database}`", ct);
+                await ExecuteAsync(endpoint.Url, ExportRow.CreateTableDdl(_database, _table), ct);
+                await ExecuteAsync(endpoint.Url, $"ALTER TABLE `{_database}`.`{_table}` ADD COLUMN IF NOT EXISTS SourceProbe String, ADD COLUMN IF NOT EXISTS RequestInfo String, ADD COLUMN IF NOT EXISTS IPAddress String", ct);
+                endpoint.SchemaReady = true;
+                _logger.Info("ClickHouse: таблица {Database}.{Table} готова через {Url}", _database, _table, endpoint.Url);
+            }
+            finally
+            {
+                endpoint.SchemaGate.Release();
+            }
+        }
+
+        private async Task ExecuteAsync(string url, string sql, CancellationToken cancellationToken)
         {
             using StringContent content = new(sql, Encoding.UTF8, "text/plain");
-            using HttpResponseMessage response = await _http.PostAsync(_baseUrl + "/?wait_end_of_query=1", content, cancellationToken);
+            using HttpResponseMessage response = await _http.PostAsync(url + "/?wait_end_of_query=1", content, cancellationToken);
             await EnsureSuccessAsync(response, cancellationToken);
         }
 
-        /// <summary>
-        /// Проверяет ответ базы. ClickHouse возвращает текст ошибки телом, поэтому
-        /// включаем его в исключение — иначе в журнале остаётся один код состояния.
-        /// </summary>
+        private static string ValidateAddress(string? address)
+        {
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var url) ||
+                url.Scheme is not ("http" or "https") || url.UserInfo.Length != 0 ||
+                url.Query.Length != 0 || url.Fragment.Length != 0)
+                throw new InvalidOperationException("ClickHouse:Urls и ClickHouse:Url принимают базовые адреса HTTP(S).");
+            return url.AbsoluteUri.TrimEnd('/');
+        }
+
         private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
         {
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -113,6 +178,10 @@ namespace SPI.Twamp.Server.Infrastructure
         }
 
         /// <summary>Освобождает HTTP-клиент.</summary>
-        public void Dispose() => _http.Dispose();
+        public void Dispose()
+        {
+            _http.Dispose();
+            foreach (var endpoint in _endpoints) endpoint.SchemaGate.Dispose();
+        }
     }
 }

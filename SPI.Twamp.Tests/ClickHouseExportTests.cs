@@ -28,6 +28,14 @@ namespace SPI.Twamp.Tests
         /// <summary>Код ответа заглушки — меняется тестом, чтобы сыграть недоступность базы.</summary>
         private int _statusCode = 200;
         private string _responseBody = "";
+        private readonly List<string> _insertPaths = [];
+        private volatile bool _failPrimaryInsert;
+
+        private sealed class TestClock : TimeProvider
+        {
+            public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;
+            public override DateTimeOffset GetUtcNow() => Now;
+        }
 
         /// <summary>Поднимает заглушку ClickHouse на свободном порту.</summary>
         public ClickHouseExportTests()
@@ -69,15 +77,49 @@ namespace SPI.Twamp.Tests
                 lock (_received)
                 {
                     _received.Add((context.Request.Url?.Query ?? "", body));
+                    if (context.Request.QueryString["query"]?.StartsWith("INSERT", StringComparison.Ordinal) == true)
+                        _insertPaths.Add(context.Request.Url!.AbsolutePath);
                 }
 
-                context.Response.StatusCode = _statusCode;
+                context.Response.StatusCode = _failPrimaryInsert && context.Request.Url!.AbsolutePath == "/primary/" &&
+                    context.Request.QueryString["query"] != null ? 503 : _statusCode;
                 context.Response.Close(Encoding.UTF8.GetBytes(_responseBody), false);
             }
         }
 
+        [Fact]
+        public async Task InsertSwitchesToReserveAndReturnsToPrimaryAfterRecovery()
+        {
+            _failPrimaryInsert = true;
+            var primary = $"http://localhost:{_port}/primary";
+            var reserve = $"http://localhost:{_port}/reserve";
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ClickHouse:Urls:0"] = primary,
+                ["ClickHouse:Urls:1"] = reserve
+            }).Build();
+            var clock = new TestClock();
+            using var writer = new ClickHouseWriter(LogManager.GetCurrentClassLogger(), config, clock);
+            string path = Path.Combine(_directory, "test.ndjson");
+            var ct = TestContext.Current.CancellationToken;
+            await File.WriteAllTextAsync(path, "{}\n", ct);
+            await writer.EnsureTableAsync(ct);
+            Assert.Equal(primary, writer.Url);
+            await writer.InsertSegmentAsync(path, ct);
+            await writer.InsertSegmentAsync(path, ct);
+            Assert.Equal(reserve, writer.Url);
+            _failPrimaryInsert = false;
+            clock.Now += TimeSpan.FromSeconds(30);
+            await writer.EnsureTableAsync(ct);
+            Assert.Equal(primary, writer.Url);
+            await writer.InsertSegmentAsync(path, ct);
+            Assert.Equal(primary, writer.Url);
+            lock (_received)
+                Assert.Equal(new[] { "/primary/", "/reserve/", "/reserve/", "/primary/" }, _insertPaths.ToArray());
+        }
+
         /// <summary>Собирает буфер и писателя, настроенные на заглушку.</summary>
-        private (ResultSpool Spool, ClickHouseWriter Writer, IConfiguration Config) CreateStack()
+        private (ResultSpool Spool, ClickHouseWriter Writer, IConfiguration Config) CreateStack(bool useFailover = false)
         {
             IConfiguration configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
@@ -92,6 +134,12 @@ namespace SPI.Twamp.Tests
                     ["ClickHouse:RetrySeconds"] = "1"
                 })
                 .Build();
+
+            if (useFailover)
+            {
+                configuration["ClickHouse:Urls:0"] = $"http://localhost:{_port}/primary";
+                configuration["ClickHouse:Urls:1"] = $"http://localhost:{_port}/reserve";
+            }
 
             Logger logger = LogManager.GetCurrentClassLogger();
             return (new ResultSpool(logger, configuration), new ClickHouseWriter(logger, configuration), configuration);
@@ -166,7 +214,7 @@ namespace SPI.Twamp.Tests
         public async Task UncommittedBatchSurvivesRestart(int status, string body)
         {
             var ct = TestContext.Current.CancellationToken;
-            (var spool, var writer, _) = CreateStack();
+            (var spool, var writer, var config) = CreateStack(useFailover: true);
             using var spoolScope = spool;
             using var writerScope = writer;
             const string probe = "http://localhost:8443";
@@ -177,9 +225,13 @@ namespace SPI.Twamp.Tests
             using (var buffer = new SPI.Twamp.Collector.DeliveryBuffer(_directory))
             {
                 path = await buffer.StageAsync(probe, batch, new Dictionary<Guid,string>(), ct);
+                await writer.EnsureTableAsync(ct);
                 _statusCode = status;
                 _responseBody = body;
-                await Assert.ThrowsAsync<HttpRequestException>(() => SPI.Twamp.Collector.DeliveryBuffer.StoreAsync(path, writer, ct));
+                var error = await Assert.ThrowsAsync<HttpRequestException>(
+                    () => SPI.Twamp.Collector.DeliveryBuffer.StoreAsync(path, writer, ct));
+                Assert.Contains(config["ClickHouse:Urls:0"]!, error.Message);
+                Assert.Contains(config["ClickHouse:Urls:1"]!, error.Message);
             }
             using var recovered = new SPI.Twamp.Collector.DeliveryBuffer(_directory);
             Assert.Equal(path, recovered.Peek(probe));

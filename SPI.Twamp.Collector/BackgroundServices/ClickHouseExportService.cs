@@ -32,7 +32,6 @@ namespace SPI.Twamp.Server.BackgroundServices
         private readonly int _retrySeconds = configuration["ClickHouse:RetrySeconds"].ConvertTo(30);
 
         /// <summary>Таблица уже создана в текущем сеансе связи с базой.</summary>
-        private bool _tableReady;
 
         /// <summary>О недоступности базы сообщаем один раз — до восстановления.</summary>
         private bool _reportedFailure;
@@ -112,11 +111,9 @@ namespace SPI.Twamp.Server.BackgroundServices
             {
                 _ = await _spool.SealIfDueAsync();
 
-                if (!_tableReady)
-                {
-                    await _writer.EnsureTableAsync(stoppingToken);
-                    _tableReady = true;
-                }
+                // The writer caches successful schema checks and retries failed
+                // addresses after their cooldown, even while the queue is empty.
+                await _writer.EnsureTableAsync(stoppingToken);
 
                 await FlushSegmentsAsync(stoppingToken);
                 _online = true;
@@ -171,7 +168,6 @@ namespace SPI.Twamp.Server.BackgroundServices
         /// <summary>Обрабатывает недоступность базы: сообщает один раз и сбрасывает готовность таблицы.</summary>
         private void HandleFailure(Exception ex)
         {
-            _tableReady = false; // база могла быть пересоздана — проверим схему заново
             _online = false;
             _lastError = ex.Message;
             _lastErrorAt = DateTime.Now;
