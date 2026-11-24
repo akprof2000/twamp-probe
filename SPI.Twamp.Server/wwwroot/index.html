@@ -38,6 +38,7 @@
   <h1>TWamp — зондирование</h1>
   <nav>
     <button data-tab="status" class="active">Статус проб</button>
+    <button data-tab="ha" hidden>Реестр и балансировка</button>
     <button data-tab="tasks">Задачи</button>
     <button data-tab="upload">Загрузка</button>
     <button data-tab="storage">Хранилище</button>
@@ -46,6 +47,25 @@
   <div class="key">Ключ API: <input id="apiKey" type="text" placeholder="пусто, если выключен"></div>
 </header>
 <main>
+<section id="tab-ha">
+  <div class="card"><h2>Реестр и балансировка</h2>
+    <div class="row"><button id="ha-reload">Перечитать реестр</button><span id="ha-revision"></span></div>
+    <div id="ha-notice" role="status"></div>
+  </div>
+  <div class="card"><h2>Съёмники</h2>
+    <form id="ha-register" class="row"><label>Адрес API <input name="url" type="url" required placeholder="http://collector-a:9001"></label><button>Добавить съёмник</button></form>
+    <div class="scroll"><table><thead><tr><th>ID и машина</th><th>Адрес API</th><th>Состояние и последняя запись</th><th>Производительность</th><th>Режим</th><th>Действия</th></tr></thead><tbody id="ha-nodes"></tbody></table></div>
+    <div id="ha-replacement"></div>
+  </div>
+  <div class="card"><h2>Пробы и пары съёмников</h2>
+    <form id="ha-add-probe" class="row"><label>Имя <input name="name" required></label><label>Адрес пробы <input name="url" type="url" required list="ha-known" placeholder="http://probe:8443"></label><datalist id="ha-known"></datalist><button>Добавить пробу</button></form>
+    <div class="scroll"><table><thead><tr><th>Проба и адрес</th><th>Съёмник 1</th><th>Съёмник 2</th><th>Основной</th><th>Собирает сейчас</th><th>Действия</th></tr></thead><tbody id="ha-probes"></tbody></table></div>
+  </div>
+  <div class="card"><h2>План распределения</h2>
+    <div class="row"><button id="ha-preview">Рассчитать план</button><button id="ha-apply" disabled>Применить просмотренный план</button></div>
+    <div id="ha-plan"></div>
+  </div>
+</section>
 
 <section id="tab-status" class="active">
   <div class="card">
@@ -254,6 +274,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   b.classList.add('active');
   $('#tab-' + b.dataset.tab).classList.add('active');
   if (b.dataset.tab === 'status') loadStatus();
+  if (b.dataset.tab === 'ha') window.twampHa?.open();
   if (b.dataset.tab === 'tasks') loadTasks();
   if (b.dataset.tab === 'upload') loadSets();
   if (b.dataset.tab === 'storage') loadCollectors().then(loadStorage);
@@ -451,14 +472,14 @@ function renderProbes() {
   const esc = s => (s || '').replace(/'/g, "\\'");
   $('#tblStatus tbody').innerHTML = rows.map(p => `<tr>
     <td class="wrap">${escHtml(p.requestInfo)}</td>
-    <td><select aria-label="Съёмник пробы" data-probe="${escHtml(p.requestInfo)}" data-name="${escHtml(p.name)}" onchange="assignCollector(this)">${collectorOptions(p.collectorId)}</select></td><td>${escHtml(p.name)}</td><td>${p.hostName||''}</td><td>${p.version||'—'}</td>
-    <td>${p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
+    <td>${window.twampHa?.enabled ? escHtml(p.owner || 'Ожидает владельца') : `<select aria-label="Съёмник пробы" data-probe="${escHtml(p.requestInfo)}" data-name="${escHtml(p.name)}" onchange="assignCollector(this)">${collectorOptions(p.collectorId)}</select>`}</td><td>${escHtml(p.name)}</td><td>${escHtml(p.hostName||'')}</td><td>${escHtml(p.version||'—')}</td>
+    <td>${window.twampHa?.enabled && !p.owner ? 'ожидает владельца' : p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
     <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
     <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
     <td><button class="act" onclick="loadProbeTasks(this,'${esc(p.requestInfo)}')">задачи</button>
         <button class="act" onclick="withBusy(this,()=>showProbeState('${esc(p.requestInfo)}'))">состояние</button>
-        <button class="act" onclick="renameProbe('${esc(p.requestInfo)}','${esc(p.name)}')">имя</button>
-        <button class="act" onclick="removeProbe('${esc(p.requestInfo)}')">удалить</button></td></tr>`).join('')
+        ${window.twampHa?.enabled ? '' : `<button class="act" onclick="renameProbe('${esc(p.requestInfo)}','${esc(p.name)}')">имя</button>
+        <button class="act" onclick="removeProbe('${esc(p.requestInfo)}')">удалить</button>`}</td></tr>`).join('')
     || `<tr><td colspan="11">${probesCache.length ? 'ничего не найдено по фильтру' : 'пробы не подключены'}</td></tr>`;
   $('#probeCount').textContent = (q || link)
     ? `показано ${rows.length} из ${probesCache.length}`
@@ -842,6 +863,8 @@ function refreshActiveTab() {
     loadTasks();
   } else if (tab === 'storage') {
     loadStorage();
+  } else if (tab === 'ha') {
+    window.twampHa?.refresh();
   }
 }
 
@@ -864,5 +887,6 @@ async function changeLoop() {
 changeLoop();
 loadStatus();
 </script>
+<script src="/ha.js"></script>
 </body>
 </html>

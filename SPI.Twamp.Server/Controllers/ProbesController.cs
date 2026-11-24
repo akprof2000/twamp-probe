@@ -86,6 +86,8 @@ namespace SPI.Twamp.Server.Controllers
         [HttpPost("[action]")]
         public async Task<ActionResult> SetInfoClient([FromBody][Required] Client client, [FromServices] SPI.Twamp.Server.Infrastructure.CollectorRegistry collectors, CancellationToken cancellationToken)
         {
+            if(HttpContext.RequestServices.GetRequiredService<SPI.Twamp.HighAvailability.KeeperPlanStore>().Enabled)
+                return Conflict("Регистрация и изменение пробы выполняются на вкладке распределения HA.");
             if (client.CollectorId is { } id && (await collectors.ListAsync()).All(c => c.Id != id))
                 return BadRequest("Съёмник не зарегистрирован.");
             await _clientService.SetInfoAsync(client, cancellationToken);
@@ -115,6 +117,8 @@ namespace SPI.Twamp.Server.Controllers
             [FromQuery][Required] string requestInfo, [FromQuery] bool deleteTasks = false,
             CancellationToken cancellationToken = default)
         {
+            if(HttpContext.RequestServices.GetRequiredService<SPI.Twamp.HighAvailability.KeeperPlanStore>().Enabled)
+                return Conflict("Удалите пробу в реестре HA и примените план.");
             bool removed = await _clientService.DeleteAsync(requestInfo, deleteTasks, cancellationToken);
             return removed ? Ok() : NotFound($"Проба «{requestInfo}» не найдена");
         }
@@ -246,6 +250,7 @@ namespace SPI.Twamp.Server.Controllers
                 {
                     c.RequestInfo,
                     CollectorId = c.CollectorId ?? "default",
+                    Owner = state?.Owner,
                     c.Name,
                     c.HostName,
                     c.IPAddress,

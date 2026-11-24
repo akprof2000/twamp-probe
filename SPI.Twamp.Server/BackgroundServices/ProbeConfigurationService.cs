@@ -81,6 +81,11 @@ namespace SPI.Twamp.Server.BackgroundServices
             foreach (Contracts.PendingProbeCleanup cleanup in await _clients.GetCleanupsAsync())
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if(await _clients.ExistsAsync(cleanup.RequestInfo))
+                {
+                    await _clients.RemoveCleanupAsync(cleanup.RequestInfo);
+                    continue;
+                }
 
                 if (await TryClearProbeTasksAsync(cleanup.RequestInfo, cancellationToken))
                 {

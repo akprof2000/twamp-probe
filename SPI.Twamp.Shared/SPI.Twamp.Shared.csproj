@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ZooKeeperNetEx" Version="3.4.12.4" />
     <Using Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Flurl.Http" Version="4.0.2" />

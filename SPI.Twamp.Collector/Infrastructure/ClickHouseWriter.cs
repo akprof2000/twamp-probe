@@ -40,6 +40,8 @@ namespace SPI.Twamp.Server.Infrastructure
         }
         private readonly string _database;
         private readonly string _table;
+        private readonly bool _ha;
+        private readonly string _replicaPath;
 
         /// <summary>Создаёт писателя по конфигурации (секция <c>ClickHouse</c>).</summary>
         /// <param name="logger">Логгер.</param>
@@ -59,6 +61,11 @@ namespace SPI.Twamp.Server.Infrastructure
             _activeUrl = _endpoints[0].Url;
             _database = configuration["ClickHouse:Database"] ?? "twamp";
             _table = configuration["ClickHouse:Table"] ?? "results";
+            _ha = configuration.GetValue("HighAvailability:Enabled", false);
+            if (_ha && (!System.Text.RegularExpressions.Regex.IsMatch(_database, @"\A[A-Za-z0-9_]+\z") ||
+                !System.Text.RegularExpressions.Regex.IsMatch(_table, @"\A[A-Za-z0-9_]+\z")))
+                throw new InvalidOperationException("Недопустимое имя базы или таблицы ClickHouse.");
+            _replicaPath = $"/clickhouse/twamp/{_database}/{_table}/01";
 
             _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
             {
@@ -85,8 +92,18 @@ namespace SPI.Twamp.Server.Infrastructure
         public string Target => $"{_database}.{_table}";
 
         /// <inheritdoc/>
-        public Task EnsureTableAsync(CancellationToken cancellationToken) =>
-            WithFailoverAsync(EnsureEndpointAsync, cancellationToken);
+        public async Task EnsureTableAsync(CancellationToken cancellationToken)
+        {
+            if (!_ha) { await WithFailoverAsync(EnsureEndpointAsync, cancellationToken); return; }
+            // Bootstrap all reachable replicas before the first quorum INSERT.
+            await Task.WhenAll(_endpoints.Select(async ep =>
+            {
+                try { await EnsureEndpointAsync(ep,cancellationToken); }
+                catch(Exception ex) when(!cancellationToken.IsCancellationRequested && ex is HttpRequestException or OperationCanceledException)
+                { _logger.Warn("Реплика {Url}: {Reason}",ep.Url,ex.Message); }
+            }));
+            if (!_endpoints.Any(ep=>ep.SchemaReady)) throw new HttpRequestException("Нет доступной реплицируемой таблицы TWamp.");
+        }
 
         /// <inheritdoc/>
         public Task InsertSegmentAsync(string path, CancellationToken cancellationToken) =>
@@ -97,7 +114,10 @@ namespace SPI.Twamp.Server.Infrastructure
                 using FileStream file = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 using StreamContent content = new(file);
                 content.Headers.ContentType = new MediaTypeHeaderValue("application/x-ndjson");
-                using var response = await _http.PostAsync($"{endpoint.Url}/?query={query}{InsertSettings}", content, ct);
+                var quorum = _ha ? "&insert_quorum=2" : "";
+                if (_ha && Guid.TryParseExact(Path.GetFileName(path).Split('.')[0],"N",out var batch))
+                    quorum += "&insert_deduplication_token="+batch.ToString("N");
+                using var response = await _http.PostAsync($"{endpoint.Url}/?query={query}{InsertSettings}{quorum}", content, ct);
                 await EnsureSuccessAsync(response, ct);
             }, cancellationToken);
 
@@ -139,7 +159,13 @@ namespace SPI.Twamp.Server.Infrastructure
             {
                 if (endpoint.SchemaReady) return;
                 await ExecuteAsync(endpoint.Url, $"CREATE DATABASE IF NOT EXISTS `{_database}`", ct);
-                await ExecuteAsync(endpoint.Url, ExportRow.CreateTableDdl(_database, _table), ct);
+                var engine = _ha ? $"ReplicatedReplacingMergeTree('{_replicaPath}', '{{replica}}')" : "ReplacingMergeTree";
+                await ExecuteAsync(endpoint.Url, ExportRow.CreateTableDdl(_database, _table, engine, _ha), ct);
+                if (_ha)
+                {
+                    string check = $"SELECT throwIf(count() != 1, 'HA requires the replicated TWamp table') FROM system.replicas WHERE database='{_database}' AND table='{_table}' AND engine='ReplicatedReplacingMergeTree' AND zookeeper_path='{_replicaPath}' FORMAT Null";
+                    await ExecuteAsync(endpoint.Url, check, ct);
+                }
                 await ExecuteAsync(endpoint.Url, $"ALTER TABLE `{_database}`.`{_table}` ADD COLUMN IF NOT EXISTS SourceProbe String, ADD COLUMN IF NOT EXISTS RequestInfo String, ADD COLUMN IF NOT EXISTS IPAddress String", ct);
                 endpoint.SchemaReady = true;
                 _logger.Info("ClickHouse: таблица {Database}.{Table} готова через {Url}", _database, _table, endpoint.Url);

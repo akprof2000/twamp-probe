@@ -37,7 +37,7 @@ public sealed class DeliveryBuffer : IDisposable
     }
 
     public async Task<string> StageAsync(string url, ProbeResultBatch batch,
-        IReadOnlyDictionary<Guid,string> titles, CancellationToken ct)
+        IReadOnlyDictionary<Guid,string> titles, CancellationToken ct, bool utc = false)
     {
         if (batch.BatchId == Guid.Empty || batch.Items.Length == 0)
             throw new InvalidDataException("Пустая пачка или идентификатор");
@@ -62,6 +62,8 @@ public sealed class DeliveryBuffer : IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 if (item.ResultId == Guid.Empty) throw new InvalidDataException("Результат без ResultId");
+                if(utc && item.Creation is DateTime started)
+                    item.Creation = started.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(started,DateTimeKind.Utc) : started.ToUniversalTime();
                 var parsed = ProbeOutputParser.Parse(item.Mode, item.Console, item.ErrorConsole, item.TaskId);
                 if (parsed.Count == 0) parsed.Add(new TwPingStats { Mode = item.Mode, Id = item.TaskId });
                 for (int i = 0; i < parsed.Count; i++)
@@ -81,13 +83,14 @@ public sealed class DeliveryBuffer : IDisposable
     }
 
     public static int RowCount(string path) => int.Parse(Path.GetFileName(path).Split('.')[1], CultureInfo.InvariantCulture);
-    public static bool IsStored(string path) => path.EndsWith(".stored.ndjson", StringComparison.Ordinal);
+    public static bool IsQuorumStored(string path) => path.EndsWith(".quorum.ndjson", StringComparison.Ordinal);
+    public static bool IsStored(string path) => path.EndsWith(".stored.ndjson", StringComparison.Ordinal) || IsQuorumStored(path);
 
     // A failed INSERT leaves pending in place. A failed ACK leaves stored in place.
-    public static async Task<string> StoreAsync(string path, IClickHouseWriter writer, CancellationToken ct)
+    public static async Task<string> StoreAsync(string path, IClickHouseWriter writer, CancellationToken ct, bool quorum = false)
     {
         await writer.InsertSegmentAsync(path, ct);
-        var stored = Path.ChangeExtension(Path.ChangeExtension(path, null), "stored.ndjson");
+        var stored = Path.ChangeExtension(Path.ChangeExtension(path, null), quorum ? "quorum.ndjson" : "stored.ndjson");
         File.Move(path, stored);
         return stored;
     }
@@ -100,7 +103,7 @@ public sealed class DeliveryBuffer : IDisposable
         File.Delete(path);
     }
 
-    public int AwaitingConfirmation => Directory.EnumerateFiles(_root, "*.stored.ndjson", SearchOption.AllDirectories).Count();
+    public int AwaitingConfirmation => Directory.EnumerateFiles(_root, "*.ndjson", SearchOption.AllDirectories).Count(IsStored);
 
     public string[] PendingFiles() => Directory.GetFiles(_root, "*.pending.ndjson", SearchOption.AllDirectories);
 

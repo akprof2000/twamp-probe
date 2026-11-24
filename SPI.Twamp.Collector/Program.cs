@@ -5,6 +5,7 @@ using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.BackgroundServices;
 using SPI.Twamp.Server.Contracts;
 using SPI.Twamp.Server.Infrastructure;
+using SPI.Twamp.HighAvailability;
 
 if (args.Length > 0 && args[0] == ConfigMerger.CommandLineSwitch)
     return ConfigMerger.RunCommandLine(args);
@@ -23,6 +24,7 @@ builder.Services.AddHttpClient("configurator", client =>
     if (config["Auth:ApiKey"] is { Length: > 0 } key) client.DefaultRequestHeaders.Add("X-Api-Key", key);
 });
 builder.Services.AddSingleton<IProbeClient, ProbeClient>();
+builder.Services.AddSingleton<KeeperPlanStore>();
 builder.Services.AddSingleton<IClickHouseWriter, ClickHouseWriter>();
 builder.Services.AddSingleton(_ => new DeliveryBuffer(config["ClickHouse:SpoolPath"] ?? "spool"));
 builder.Services.AddSingleton<IResultSpool, ResultSpool>();
@@ -40,7 +42,15 @@ if (config["Auth:ApiKey"] is { Length: > 0 } apiKey)
         await next();
     });
 }
-app.MapGet("/identity", () => new { id = config["Collector:Id"] ?? "default" });
+app.MapGet("/identity", async (KeeperPlanStore keeper,CancellationToken ct) => new { id = config["Collector:Id"] ?? "default",
+    machine = config["Collector:Machine"] is {Length:>0} machine ? machine : Environment.MachineName,
+    ha = keeper.Enabled, root = keeper.Namespace, registry = keeper.Enabled ? await keeper.IdentityAsync(ct) : Guid.Empty,
+    target = (config["ClickHouse:Database"] ?? "twamp")+"."+(config["ClickHouse:Table"] ?? "results") });
+app.MapGet("/probe-link", async (string url,IProbeClient probe,CancellationToken ct) =>
+{
+    await probe.CheckInAsync(PlanBuilder.Address(url),ct);
+    return Results.Ok();
+});
 app.MapGet("/snapshot", (Guid? instance, long? version, CollectorWorker worker) =>
     worker.Snapshot(instance,version) is { } snapshot ? Results.Ok(snapshot) : Results.NoContent());
 app.MapGet("/storage", (CollectorWorker worker, ClickHouseExportService legacy) => worker.Storage(legacy.GetState()));

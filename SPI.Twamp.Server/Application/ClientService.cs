@@ -39,6 +39,7 @@ namespace SPI.Twamp.Server.Application
         /// <inheritdoc/>
         public async Task SetInfoAsync(Client client, CancellationToken cancellationToken)
         {
+            await _clients.RemoveCleanupAsync(client.RequestInfo);
             _logger.Info("Подтверждение пробы {@Client}", client);
 
             // Переносим из записи CheckIn данные, которые оператор не заполняет вручную

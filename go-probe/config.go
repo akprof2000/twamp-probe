@@ -25,6 +25,7 @@ type Config struct {
 	ResultBatchSize    int       // Probe:ResultBatchSize — число результатов в пачке
 	QueueCapacity      int       // Probe:QueueCapacity — ёмкость очереди задач диспетчера
 	ServerTimeoutHours int       // Probe:ServerTimeoutHours — молчание сервера, после которого проба снимает расписание (0 — выключено)
+	RequireQuorumAck   bool      // Accept an ACK only from a quorum writer during HA rollout.
 	MinParallel        int       // Probe:MinParallel — ниже этого предел не опускается даже при нехватке памяти
 	StartParallel      int       // Probe:StartParallel — с какого предела начинаем разгон после запуска
 	MemoryHighPercent  float64   // Probe:MemoryHighPercent — выше этой занятости памяти предел сжимается
@@ -75,6 +76,7 @@ func LoadConfig(path string) (*Config, error) {
 		ResultBatchSize:    num(raw, "Probe:ResultBatchSize", 1000),
 		QueueCapacity:      num(raw, "Probe:QueueCapacity", 100000),
 		ServerTimeoutHours: num(raw, "Probe:ServerTimeoutHours", 24),
+		RequireQuorumAck:   flag(raw, "Probe:RequireQuorumAck", false),
 		MinParallel:        num(raw, "Probe:MinParallel", 16),
 		StartParallel:      num(raw, "Probe:StartParallel", 64),
 		MemoryHighPercent:  float64(num(raw, "Probe:MemoryHighPercent", 95)),

@@ -52,13 +52,14 @@ namespace SPI.Twamp.Tests
             silent.Start();
             int port = ((IPEndPoint)silent.LocalEndpoint).Port;
             // Принимаем соединение, но ответа не даём — так ведёт себя перегруженная проба.
-            _ = silent.AcceptTcpClientAsync(TestContext.Current.CancellationToken).AsTask();
+            var connection = silent.AcceptTcpClientAsync(TestContext.Current.CancellationToken).AsTask();
 
             ActionResult result = await Controller(1).ProbeTaskStatus(
                 $"http://127.0.0.1:{port}", cancellationToken: TestContext.Current.CancellationToken);
 
             ObjectResult response = Assert.IsType<ObjectResult>(result);
-            Assert.Equal(StatusCodes.Status504GatewayTimeout, response.StatusCode);
+            Assert.True(response.StatusCode == StatusCodes.Status504GatewayTimeout, response.Value?.ToString());
+            using var accepted = await connection;
             Assert.Contains("не ответила", Assert.IsType<string>(response.Value));
         }
     }

@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="930" viewBox="0 0 1480 930" role="img" aria-labelledby="title desc">
+  <title id="title">Целевая архитектура развёртывания TWamp</title>
+  <desc id="desc">Сервер управления хранит конфигурацию, задаёт задания пробам и публикует применённый план для съёмников. Каждой пробе назначают ровно два съёмника на разных машинах. В примере A собирает с П1, B с П2, а друг для друга они в резерве. Keeper координирует владение каждой пробой. Результаты отправляются в один шард ClickHouse с тремя репликами. После успешной записи на две реплики съёмник подтверждает пробе всю пачку.</desc>
+  <defs>
+    <marker id="arrow-control" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9Z" fill="#46647d"/></marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9Z" fill="#097268"/></marker>
+    <marker id="arrow-keeper" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9Z" fill="#70539a"/></marker>
+    <style>
+      text{font-family:"Segoe UI",Arial,sans-serif;fill:#183242}
+      .title{font-size:41px;font-weight:700;letter-spacing:-1px}
+      .subtitle{font-size:21px;fill:#47606d}
+      .heading{font-size:25px;font-weight:650;letter-spacing:-.45px}
+      .subheading{font-size:20px;font-weight:650}
+      .body{font-size:18px}
+      .small{font-size:16px;fill:#435d69}
+      .mono{font-family:Consolas,"Courier New",monospace;font-size:17px}
+      .route{fill:none;stroke-linejoin:round;stroke-linecap:round}
+      .tag{font-size:16px;font-weight:650}
+      .data-text{fill:#07675e}
+      .coord-text{fill:#694b91}
+    </style>
+  </defs>
+  <rect width="1480" height="930" rx="18" fill="#f6f8f9"/>
+  <g transform="translate(48 49)">
+    <text class="title" y="28">Архитектура развёртывания TWamp</text>
+    <text class="subtitle" y="67">На примере двух проб, двух съёмников и одного реплицированного шарда ClickHouse</text>
+  </g>
+  <g aria-label="Сервер управления">
+    <rect x="48" y="150" width="844" height="143" rx="13" fill="#fff" stroke="#c8d6dc"/>
+    <path d="M51 171V271" stroke="#426482" stroke-width="5" stroke-linecap="round"/>
+    <text class="heading" x="73" y="190">Сервер управления</text>
+    <text class="body" x="74" y="227">Веб-интерфейс и API</text>
+    <text class="small" x="74" y="260">Расчёт плана → правка → применение</text>
+    <path d="M451 172V270" stroke="#d5dfe4"/>
+    <text class="subheading" x="477" y="191">LiteDB конфигуратора</text>
+    <text class="small" x="478" y="226">Задания, параметры и сведения о пробах</text>
+    <text class="small" x="478" y="254">Пары и версии плана хранятся в Keeper</text>
+  </g>
+  <g aria-label="Управляющие связи">
+    <path class="route" d="M213 294V369" stroke="#46647d" stroke-width="2.4" marker-end="url(#arrow-control)"/>
+    <text class="small" x="228" y="339">Задания пробам</text>
+    <path class="route" d="M638 294V369" stroke="#46647d" stroke-width="2.4" marker-end="url(#arrow-control)"/>
+    <text class="small" x="653" y="339">Опрос состояния</text>
+    <path class="route" d="M893 214H1039V254H1080" stroke="#46647d" stroke-width="2.4" marker-end="url(#arrow-control)"/>
+    <text class="tag" x="966" y="198" text-anchor="middle">Запись плана</text>
+  </g>
+  <g aria-label="Узлы измерения">
+    <rect x="48" y="375" width="322" height="366" rx="13" fill="#fff" stroke="#c8d6dc"/>
+    <text class="heading" x="71" y="415">Пробы</text>
+    <text class="small" x="72" y="444">Измеряют и хранят очередь.</text>
+    <rect x="68" y="474" width="282" height="84" rx="9" fill="#f0f4f6"/>
+    <text class="subheading" x="85" y="506">Проба П1</text>
+    <text class="small" x="85" y="536">Назначенная пара · A и B</text>
+    <rect x="68" y="598" width="282" height="84" rx="9" fill="#f0f4f6"/>
+    <text class="subheading" x="85" y="630">Проба П2</text>
+    <text class="small" x="85" y="660">Назначенная пара · A и B</text>
+  </g>
+  <g aria-label="Узлы сбора">
+    <rect x="550" y="375" width="342" height="366" rx="13" fill="#fff" stroke="#adcfc8"/>
+    <text class="heading" x="572" y="415">Съёмники</text>
+    <text class="small" x="573" y="444">Отдельное приложение на машине.</text>
+    <rect x="569" y="474" width="304" height="84" rx="9" fill="#e8f4ef"/>
+    <text class="subheading" x="585" y="506">Машина A · съёмник A</text>
+    <text class="small" x="585" y="536">Собирает П1 · резерв для П2</text>
+    <rect x="569" y="598" width="304" height="84" rx="9" fill="#e8f4ef"/>
+    <text class="subheading" x="585" y="630">Машина B · съёмник B</text>
+    <text class="small" x="585" y="660">Собирает П2 · резерв для П1</text>
+    <text class="small" x="573" y="717">Локальная копия применённого плана</text>
+  </g>
+  <g aria-label="Активные и резервные связи между пробами и съёмниками">
+    <path class="route" d="M351 531L569 625M351 625L569 531" stroke="#899da5" stroke-width="2" stroke-dasharray="5 6"/>
+    <path class="route" d="M352 513H567" stroke="#097268" stroke-width="2.6" marker-start="url(#arrow-data)" marker-end="url(#arrow-data)"/>
+    <path class="route" d="M352 642H567" stroke="#097268" stroke-width="2.6" marker-start="url(#arrow-data)" marker-end="url(#arrow-data)"/>
+    <text class="tag data-text" x="460" y="497" text-anchor="middle">Сбор П1</text>
+    <text class="tag data-text" x="460" y="671" text-anchor="middle">Сбор П2</text>
+    <rect x="423" y="564" width="74" height="26" rx="6" fill="#f6f8f9"/>
+    <text class="small" x="460" y="584" text-anchor="middle">резерв</text>
+  </g>
+  <g aria-label="Кластер хранения и координации">
+    <rect x="1063" y="150" width="369" height="591" rx="13" fill="#fff" stroke="#c8d6dc"/>
+    <text class="heading" x="1086" y="190">Кластер ClickHouse</text>
+    <text class="small" x="1087" y="219">Пример размещения на трёх машинах</text>
+    <rect x="1083" y="248" width="329" height="92" rx="9" fill="#f2eff7"/>
+    <text class="subheading coord-text" x="1099" y="281">ClickHouse Keeper</text>
+    <text class="small" x="1099" y="310">Владелец каждой пробы · кворум 2/3</text>
+    <rect x="1083" y="372" width="329" height="122" rx="9" fill="#e8f4ef"/>
+    <text class="subheading data-text" x="1099" y="406">Таблица измерений</text>
+    <text class="small" x="1099" y="436">1 шард · 3 реплики</text>
+    <text class="mono data-text" x="1099" y="466">insert_quorum = 2</text>
+    <text class="subheading" x="1087" y="546">Размещение по узлам</text>
+    <path d="M1086 563H1409M1086 608H1409M1086 653H1409" stroke="#d8e1e5"/>
+    <text class="body" x="1090" y="592">Узел 1</text><text class="small" x="1185" y="592">Реплика 1 + Keeper 1</text>
+    <text class="body" x="1090" y="637">Узел 2</text><text class="small" x="1185" y="637">Реплика 2 + Keeper 2</text>
+    <text class="body" x="1090" y="682">Узел 3</text><text class="small" x="1185" y="682">Реплика 3 + Keeper 3</text>
+  </g>
+  <g aria-label="Соединения с кластером, доступные обоим съёмникам">
+    <path class="route" d="M894 441H917V291H1080" stroke="#70539a" stroke-width="2.5" marker-end="url(#arrow-keeper)"/>
+    <text class="tag coord-text" x="987" y="282" text-anchor="middle">План и владение</text>
+    <path class="route" d="M894 577H951V437H1080" stroke="#097268" stroke-width="2.6" marker-end="url(#arrow-data)"/>
+    <text class="tag data-text" x="1008" y="418" text-anchor="middle">INSERT</text>
+  </g>
+  <g aria-label="Порядок доставки">
+    <rect x="48" y="781" width="1384" height="112" rx="13" fill="#193742"/>
+    <text x="70" y="828" font-size="22" font-weight="650" style="fill:#fff">Доставка</text>
+    <text x="71" y="855" font-size="18" style="fill:#d7e8e9">одной пачки</text>
+    <path d="M246 802V872" stroke="#52717b"/>
+    <text x="273" y="829" font-size="19" font-weight="650" style="fill:#fff">1. Съёмник читает пачку</text>
+    <text x="273" y="856" font-size="16" style="fill:#d7e8e9">Проба сохраняет её до подтверждения.</text>
+    <path d="M622 802V872" stroke="#52717b"/>
+    <text x="647" y="829" font-size="19" font-weight="650" style="fill:#fff">2. ClickHouse подтверждает запись</text>
+    <text x="647" y="856" font-size="16" style="fill:#d7e8e9">Вся пачка записана на две реплики.</text>
+    <path d="M1024 802V872" stroke="#52717b"/>
+    <text x="1049" y="829" font-size="19" font-weight="650" style="fill:#fff">3. Съёмник подтверждает пробе</text>
+    <text x="1049" y="856" font-size="16" style="fill:#d7e8e9">ConfirmData(batchId) освобождает пачку.</text>
+  </g>
+</svg>

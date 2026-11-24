@@ -19,12 +19,14 @@ namespace SPI.Twamp.Server.Infrastructure
 
         /// <summary>Общий ключ API (заголовок X-Api-Key); пустой — аутентификация выключена.</summary>
         private readonly string? _apiKey;
+        private readonly bool _quorumAck;
 
         /// <summary>Считывает таймаут («Probe:HttpTimeoutSec») и ключ API («Auth:ApiKey») из конфигурации.</summary>
         public ProbeClient(IConfiguration configuration)
         {
             _timeoutSeconds = configuration["Probe:HttpTimeoutSec"].ConvertTo(60);
             _apiKey = configuration["Auth:ApiKey"];
+            _quorumAck = configuration.GetValue("HighAvailability:Enabled",false);
         }
 
         /// <summary>Формирует запрос к пробе с таймаутом и ключом API (если настроен).</summary>
@@ -65,6 +67,7 @@ namespace SPI.Twamp.Server.Infrastructure
         public async Task ConfirmResultsAsync(string probeUrl, Guid batchId, CancellationToken cancellationToken) =>
             _ = await Request(probeUrl, "api/ProbeInterface/ConfirmData")
                 .WithHeader("X-Twamp-Commit", "clickhouse")
+                .WithHeader("X-Twamp-Quorum", _quorumAck ? "2" : "1")
                 .SetQueryParam("batchId", batchId)
                 .PostAsync(cancellationToken: cancellationToken).ReceiveJson<bool>();
 

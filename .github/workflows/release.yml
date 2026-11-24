@@ -190,12 +190,20 @@ jobs:
           ls -lh ../publish/twamp-probe-go-*
 
       # Запуск без выпуска версии: архивы доступны как артефакты workflow.
+      - name: Проверка парного сбора и кворума
+        run: |
+          dotnet build SPI.TWamp.slnx -c Release
+          python3 tests/ha_smoke.py --configurator SPI.Twamp.Server/bin/Release/net10.0/SPI.Twamp.Server --collector SPI.Twamp.Collector/bin/Release/net10.0/SPI.Twamp.Collector
+          (cd deploy/ha && zip -q "../../publish/twamp-ha-${VERSION}.zip" README.md compose.yaml clickhouse.xml twamp-deployment.svg)
+          (cd publish && sha256sum *.zip *.tar.gz > SHA256SUMS)
+
       - name: Артефакты (без выпуска релиза)
         if: env.RELEASE != '1'
         uses: actions/upload-artifact@v7
         with:
           name: twamp-${{ env.VERSION }}
           path: |
+            publish/SHA256SUMS
             publish/*.tar.gz
             publish/*.zip
           retention-days: 1
@@ -207,7 +215,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
           files: |
+            publish/SHA256SUMS
             publish/*.tar.gz
             publish/*.zip
           generate_release_notes: true

@@ -230,10 +230,10 @@ namespace SPI.Twamp.Server.Contracts
         /// </summary>
         /// <param name="database">Имя базы.</param>
         /// <param name="table">Имя таблицы.</param>
-        public static string CreateTableDdl(string database, string table) => $$"""
+        public static string CreateTableDdl(string database, string table, string engine = "ReplacingMergeTree",bool utc = false) => $$"""
             CREATE TABLE IF NOT EXISTS `{{database}}`.`{{table}}`
             (
-                Started DateTime,
+                Started {{(utc ? "DateTime('UTC')" : "DateTime")}},
                 Title String,
                 Id String,
                 Mode String,
@@ -276,7 +276,7 @@ namespace SPI.Twamp.Server.Contracts
                 ResultId String,
                 RowNo Int32
             )
-            ENGINE = ReplacingMergeTree
+            ENGINE = {{engine}}
             PARTITION BY toYYYYMM(Started)
             ORDER BY (Started, ResultId, RowNo)
             """;

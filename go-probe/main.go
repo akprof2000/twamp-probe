@@ -392,7 +392,7 @@ func (a *apiServer) checkData(w http.ResponseWriter, _ *http.Request) {
 
 // confirmData подтверждает запись пачки сервером — проба удаляет её.
 func (a *apiServer) confirmData(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Twamp-Commit") != "clickhouse" {
+	if r.Header.Get("X-Twamp-Commit") != "clickhouse" || (a.cfg.RequireQuorumAck && r.Header.Get("X-Twamp-Quorum") != "2") {
 		http.Error(w, "ClickHouse commit required", http.StatusPreconditionRequired)
 		return
 	}

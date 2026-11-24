@@ -14,7 +14,7 @@ public sealed class CollectorRegistration
 }
 
 /// <summary>Постоянный каталог съёмников с поддержкой прежнего Collector:Url.</summary>
-public sealed class CollectorRegistry(LiteDbContext db, IConfiguration config, IHttpClientFactory http)
+public sealed class CollectorRegistry(LiteDbContext db, IConfiguration config, IHttpClientFactory http, SPI.Twamp.HighAvailability.KeeperPlanStore keeper)
 {
     /// <summary>Прежние пробы относятся к съёмнику default.</summary>
     public const string DefaultId = "default";
@@ -22,6 +22,8 @@ public sealed class CollectorRegistry(LiteDbContext db, IConfiguration config, I
     /// <summary>Возвращает зарегистрированные съёмники.</summary>
     public async Task<CollectorRegistration[]> ListAsync()
     {
+        if(keeper.Enabled)
+            return (await keeper.ReadAsync(CancellationToken.None)).Plan.Collectors.Select(c=>new CollectorRegistration{ Id=c.Id,Url=c.Url }).ToArray();
         var entries = (await db.Collectors.FindAllAsync()).ToList();
         if (entries.All(c => c.Id != DefaultId))
             entries.Add(new() { Id = DefaultId, Url = config["Collector:Url"] ?? "http://localhost:9001" });

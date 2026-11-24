@@ -122,6 +122,8 @@ try
     builder.Services.AddSingleton<IProbePoller>(sp => sp.GetRequiredService<ProbeConfigurationService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ProbeConfigurationService>());
     builder.Services.AddSingleton<CollectorRegistry>();
+    builder.Services.AddSingleton<SPI.Twamp.HighAvailability.KeeperPlanStore>();
+    builder.Services.AddHostedService<HaRegistrySync>();
     builder.Services.AddHttpClient("collector", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(10);

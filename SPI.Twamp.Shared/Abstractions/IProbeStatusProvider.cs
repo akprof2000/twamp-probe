@@ -15,7 +15,7 @@ namespace SPI.Twamp.Server.Abstractions
         DateTime? LastError,
         string? LastErrorMessage,
         long TotalResults,
-        int BackoffSeconds);
+        int BackoffSeconds, string? Owner = null, double WorkPerSecond = 0);
 
     /// <summary>
     /// Последний известный результат выполнения задачи — два статуса:

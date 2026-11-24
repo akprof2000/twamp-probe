@@ -1,0 +1,18 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      CH_NODE_ID: ${CH_NODE_ID:?set 1, 2 or 3}
+      CH_HOST: ${CH_HOST:?set this node hostname}
+      CH_REPLICA: ${CH_REPLICA:?set a unique replica name}
+      CH_HOST_1: ${CH_HOST_1:?set node 1 hostname}
+      CH_HOST_2: ${CH_HOST_2:?set node 2 hostname}
+      CH_HOST_3: ${CH_HOST_3:?set node 3 hostname}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set ClickHouse password}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse.xml:/etc/clickhouse-server/config.d/twamp.xml:ro
+volumes:
+  clickhouse-data:
