@@ -1,8 +1,7 @@
 ﻿// Ignore Spelling: SPI Twamp
 
 using CsvHelper;
-using CsvHelper.Configuration;
-using CsvHelper.TypeConversion;
+using CsvRow = SPI.Twamp.Server.Contracts.CsvRow;
 using Microsoft.Extensions.Caching.Memory;
 using NLog;
 using SPI.Twamp.Server.Abstractions;
@@ -42,7 +41,7 @@ namespace SPI.Twamp.Server.Application
         public async Task<IReadOnlyList<string>> ImportCsvAsync(
             Stream csv, string sourceName, string delimiter, string dateTimeFormat, CancellationToken cancellationToken)
         {
-            CsvRow[] rows = await ReadRowsAsync(csv, delimiter, dateTimeFormat, cancellationToken);
+            CsvRow[] rows = await ReadRowsAsync(csv, delimiter, cancellationToken);
             _logger.Info("Импорт CSV {File}: строк {Count}", sourceName, rows.Length);
 
             DateTime now = DateTime.Now;
@@ -51,7 +50,7 @@ namespace SPI.Twamp.Server.Application
 
             foreach (CsvRow row in rows)
             {
-                TaskInfo task = MapToTask(row, sourceName, now);
+                TaskInfo task = MapToTask(row, sourceName, now, dateTimeFormat);
 
                 // Задачи с датой окончания в прошлом не имеют смысла — сообщаем о них,
                 // но (сохраняя исходное поведение) всё равно передаём в обработку.
@@ -72,25 +71,21 @@ namespace SPI.Twamp.Server.Application
 
         /// <summary>Читает и разбирает строки CSV в модели <see cref="CsvRow"/>.</summary>
         private static async Task<CsvRow[]> ReadRowsAsync(
-            Stream csv, string delimiter, string dateTimeFormat, CancellationToken cancellationToken)
+            Stream csv, string delimiter, CancellationToken cancellationToken)
         {
-            using StreamReader reader = new(csv, Encoding.UTF8);
-
-            CsvConfiguration config = new(CultureInfo.InvariantCulture)
+            using var input = new CsvSeparatorStream(csv, delimiter, leaveOpen: true);
+            var options = new CsvReaderOptions
             {
-                Delimiter = delimiter,
-                PrepareHeaderForMatch = args => args.Header.ToLower()
+                Separator = input.Replacement,
+                FormatProvider = CultureInfo.InvariantCulture,
+                NormalizeHeaderName = header => header.ToLowerInvariant()
             };
-
-            using CsvReader csvReader = new(reader, config);
-            csvReader.Context.TypeConverterOptionsCache.AddOptions<DateTime>(
-                new TypeConverterOptions { Formats = [dateTimeFormat] });
-
+            using var csvReader = CsvReader.Create(input, options);
             return await csvReader.GetRecordsAsync<CsvRow>(cancellationToken).ToArrayAsync(cancellationToken);
         }
 
         /// <summary>Преобразует строку CSV в задачу.</summary>
-        private static TaskInfo MapToTask(CsvRow row, string sourceName, DateTime createdAt) => new()
+        private static TaskInfo MapToTask(CsvRow row, string sourceName, DateTime createdAt, string dateTimeFormat) => new()
         {
             Circles = row.Circles,
             ContinueIfError = true,
@@ -100,8 +95,8 @@ namespace SPI.Twamp.Server.Application
             Delete = false,
             // Kind=Local: при передаче пробе в другом часовом поясе JSON будет
             // содержать смещение, и время корректно пересчитается на её стороне.
-            Start = DateTime.SpecifyKind(row.Start, DateTimeKind.Local),
-            End = DateTime.SpecifyKind(row.End, DateTimeKind.Local),
+            Start = DateTime.SpecifyKind(DateTime.ParseExact(row.Start, dateTimeFormat, CultureInfo.InvariantCulture), DateTimeKind.Local),
+            End = DateTime.SpecifyKind(DateTime.ParseExact(row.End, dateTimeFormat, CultureInfo.InvariantCulture), DateTimeKind.Local),
             EndNode = row.Ip,
             Mode = row.Mode,
             Parameters = row.Request is null

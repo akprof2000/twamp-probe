@@ -33,8 +33,8 @@ if [ ! -f "$SRC/SPI.Twamp.Server" ]; then
 fi
 if ls "$SRC"/*.dll >/dev/null 2>&1 && [ ! -f "$SRC/libcoreclr.so" ]; then
     if ! command -v dotnet >/dev/null; then
-        echo "Это сборка framework — нужен .NET 10 Runtime (ASP.NET Core):" >&2
-        echo "  dnf install -y aspnetcore-runtime-10.0" >&2
+        echo "Это сборка framework — нужен .NET 11 Runtime (ASP.NET Core):" >&2
+        echo "  dnf install -y aspnetcore-runtime-11.0" >&2
         echo "Либо возьмите архив selfcontained — ему .NET не нужен." >&2
         exit 1
     fi

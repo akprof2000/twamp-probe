@@ -1,7 +1,6 @@
 ﻿// Ignore Spelling: SPI Twamp
 
 using CsvHelper;
-using CsvHelper.Configuration;
 using NLog;
 using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.Contracts;
@@ -200,20 +199,19 @@ namespace SPI.Twamp.Server.Application
         {
             using StreamReader reader = new(csv, Encoding.UTF8);
 
-            CsvConfiguration config = new(CultureInfo.InvariantCulture)
+            var config = new CsvReaderOptions
             {
-                Delimiter = ";",
-                // Маппинг по имени заголовка без учёта регистра; лишние колонки игнорируем.
-                PrepareHeaderForMatch = args => args.Header.Trim().ToLower(),
-                MissingFieldFound = null,
-                HeaderValidated = null,
-                TrimOptions = TrimOptions.Trim
+                FormatProvider = CultureInfo.InvariantCulture,
+                Separator = ';',
+                NormalizeHeaderName = header => header.Trim().ToLowerInvariant(),
+                MissingField = CsvMissingFieldHandling.ReturnEmpty,
+                TrimWhitespace = true
             };
 
             ProbeTemplate[] parsed;
             try
             {
-                using CsvReader csvReader = new(reader, config);
+                using CsvReader csvReader = CsvReader.Create(reader, config);
                 parsed = await csvReader.GetRecordsAsync<ProbeTemplate>(cancellationToken)
                     .ToArrayAsync(cancellationToken);
             }

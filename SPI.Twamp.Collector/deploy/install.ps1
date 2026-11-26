@@ -36,8 +36,8 @@ if (-not (Test-Path (Join-Path $source 'SPI.Twamp.Collector.exe'))) {
 if (-not (Test-Path (Join-Path $source 'hostpolicy.dll')) -and
     -not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw @"
-Это сборка framework — нужен .NET 10 Runtime (ASP.NET Core):
-  https://dotnet.microsoft.com/download/dotnet/10.0
+Это сборка framework — нужен .NET 11 Runtime (ASP.NET Core):
+  https://dotnet.microsoft.com/download/dotnet/11.0
 Либо возьмите архив selfcontained — ему .NET не нужен.
 "@
 }

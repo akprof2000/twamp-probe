@@ -40,13 +40,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Установка .NET 10
+      - name: Установка .NET 11
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 11.0.x
 
       - name: Юнит-тесты
-        run: dotnet test SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release
+        run: dotnet test --project SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release
 
       - name: Публикация сервера (linux-x64 + windows-x64)
         run: |
@@ -107,7 +107,7 @@ jobs:
 
           SRV=SPI.Twamp.Server/SPI.Twamp.Server.csproj
 
-          # Маленькие сборки: без библиотек .NET, на хосте нужен установленный .NET 10 Runtime (ASP.NET Core).
+          # Маленькие сборки: без библиотек .NET, на хосте нужен установленный .NET 11 Runtime (ASP.NET Core).
           publish_one "$SRV" twamp-server framework linux-x64 --self-contained false
           publish_one "$SRV" twamp-server framework win-x64   --self-contained false
 
@@ -127,7 +127,7 @@ jobs:
       - name: Установка Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.27.4"
           cache: false
 
       # Go-проба: один статический бинарник ~6 МБ без зависимостей. Linux-вариант
@@ -193,7 +193,7 @@ jobs:
       - name: Проверка парного сбора и кворума
         run: |
           dotnet build SPI.TWamp.slnx -c Release
-          python3 tests/ha_smoke.py --configurator SPI.Twamp.Server/bin/Release/net10.0/SPI.Twamp.Server --collector SPI.Twamp.Collector/bin/Release/net10.0/SPI.Twamp.Collector
+          python3 tests/ha_smoke.py --configurator SPI.Twamp.Server/bin/Release/net11.0/SPI.Twamp.Server --collector SPI.Twamp.Collector/bin/Release/net11.0/SPI.Twamp.Collector
           (cd deploy/ha && zip -q "../../publish/twamp-ha-${VERSION}.zip" README.md compose.yaml clickhouse.xml twamp-deployment.svg)
           (cd publish && sha256sum *.zip *.tar.gz > SHA256SUMS)
 
@@ -245,9 +245,9 @@ jobs:
 
             | Архив | Что это | Требования на хосте |
             |---|---|---|
-            | `twamp-server-*-linux-x64-framework.tar.gz` | сервер для Linux, маленький | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-server-*-linux-x64-framework.tar.gz` | сервер для Linux, маленький | .NET 11 Runtime (ASP.NET Core) |
             | `twamp-server-*-linux-x64-selfcontained.tar.gz` | сервер для Linux, самодостаточный | нет — распаковал и запустил |
-            | `twamp-server-*-windows-x64-framework.zip` | сервер для Windows, маленький | .NET 10 Runtime (ASP.NET Core) |
+            | `twamp-server-*-windows-x64-framework.zip` | сервер для Windows, маленький | .NET 11 Runtime (ASP.NET Core) |
             | `twamp-server-*-windows-x64-selfcontained.zip` | сервер для Windows, самодостаточный | нет — распаковал и запустил |
             | `twamp-collector-*` | съёмник для Linux или Windows | framework — ASP.NET Core 10, selfcontained — без рантайма |
             | `twamp-probe-go-*-linux-x64.tar.gz` | **проба (Go)** для Linux — один статический бинарник, twping в комплекте | нет; для TWampy — Python 3.8+ |

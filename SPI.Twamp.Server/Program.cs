@@ -261,7 +261,7 @@ try
 catch (Exception ex)
 {
     logger?.Fatal(ex, "Аварийная остановка: необработанное исключение");
-    Environment.Exit(1);
+    Environment.ExitCode = 1;
 }
 finally
 {

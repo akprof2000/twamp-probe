@@ -1,6 +1,6 @@
 // Ignore Spelling: SPI Twamp
 
-using CsvHelper.Configuration.Attributes;
+using CsvHelper;
 
 namespace SPI.Twamp.Server.Contracts
 {
@@ -51,18 +51,18 @@ namespace SPI.Twamp.Server.Contracts
         public ulong Pause { get; set; } = 1;
         /// <summary>
         /// Индивидуальный таймаут выполнения зонда, в секундах (0 — без ограничения).
-        /// Колонка необязательна: [Optional] позволяет загружать CSV без этого столбца.
+        /// Колонка необязательна: [CsvColumn(Optional = true)] позволяет загружать CSV без этого столбца.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public int Timeout { get; set; } = 0;
         /// <summary>
         /// Дата начала действия задачи.
         /// </summary>
-        public DateTime Start { get; set; }
+        public string Start { get; set; } = "";
         /// <summary>
         /// Дата окончания действия задачи.
         /// </summary>
-        public DateTime End { get; set; }
+        public string End { get; set; } = "";
         /// <summary>
         /// Режим зондирования (WinPing / TWamp / TWampy).
         /// </summary>

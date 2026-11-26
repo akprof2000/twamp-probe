@@ -1,6 +1,6 @@
 // Ignore Spelling: SPI Twamp
 
-using CsvHelper.Configuration.Attributes;
+using CsvHelper;
 using LiteDB;
 
 namespace SPI.Twamp.Server.Contracts
@@ -23,7 +23,7 @@ namespace SPI.Twamp.Server.Contracts
         /// <summary>
         /// Идентификатор записи в БД (не является колонкой CSV).
         /// </summary>
-        [Ignore]
+        [CsvIgnore]
         [BsonId]
         public ObjectId? Id { get; set; }
 
@@ -32,13 +32,13 @@ namespace SPI.Twamp.Server.Contracts
         /// по умолчанию — имя файла). Наборы загружаются, применяются к файлам
         /// маршрутизаторов и удаляются независимо друг от друга.
         /// </summary>
-        [Ignore]
+        [CsvIgnore]
         public string SetName { get; set; } = "";
 
         /// <summary>
         /// Название шаблона — попадает в имя создаваемой задачи («устройство-шаблон»).
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public string Name { get; set; } = "";
 
         /// <summary>
@@ -49,63 +49,62 @@ namespace SPI.Twamp.Server.Contracts
         /// <summary>
         /// Аргументы командной строки зонда (адрес маршрутизатора подставляет проба).
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public string? Request { get; set; }
 
         /// <summary>
         /// Тип задачи (Scheduler или Repeater). По умолчанию — Scheduler.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public TaskType Type { get; set; } = TaskType.Scheduler;
 
         /// <summary>
         /// Количество повторов зонда внутри цикла.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public uint Repeats { get; set; } = 1;
 
         /// <summary>
         /// Количество циклов замера.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public uint Circles { get; set; } = 1;
 
         /// <summary>
         /// Пауза между циклами, в секундах.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public ulong Pause { get; set; } = 0;
 
         /// <summary>
         /// Cron-выражение расписания.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public string Cron { get; set; } = "*/1 * * * *";
 
         /// <summary>
         /// Начало действия: дата либо длительность от момента создания. Пусто — сразу.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public string? Start { get; set; }
 
         /// <summary>
         /// Окончание действия: дата либо длительность от момента создания («2 week 3 day»).
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public string? End { get; set; }
 
         /// <summary>
         /// Режим зондирования (TWamp / WinPing / TWampy). По умолчанию — TWamp.
         /// </summary>
-        [Optional]
+        [CsvColumn(Optional = true)]
         public TaskMode Mode { get; set; } = TaskMode.TWamp;
 
         /// <summary>
         /// Индивидуальный таймаут задачи, в секундах (0 — без ограничения).
         /// Заголовок в CSV — «TimeOut» или «Timeout».
         /// </summary>
-        [Optional]
-        [Name("TimeOut", "Timeout")]
+        [CsvColumn("TimeOut", Optional = true)]
         public int Timeout { get; set; } = 0;
     }
 }

@@ -6,7 +6,7 @@
 [![Релиз](https://img.shields.io/github/v/release/akprof2000/twamp-probe?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&color=blue)](https://github.com/akprof2000/twamp-probe/releases/latest)
 [![Загрузки](https://img.shields.io/github/downloads/akprof2000/twamp-probe/total?label=%D0%B7%D0%B0%D0%B3%D1%80%D1%83%D0%B7%D0%BA%D0%B8&color=success)](https://github.com/akprof2000/twamp-probe/releases)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.27.4-00ADD8)](https://go.dev/)
 [![Лицензия](https://img.shields.io/github/license/akprof2000/twamp-probe?label=%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F&color=lightgrey)](LICENSE)
 
 Система измерения качества сети (задержки, потери, джиттер) по протоколу **TWAMP** и обычному **ICMP-ping**. Конфигуратор задаёт расписание распределённым пробам. Отдельный съёмник забирает результаты, сохраняет их на диск и подтверждает пробе доставку после вставки в **ClickHouse**.
@@ -96,16 +96,16 @@ tar -xzf twamp-probe-go-*-linux-x64.tar.gz -C /opt/twamp-probe
 /opt/twamp-probe/twamp-probe
 ```
 
-`twamp-server-*-framework.tar.gz` — тот же сервер в 15 раз меньше, но на хосте нужен .NET 10 Runtime (ASP.NET Core).
+`twamp-server-*-framework.tar.gz` — тот же сервер в 15 раз меньше, но на хосте нужен .NET 11 Runtime (ASP.NET Core).
 Проба поставляется только сборкой на Go: она не требует рантайма и одинаково работает на Linux и Windows.
 
 ### Вариант 2: сборка из исходников
 
 #### Требования
 
-- **Сервер**: .NET 10 SDK (для сборки) или .NET 10 Runtime (для запуска); вариант
+- **Сервер**: .NET 11 SDK (для сборки) или .NET 11 Runtime (для запуска); вариант
   selfcontained не требует ничего.
-- **Проба**: Go 1.25 для сборки; на целевой машине — ничего.
+- **Проба**: Go 1.27.4 для сборки; на целевой машине — ничего.
 - Для режима **TWamp** — утилита `twping` (perfsonar); в linux-пакете пробы она уже лежит рядом.
 - Для режима **TWampy** — Python 3.8+ на пробе, либо **встроенный отправитель**
   (`twampy:embedded`), которому python не нужен. Сам twampy вендорен в проекте

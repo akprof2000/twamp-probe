@@ -24,7 +24,7 @@
 ## Разработка
 
 ```
-SPI.TWamp.slnx              — решение (.NET 10)
+SPI.TWamp.slnx              — решение (.NET 11)
 ├── go-probe/               — проба (Go): один бинарник, twampy и файлы установки
 ├── SPI.Twamp.Server/       — сервер (ASP.NET Core, LiteDB)
 └── SPI.Twamp.Tests/        — юнит-тесты (xUnit)
@@ -34,7 +34,7 @@ SPI.TWamp.slnx              — решение (.NET 10)
 
 ```bash
 dotnet build SPI.TWamp.slnx -c Release
-dotnet test SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release
+dotnet test --project SPI.Twamp.Tests/SPI.Twamp.Tests.csproj -c Release
 ```
 
 Тестами покрыты: разбор длительностей шаблонов (`TimeSpec`), разбор строк файла маршрутизаторов, детерминированные идентификаторы задач, парсер вывода `twping`, **парсер вывода `twampy` и его сходимость по значениям с twping** (`TwampyParserTests`), слияние задач в реестре пробы.
@@ -51,7 +51,7 @@ CI: GitHub Actions ([.github/workflows/build.yml](../.github/workflows/build.yml
 
 | Архив | Вариант | Требования на хосте |
 |---|---|---|
-| `twamp-server-*-framework.tar.gz` | сервер, маленький (~7 МБ) | установленный .NET 10 Runtime (ASP.NET Core) |
+| `twamp-server-*-framework.tar.gz` | сервер, маленький (~7 МБ) | установленный .NET 11 Runtime (ASP.NET Core) |
 | `twamp-server-*-selfcontained.tar.gz` | сервер, самодостаточный (один исполняемый файл со всеми библиотеками) | нет — распаковал и запустил |
 | `twamp-probe-go-*-linux-x64.tar.gz` | **проба** (Go) для Linux — один статический бинарник ~6 МБ | нет; для режима TWampy — Python 3.8+ |
 | `twamp-probe-go-*-windows-x64.zip` | **проба** (Go) для Windows | нет; для режима TWampy — Python 3.8+ |
