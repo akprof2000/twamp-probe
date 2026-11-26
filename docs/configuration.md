@@ -29,7 +29,9 @@
 | Ключ | По умолчанию | Назначение |
 |---|---|---|
 | `Urls` | `http://localhost:9001` | API статуса съёмника и CSV из буфера |
-| `Configurator:Url` | `http://localhost:9000` | каталог подтверждённых проб |
+| `Collector:Id` | `default` | уникальный идентификатор съёмника |
+| `Collector:UseLegacyCatalog` | включён при заданном `Configurator:Url` | явно задайте `false` при переводе всех проб на автономные назначения |
+| `Configurator:Url` | отсутствует | адрес конфигуратора только для прежнего режима получения каталога |
 | `Auth:ApiKey` | пусто | общий ключ трёх служб |
 | `ClickHouse:Enabled` | `true` | съёмнику требуется запись в ClickHouse |
 | `ClickHouse:Url` | `http://localhost:8123` | адрес HTTP-интерфейса базы |

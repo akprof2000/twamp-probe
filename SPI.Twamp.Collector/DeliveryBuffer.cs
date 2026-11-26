@@ -69,6 +69,7 @@ public sealed class DeliveryBuffer : IDisposable
                 for (int i = 0; i < parsed.Count; i++)
                 {
                     var row = ExportRow.Create(item, parsed[i], i, item.TaskTitle ?? titles.GetValueOrDefault(item.TaskId) ?? "");
+                    if (utc) row.Started = (item.Creation ?? DateTime.UnixEpoch).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'",CultureInfo.InvariantCulture);
                     row.SourceProbe = url;
                     await writer.WriteLineAsync(JsonSerializer.Serialize(row, SpoolJson.Options).AsMemory(), ct);
                     count++;

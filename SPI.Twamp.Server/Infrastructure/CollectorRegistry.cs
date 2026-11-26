@@ -11,6 +11,8 @@ public sealed class CollectorRegistration
     public string Id { get; set; } = "";
     /// <summary>HTTP-адрес API съёмника.</summary>
     public string Url { get; set; } = "";
+    /// <summary>Съёмник добавлен в постоянный каталог этого конфигуратора.</summary>
+    [BsonIgnore] public bool Registered { get; set; }
 }
 
 /// <summary>Постоянный каталог съёмников с поддержкой прежнего Collector:Url.</summary>
@@ -25,9 +27,24 @@ public sealed class CollectorRegistry(LiteDbContext db, IConfiguration config, I
         if(keeper.Enabled)
             return (await keeper.ReadAsync(CancellationToken.None)).Plan.Collectors.Select(c=>new CollectorRegistration{ Id=c.Id,Url=c.Url }).ToArray();
         var entries = (await db.Collectors.FindAllAsync()).ToList();
-        if (entries.All(c => c.Id != DefaultId))
+        foreach (var entry in entries) entry.Registered = true;
+        if (entries.All(c => c.Id != DefaultId) && (entries.Count == 0 ||
+            (await db.Clients.FindAllAsync()).Any(c => (c.CollectorId ?? DefaultId) == DefaultId)))
             entries.Add(new() { Id = DefaultId, Url = config["Collector:Url"] ?? "http://localhost:9001" });
         return entries.OrderBy(c => c.Id, StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>Удаляет адрес из локального каталога после снятия всех назначений.</summary>
+    public async Task<bool> RemoveAsync(string id)
+    {
+        if (keeper.Enabled) throw new InvalidOperationException("Используйте реестр HA.");
+        var routes = (await db.ProbeRoutes.FindAllAsync()).ToArray();
+        if (routes.Any(r => r.Members.Any(m => m.Id == id) || !r.Applied && r.Retired.Any(m => m.Id == id)))
+            throw new InvalidOperationException("Сначала замените съёмник в назначениях проб.");
+        var ordered = routes.Where(r => r.Applied).Select(r => r.Probe).ToHashSet();
+        if ((await db.Clients.FindAllAsync()).Any(c => !ordered.Contains(c.RequestInfo) && (c.CollectorId ?? DefaultId) == id))
+            throw new InvalidOperationException("Сначала измените съёмник в назначениях проб.");
+        return await db.Collectors.DeleteAsync(id);
     }
 
     /// <summary>Проверяет идентичность и сохраняет адрес.</summary>

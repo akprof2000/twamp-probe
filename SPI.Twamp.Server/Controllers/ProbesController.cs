@@ -119,6 +119,14 @@ namespace SPI.Twamp.Server.Controllers
         {
             if(HttpContext.RequestServices.GetRequiredService<SPI.Twamp.HighAvailability.KeeperPlanStore>().Enabled)
                 return Conflict("Удалите пробу в реестре HA и примените план.");
+            var routes=HttpContext.RequestServices.GetRequiredService<SPI.Twamp.Server.Infrastructure.RoutePublisher>();
+            var route=(await routes.ListAsync()).FirstOrDefault(r=>r.Probe==requestInfo);
+            if(route!=null)
+            {
+                try {await routes.SetAsync(requestInfo,[],route.Revision,true,cancellationToken);}
+                catch(Exception ex) when(!cancellationToken.IsCancellationRequested)
+                {return StatusCode(502,"Не подтверждено снятие назначения с пробы. "+ex.Message);}
+            }
             bool removed = await _clientService.DeleteAsync(requestInfo, deleteTasks, cancellationToken);
             return removed ? Ok() : NotFound($"Проба «{requestInfo}» не найдена");
         }

@@ -92,6 +92,17 @@ namespace SPI.Twamp.Server.Infrastructure
         public string Target => $"{_database}.{_table}";
 
         /// <inheritdoc/>
+        public Task CheckAvailableAsync(CancellationToken ct) =>
+            WithFailoverAsync(async (endpoint, token) =>
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                await EnsureEndpointAsync(endpoint, timeout.Token);
+                // Exercise INSERT privileges and the readonly profile without creating any measurement.
+                await ExecuteAsync(endpoint.Url, $"INSERT INTO `{_database}`.`{_table}` (RowNo) SELECT toUInt32(0) WHERE 0", timeout.Token);
+            },ct, recordSuccess: false);
+
+        /// <inheritdoc/>
         public async Task EnsureTableAsync(CancellationToken cancellationToken)
         {
             if (!_ha) { await WithFailoverAsync(EnsureEndpointAsync, cancellationToken); return; }
@@ -121,7 +132,7 @@ namespace SPI.Twamp.Server.Infrastructure
                 await EnsureSuccessAsync(response, ct);
             }, cancellationToken);
 
-        private async Task WithFailoverAsync(Func<Endpoint, CancellationToken, Task> operation, CancellationToken ct)
+        private async Task WithFailoverAsync(Func<Endpoint, CancellationToken, Task> operation, CancellationToken ct, bool recordSuccess = true)
         {
             long now = _clock.GetUtcNow().UtcTicks;
             // After a cooldown, the next operation tries the primary first again.
@@ -133,8 +144,11 @@ namespace SPI.Twamp.Server.Infrastructure
                 try
                 {
                     await operation(endpoint, ct);
-                    Interlocked.Exchange(ref endpoint.RetryAtTicks, 0);
-                    Volatile.Write(ref _activeUrl, endpoint.Url);
+                    if (recordSuccess)
+                    {
+                        Interlocked.Exchange(ref endpoint.RetryAtTicks, 0);
+                        Volatile.Write(ref _activeUrl, endpoint.Url);
+                    }
                     return;
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested &&

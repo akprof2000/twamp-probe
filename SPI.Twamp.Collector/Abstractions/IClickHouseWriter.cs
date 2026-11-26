@@ -19,6 +19,8 @@ namespace SPI.Twamp.Server.Abstractions
         /// <summary>Создаёт базу и таблицу, если их ещё нет.</summary>
         /// <param name="cancellationToken">Токен отмены.</param>
         Task EnsureTableAsync(CancellationToken cancellationToken);
+        /// <summary>Проверяет доступность хотя бы одного адреса ClickHouse.</summary>
+        Task CheckAvailableAsync(CancellationToken cancellationToken) => EnsureTableAsync(cancellationToken);
 
         /// <summary>
         /// Отправляет файл сегмента (NDJSON) в таблицу одним запросом <c>FORMAT JSONEachRow</c>.

@@ -44,6 +44,7 @@ type Enqueuer interface {
 
 // TaskRegistry — реестр задач по расписанию.
 type TaskRegistry struct {
+	dirty      bool
 	file       string
 	mu         sync.Mutex
 	tasks      map[string]*scheduledTask
@@ -73,7 +74,7 @@ func (r *TaskRegistry) Load() {
 }
 
 // MergeJobs применяет инкрементальные изменения задач (добавить/обновить/удалить).
-func (r *TaskRegistry) MergeJobs(jobs []TaskInfo) {
+func (r *TaskRegistry) MergeJobs(jobs []TaskInfo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -81,9 +82,12 @@ func (r *TaskRegistry) MergeJobs(jobs []TaskInfo) {
 	for i := range jobs {
 		changed = r.mergeOne(&jobs[i]) || changed
 	}
-	if changed {
-		r.persist()
+	if changed || r.dirty {
+		err := r.persist()
+		r.dirty = err != nil
+		return err
 	}
+	return nil
 }
 
 // mergeOne применяет одну задачу; вызывается под mu. Возвращает «реестр изменился».
@@ -233,7 +237,7 @@ func (r *TaskRegistry) ClearAll() int {
 }
 
 // persist сохраняет реестр на диск; вызывается под mu.
-func (r *TaskRegistry) persist() {
+func (r *TaskRegistry) persist() error {
 	all := make([]TaskInfo, 0, len(r.tasks))
 	for _, entry := range r.tasks {
 		all = append(all, *entry.task)
@@ -241,9 +245,22 @@ func (r *TaskRegistry) persist() {
 	data, err := json.Marshal(all)
 	if err != nil {
 		logRegistry.Error("Не удалось сериализовать реестр задач", "ошибка", err)
-		return
+		return err
 	}
-	if err := os.WriteFile(r.file, data, 0o644); err != nil {
-		logRegistry.Error("Не удалось сохранить реестр задач", "файл", r.file, "ошибка", err)
+	tmp := r.file + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
 	}
+	if _, err = f.Write(data); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(tmp, r.file)
 }

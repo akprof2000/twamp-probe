@@ -11,7 +11,8 @@ namespace SPI.Twamp.Server.Application
     /// доставкой пробе и фоновой сверкой состояния.
     /// </summary>
     public sealed class TaskService(
-        Logger logger, ITaskRepository tasks, IProbeClient probe, IChangeNotifier changeNotifier) : ITaskService
+        Logger logger, ITaskRepository tasks, IProbeClient probe, IChangeNotifier changeNotifier,
+        Infrastructure.OrderedSchedules? ordered = null) : ITaskService
     {
         private readonly Logger _logger = logger;
         private readonly ITaskRepository _tasks = tasks;
@@ -34,8 +35,7 @@ namespace SPI.Twamp.Server.Application
             _logger.Info("Сохранение задачи {@Task}", task);
             await _tasks.UpsertAsync(task);
             _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
-            // Доставка пробе — в фоне (ответ оператору не ждёт SetJobs).
-            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct));
+            await DeliverChangesAsync([task], cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -49,9 +49,20 @@ namespace SPI.Twamp.Server.Application
             _logger.Info("Массовое сохранение задач: {Count}", tasks.Count);
             await _tasks.UpsertRangeAsync(tasks);
             _changeNotifier.Notify(); // список задач изменился — событие для интерфейса
-            // Рассылка пробам — в фоне: массовая заливка не должна держать HTTP-ответ,
-            // пока все пробы примут пачки (медленная/недоступная проба зависла бы ответ).
-            QueueBackgroundPush(ct => PushGroupedAsync(tasks, ct));
+            await DeliverChangesAsync(tasks, cancellationToken);
+        }
+
+        private async Task DeliverChangesAsync(IReadOnlyList<TaskInfo> changes, CancellationToken ct)
+        {
+            var background = new List<TaskInfo>();
+            foreach (var group in changes.GroupBy(t => t.RequestInfo))
+            {
+                if (ordered != null && group.Any(t => t.Type == TaskType.Scheduler) && await ordered.SyncIfRouted(group.Key, ct))
+                    background.AddRange(group.Where(t => t.Type != TaskType.Scheduler));
+                else
+                    background.AddRange(group);
+            }
+            if (background.Count > 0) QueueBackgroundPush(token => PushGroupedAsync(background, token));
         }
 
         /// <summary>
@@ -86,7 +97,7 @@ namespace SPI.Twamp.Server.Application
             task.DeletedAt = null;
             await _tasks.UpsertAsync(task);
             _changeNotifier.Notify();
-            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct)); // проба добавит задачу заново
+            await DeliverChangesAsync([task], cancellationToken);
             return true;
         }
 
@@ -111,7 +122,7 @@ namespace SPI.Twamp.Server.Application
                 deleted ? "удаление" : "восстановление", changed.Count);
             await _tasks.UpsertRangeAsync(changed);
             _changeNotifier.Notify();
-            QueueBackgroundPush(ct => PushGroupedAsync(changed, ct));
+            await DeliverChangesAsync(changed, cancellationToken);
             return changed.Count;
         }
 
@@ -130,7 +141,7 @@ namespace SPI.Twamp.Server.Application
             task.DeletedAt = DateTime.Now; // для фоновой очистки давно удалённых
             await _tasks.UpsertAsync(task);
             _changeNotifier.Notify(); // задача удалена — событие для интерфейса
-            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct)); // отправляем удаление
+            await DeliverChangesAsync([task], cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -154,7 +165,7 @@ namespace SPI.Twamp.Server.Application
             // Best-effort снимаем задачу с пробы ПЕРЕД стиранием: иначе, если проба ещё
             // держит её, восстановление (усыновление сирот) вернуло бы задачу обратно.
             task.Delete = true;
-            QueueBackgroundPush(ct => TryPushAsync(task.RequestInfo, [task], ct));
+            await DeliverChangesAsync([task], cancellationToken);
 
             await _tasks.RemoveAsync(id);
             _changeNotifier.Notify();
@@ -170,7 +181,7 @@ namespace SPI.Twamp.Server.Application
 
             IReadOnlyList<TaskInfo> all = await _tasks.GetByRequestInfoAsync(requestInfo);
             TaskInfo[] deleted = [.. all.Where(t => t.Delete)];
-            QueueBackgroundPush(ct => TryPushAsync(requestInfo, deleted, ct));
+            await DeliverChangesAsync(deleted, cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -322,8 +333,14 @@ namespace SPI.Twamp.Server.Application
 
             try
             {
+                if (ordered != null && changed.Any(t=>t.Type==TaskType.Scheduler) && await ordered.SyncIfRouted(requestInfo,cancellationToken))
+                {
+                    changed=changed.Where(t=>t.Type!=TaskType.Scheduler).ToArray();
+                    if(changed.Count==0) return;
+                }
                 await _probe.PushTasksAsync(requestInfo, changed, cancellationToken);
             }
+            catch (SPI.Twamp.Server.Infrastructure.ScheduleConflictException) { throw; }
             catch (Exception ex)
             {
                 _logger.Warn(ex, "Проба {RequestInfo} недоступна — изменения досошлёт фоновая сверка", requestInfo);

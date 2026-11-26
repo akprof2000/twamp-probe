@@ -127,3 +127,8 @@ jobs:
             --probe "$RUNNER_TEMP/twamp-probe" \
             --configurator SPI.Twamp.Server/bin/Release/net11.0/SPI.Twamp.Server \
             --collector SPI.Twamp.Collector/bin/Release/net11.0/SPI.Twamp.Collector
+      - name: Автономная работа двух проб и трёх съёмников под Linux
+        run: |
+          python3 tests/ordered_smoke.py --clickhouse "$TWAMP_CLICKHOUSE_URL" --probe "$RUNNER_TEMP/twamp-probe" \
+            --configurator SPI.Twamp.Server/bin/Release/net11.0/SPI.Twamp.Server \
+            --collector SPI.Twamp.Collector/bin/Release/net11.0/SPI.Twamp.Collector

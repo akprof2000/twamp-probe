@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.Contracts;
+using SPI.Twamp.Server.Infrastructure;
 using SPI.Twamp.HighAvailability;
 using System.Diagnostics;
 using System.Text.Json;
@@ -8,7 +9,7 @@ using System.Text.Json;
 namespace SPI.Twamp.Collector;
 
 public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, IClickHouseWriter writer,
-    IHttpClientFactory http, IConfiguration settings, ILogger<CollectorWorker> log, KeeperPlanStore keeper) : BackgroundService
+    IHttpClientFactory http, IConfiguration settings, ILogger<CollectorWorker> log, KeeperPlanStore keeper, LocalRoutes routes) : BackgroundService
 {
     private volatile CollectorCatalog _catalog = new([]);
     private readonly Dictionary<string,Task> _workers = new();
@@ -23,6 +24,38 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
     private readonly string _id = settings["Collector:Id"] ?? "default";
     private readonly string _machine = settings["Collector:Machine"] is {Length:>0} machine ? machine : Environment.MachineName;
     private volatile VersionedPlan _plan = new(-1,CollectionPlan.Empty);
+    private readonly Lazy<DeliveryBuffer> orderedBuffer = new(() => new DeliveryBuffer(Path.Combine(settings["ClickHouse:SpoolPath"] ?? "spool","ordered")));
+
+    public async Task RunOrderedAsync(string url, string token, Func<Task> verify, CancellationToken ct)
+    {
+        var transport = new ProbeClient(settings,token);
+        try
+        {
+            // The probe exposes one immutable batch until ACK. A previous owner may have already confirmed our saved copy.
+            if (orderedBuffer.Value.Peek(url) is { } saved)
+            {
+                await verify();
+                var current=await transport.GetResultsAsync(url,ct);
+                if (current.BatchId != Guid.ParseExact(Path.GetFileName(saved).Split('.')[0],"N"))
+                {
+                    if (!DeliveryBuffer.IsStored(saved))
+                    {
+                        await verify();
+                        saved = await DeliveryBuffer.StoreAsync(saved, writer, ct);
+                    }
+                    File.Delete(saved);
+                }
+            }
+            await RunProbeAsync(url,ct,verify:verify,transport:transport);
+        }
+        finally { _states.TryRemove(url,out _); Interlocked.Increment(ref _version); }
+    }
+
+    public override void Dispose()
+    {
+        if (orderedBuffer.IsValueCreated) orderedBuffer.Value.Dispose();
+        base.Dispose();
+    }
 
     public CollectorSnapshot? Snapshot(Guid? instance,long? version)
     {
@@ -34,10 +67,11 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
 
     public ClickHouseState Storage(ClickHouseState legacy)
     {
-        var pending = buffer.PendingFiles();
+        var buffers=Buffers();
+        var pending = buffers.SelectMany(b=>b.PendingFiles()).ToArray();
         lock (_storage)
             return legacy with {
-                AwaitingConfirmation = buffer.AwaitingConfirmation,
+                AwaitingConfirmation = buffers.Sum(b=>b.AwaitingConfirmation),
                 PendingRows = legacy.PendingRows + pending.Sum(p => (long)DeliveryBuffer.RowCount(p)),
                 SealedSegments = legacy.SealedSegments + pending.Length,
                 LastUploadAt = _lastUpload ?? legacy.LastUploadAt,
@@ -47,9 +81,14 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
             };
     }
 
+    public DeliveryBuffer[] Buffers() => orderedBuffer.IsValueCreated ||
+        Directory.Exists(Path.Combine(settings["ClickHouse:SpoolPath"] ?? "spool","ordered","delivery"))
+        ? [buffer,orderedBuffer.Value] : [buffer];
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         if (keeper.Enabled) { await RunClusterAsync(ct); return; }
+        if (!(settings.GetValue<bool?>("Collector:UseLegacyCatalog") ?? !string.IsNullOrWhiteSpace(settings["Configurator:Url"]))) return;
         using var client = http.CreateClient("configurator");
         try
         {
@@ -175,7 +214,7 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
     private async Task<Dictionary<Guid,string>> GetLegacyTitlesAsync(ProbeResultBatch batch, CancellationToken ct)
     {
         var ids = batch.Items.Where(item => item.TaskTitle == null).Select(item => item.TaskId).Distinct().ToArray();
-        if (ids.Length == 0) return new();
+        if (ids.Length == 0 || string.IsNullOrWhiteSpace(settings["Configurator:Url"])) return new();
         using var client = http.CreateClient("configurator");
         using var response = await client.PostAsJsonAsync("api/collector/titles", ids, ct);
         response.EnsureSuccessStatusCode();
@@ -185,17 +224,22 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
 
     private void StartWorker(string url, CancellationToken ct)
     {
-        if (!_workers.ContainsKey(url)) _workers[url] = RunProbeAsync(url, ct);
+        if (routes.Active(url) == 0 && !_workers.ContainsKey(url)) _workers[url] = RunProbeAsync(url, ct);
     }
 
-    private async Task RunProbeAsync(string url, CancellationToken ct, KeeperPlanStore.Lease? lease = null,long generation = 0)
+    private async Task RunProbeAsync(string url, CancellationToken ct, KeeperPlanStore.Lease? lease = null,long generation = 0,
+        Func<Task>? verify = null, IProbeClient? transport = null)
     {
         long received = 0;
         bool schemaReady = false;
         var since=Stopwatch.StartNew();
         double rate=0;
+        var source = transport ?? probe;
+        var delivery = verify == null ? buffer : orderedBuffer.Value;
+        if (verify != null) { _states[url] = new(null,null,null,0,0,_id); Interlocked.Increment(ref _version); }
         async Task Guard()
         {
+            if (verify != null) { await verify(); return; }
             if(lease==null)return;
             var plan=_plan;
             if(!plan.Plan.Assignments.Any(a=>a.Probe.Url==url && a.Generation==generation && Eligible(plan,a)))
@@ -206,21 +250,22 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
         {
             try
             {
-                var path = buffer.Peek(url);
+                if (verify == null && lease == null && routes.Active(url) != 0) return;
+                var path = delivery.Peek(url);
                 if (path == null)
                 {
                     var catalog = _catalog;
-                    if (lease==null && !catalog.Probes.Contains(url)) return;
+                    if (verify==null && lease==null && !catalog.Probes.Contains(url)) return;
                     await Guard();
-                    var batch = await probe.GetResultsAsync(url, ct);
+                    var batch = await source.GetResultsAsync(url, ct);
                     if (batch.Items.Length > 0)
                     {
                         Dictionary<Guid,string> titles;
-                        try { titles = await GetLegacyTitlesAsync(batch,ct); }
+                        try { titles = verify == null ? await GetLegacyTitlesAsync(batch,ct) : new(); }
                         catch(Exception ex) when(lease!=null && !ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException)
                         { titles=new(); log.LogDebug("Имена старых задач временно недоступны для {Probe}",url); }
                         var parse = Stopwatch.StartNew();
-                        path = await buffer.StageAsync(url, batch, titles, ct,lease!=null);
+                        path = await delivery.StageAsync(url, batch, titles, ct,lease!=null || verify!=null);
                         double cost = batch.Items.Length + new FileInfo(path).Length/4096d + parse.Elapsed.TotalMilliseconds;
                         var sample=cost/Math.Max(1,since.Elapsed.TotalSeconds);
                         rate=rate==0?sample:0.8*rate+0.2*sample;
@@ -259,7 +304,7 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                         }
                     }
                     await Guard();
-                    await DeliveryBuffer.AcknowledgeAsync(path, url, probe, ct);
+                    await DeliveryBuffer.AcknowledgeAsync(path, url, source, ct);
                 }
                 _states[url] = new(DateTime.Now, null, null, received, 0,_id,rate);
                 Interlocked.Increment(ref _version);
@@ -270,7 +315,7 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                 _states[url] = new(previous?.LastSuccess, DateTime.Now, ex.Message, received, (int)_retry.TotalSeconds);
                 Interlocked.Increment(ref _version);
                 log.LogWarning("Доставка с {Probe}: {Reason}", url, ex.Message);
-                if(lease!=null) throw;
+                if(lease!=null || verify!=null) throw;
                 await Task.Delay(_retry, ct);
             }
         }

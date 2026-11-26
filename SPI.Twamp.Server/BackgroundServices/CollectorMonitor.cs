@@ -6,7 +6,7 @@ namespace SPI.Twamp.Server.BackgroundServices;
 
 /// <summary>Собирает снимки съёмников и публикует состояние активных проб.</summary>
 public sealed class CollectorMonitor(CollectorRegistry registry, IClientRepository probes, SPI.Twamp.HighAvailability.KeeperPlanStore keeper,
-    IChangeNotifier changes, ILogger<CollectorMonitor> log) : BackgroundService, IProbeStatusProvider
+    IChangeNotifier changes, ILogger<CollectorMonitor> log, RoutePublisher routes) : BackgroundService, IProbeStatusProvider
 {
     private volatile CollectorSnapshot _snapshot = new(Guid.Empty, 0, new(), new());
     /// <summary>Доступность HTTP API съёмника и время его последней выгрузки.</summary>
@@ -30,6 +30,7 @@ public sealed class CollectorMonitor(CollectorRegistry registry, IClientReposito
                 var assignments = (await probes.GetAllAsync()).ToDictionary(p => p.RequestInfo,
                     p => p.CollectorId ?? CollectorRegistry.DefaultId, StringComparer.Ordinal);
                 var entries = await registry.ListAsync();
+                var ordered=(await routes.ListAsync()).ToDictionary(r=>r.Probe);
                 var responses = await Task.WhenAll(entries.Select(async entry =>
                     (entry.Id, Snapshot: await ReadAsync(entry, previous.GetValueOrDefault(entry.Id), ct))));
                 var current = responses.Where(r => r.Snapshot != null).ToDictionary(r => r.Id, r => r.Snapshot!);
@@ -39,7 +40,8 @@ public sealed class CollectorMonitor(CollectorRegistry registry, IClientReposito
                 foreach (var (id, snapshot) in current)
                 {
                     foreach (var (url, state) in snapshot.States)
-                        if (keeper.Enabled ? state.Owner == id : assignments.GetValueOrDefault(url) == id)
+                        if (ordered.TryGetValue(url, out var route) ? state.Owner==id && route.Members.Any(m=>m.Id==id)
+                            : keeper.Enabled ? state.Owner == id : assignments.GetValueOrDefault(url) == id)
                             if (!states.TryGetValue(url, out var prior) || (state.LastSuccess ?? DateTime.MinValue) >= (prior.LastSuccess ?? DateTime.MinValue)) states[url] = state;
                     foreach (var (task, result) in snapshot.LastResults)
                         if (!results.TryGetValue(task, out var old) || result.Time > old.Time) results[task] = result;

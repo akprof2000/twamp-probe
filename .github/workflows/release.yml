@@ -193,8 +193,17 @@ jobs:
       - name: Проверка парного сбора и кворума
         run: |
           dotnet build SPI.TWamp.slnx -c Release
+          export TWAMP_CLICKHOUSE_PASSWORD="$(openssl rand -hex 24)"
+          ch=$(docker run -d -p 127.0.0.1::8123 -e CLICKHOUSE_PASSWORD="$TWAMP_CLICKHOUSE_PASSWORD" -e TZ=Europe/Moscow clickhouse/clickhouse-server:25.8-alpine)
+          trap 'docker rm -fv "$ch" >/dev/null' EXIT
+          addr="http://$(docker port "$ch" 8123/tcp)"
+          curl --retry 30 --retry-all-errors --retry-delay 1 --fail "$addr/ping"
+          python3 tests/ordered_smoke.py --clickhouse "$addr" --probe go-probe/dist/twamp-probe-go/twamp-probe \
+            --configurator SPI.Twamp.Server/bin/Release/net11.0/SPI.Twamp.Server \
+            --collector SPI.Twamp.Collector/bin/Release/net11.0/SPI.Twamp.Collector
           python3 tests/ha_smoke.py --configurator SPI.Twamp.Server/bin/Release/net11.0/SPI.Twamp.Server --collector SPI.Twamp.Collector/bin/Release/net11.0/SPI.Twamp.Collector
           (cd deploy/ha && zip -q "../../publish/twamp-ha-${VERSION}.zip" README.md compose.yaml clickhouse.xml twamp-deployment.svg)
+          (cd docs && zip -q "../publish/twamp-ordered-collectors-${VERSION}.zip" ordered-collectors.md)
           (cd publish && sha256sum *.zip *.tar.gz > SHA256SUMS)
 
       - name: Артефакты (без выпуска релиза)
@@ -222,6 +231,11 @@ jobs:
             publish/*.zip
           generate_release_notes: true
           body: |
+            **Автономный сбор на Linux.** На странице «Статус проб» выберите основной съёмник и до двух резервных.
+            Съёмники переключаются по приоритету и продолжают работу при выключенном конфигураторе.
+            Для подключения с другого компьютера введите адрес одного настроенного съёмника и нажмите «Открыть конфигурацию со съёмника». Адрес конфигуратора на съёмниках не требуется.
+            Схема и настройка — в [руководстве](https://github.com/akprof2000/twamp-probe/blob/v${{ env.VERSION }}/docs/ordered-collectors.md).
+
             Сборки для Linux x64 и Windows x64. В каждом архиве — папка приложения
             целиком вместе со скриптом установки службы.
 
@@ -249,6 +263,6 @@ jobs:
             | `twamp-server-*-linux-x64-selfcontained.tar.gz` | сервер для Linux, самодостаточный | нет — распаковал и запустил |
             | `twamp-server-*-windows-x64-framework.zip` | сервер для Windows, маленький | .NET 11 Runtime (ASP.NET Core) |
             | `twamp-server-*-windows-x64-selfcontained.zip` | сервер для Windows, самодостаточный | нет — распаковал и запустил |
-            | `twamp-collector-*` | съёмник для Linux или Windows | framework — ASP.NET Core 10, selfcontained — без рантайма |
+            | `twamp-collector-*` | съёмник для Linux или Windows | framework — ASP.NET Core 11, selfcontained — без рантайма |
             | `twamp-probe-go-*-linux-x64.tar.gz` | **проба (Go)** для Linux — один статический бинарник, twping в комплекте | нет; для TWampy — Python 3.8+ |
             | `twamp-probe-go-*-windows-x64.zip` | **проба (Go)** для Windows | нет; для TWampy — Python 3.8+ |

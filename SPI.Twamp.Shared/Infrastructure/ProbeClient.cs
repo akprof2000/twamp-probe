@@ -20,12 +20,14 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <summary>Общий ключ API (заголовок X-Api-Key); пустой — аутентификация выключена.</summary>
         private readonly string? _apiKey;
         private readonly bool _quorumAck;
+        private readonly string? _leaseToken;
 
         /// <summary>Считывает таймаут («Probe:HttpTimeoutSec») и ключ API («Auth:ApiKey») из конфигурации.</summary>
-        public ProbeClient(IConfiguration configuration)
+        public ProbeClient(IConfiguration configuration, string? leaseToken = null)
         {
             _timeoutSeconds = configuration["Probe:HttpTimeoutSec"].ConvertTo(60);
             _apiKey = configuration["Auth:ApiKey"];
+            _leaseToken = leaseToken;
             _quorumAck = configuration.GetValue("HighAvailability:Enabled",false);
         }
 
@@ -41,6 +43,7 @@ namespace SPI.Twamp.Server.Infrastructure
                 request = request.WithHeader("X-Api-Key", _apiKey);
             }
 
+            if (_leaseToken != null) request = request.WithHeader("X-Twamp-Lease", _leaseToken);
             return request;
         }
 
@@ -54,7 +57,6 @@ namespace SPI.Twamp.Server.Infrastructure
         /// <inheritdoc/>
         public async Task PushTasksAsync(string probeUrl, IEnumerable<TaskInfo> tasks, CancellationToken cancellationToken) =>
             _ = await Request(probeUrl, "api/ProbeInterface/SetJobs")
-                .AllowAnyHttpStatus()
                 .PostJsonAsync(tasks, cancellationToken: cancellationToken);
 
         /// <inheritdoc/>

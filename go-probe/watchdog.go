@@ -17,6 +17,7 @@ const watchdogCheckInterval = 5 * time.Minute
 
 // ContactTracker — потокобезопасная отметка последнего обращения сервера.
 type ContactTracker struct {
+	autonomous  atomic.Bool
 	lastContact atomic.Int64 // UnixNano
 }
 
@@ -54,6 +55,9 @@ func RunWatchdog(ctx context.Context, timeoutHours int, tracker *ContactTracker,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if tracker.autonomous.Load() {
+				continue
+			}
 			last := tracker.Last()
 			// Уже чистили после этого контакта — ждём следующего обращения сервера.
 			if !lastCleared.Before(last) || time.Since(last) < timeout {

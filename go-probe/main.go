@@ -11,6 +11,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -156,15 +157,24 @@ func main() {
 
 	dispatcher := NewDispatcher(ctx, cfg.MaxParallel, cfg.QueueCapacity, runner, runReg, limiter)
 	tasks := NewTaskRegistry(tasksFileName, dispatcher, runReg, cancels)
-	tasks.Load()
 
 	// Сторож связи: молчание сервера дольше Probe:ServerTimeoutHours означает,
 	// что пробу удалили, — задачи останавливаются, расписание снимается.
 	tracker := NewContactTracker()
-	go RunWatchdog(ctx, cfg.ServerTimeoutHours, tracker, tasks)
 
 	api := &apiServer{cfg: cfg, results: results, tasks: tasks, runReg: runReg,
 		tracker: tracker, limiter: limiter, ports: ports}
+	if err := api.loadRoute(); err != nil {
+		logMain.Error("Ошибка чтения назначений съёмников", "ошибка", err)
+		os.Exit(1)
+	}
+	if api.lease.route.Revision != 0 && len(api.lease.route.Members) == 0 {
+		tasks.ClearAll()
+	} else {
+		tasks.Load()
+	}
+	tracker.autonomous.Store(len(api.lease.route.Members) > 0)
+	go RunWatchdog(ctx, cfg.ServerTimeoutHours, tracker, tasks)
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: api.routes()}
 
 	go func() {
@@ -232,14 +242,19 @@ func initComponentLoggers() {
 }
 
 // apiServer — HTTP-обработчики эндпоинтов api/probeinterface.
+// Remember the exact transition so a lost response cannot acknowledge unrelated edits.
+type scheduleWrite struct{ before, after, changes string }
+
 type apiServer struct {
-	cfg     *Config
-	results *ResultStore
-	tasks   *TaskRegistry
-	runReg  *RunRegistry
-	tracker *ContactTracker
-	limiter *AdaptiveLimiter // текущий предел и число идущих замеров
-	ports   *PortPool        // состояние пула локальных портов
+	lastScheduleWrite scheduleWrite
+	lease             collectorLease
+	cfg               *Config
+	results           *ResultStore
+	tasks             *TaskRegistry
+	runReg            *RunRegistry
+	tracker           *ContactTracker
+	limiter           *AdaptiveLimiter // текущий предел и число идущих замеров
+	ports             *PortPool        // состояние пула локальных портов
 }
 
 // routes собирает маршруты. ASP.NET сопоставляет пути регистронезависимо,
@@ -254,6 +269,10 @@ func (a *apiServer) routes() http.Handler {
 	mux.HandleFunc("GET /api/probeinterface/probestate", a.probeState)
 	mux.HandleFunc("GET /api/probeinterface/checkdata", a.checkData)
 	mux.HandleFunc("POST /api/probeinterface/confirmdata", a.confirmData)
+	mux.HandleFunc("GET /api/probeinterface/collectorlease", a.leaseRequest)
+	mux.HandleFunc("POST /api/probeinterface/collectorlease", a.leaseRequest)
+	mux.HandleFunc("POST /api/probeinterface/collectorroute", a.configureRoute)
+	mux.HandleFunc("GET /api/probeinterface/collectorroute", a.configureRoute)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.ToLower(r.URL.Path)
@@ -311,9 +330,50 @@ func (a *apiServer) setJobs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Некорректное тело запроса: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	a.lease.mu.Lock()
+	defer a.lease.mu.Unlock()
+	versioned := r.Header.Get("X-Twamp-Route-Revision") != "" || r.Header.Get("If-Match") != ""
+	if len(a.lease.route.Members) == 0 && (versioned || a.lease.route.Revision != 0 && slices.ContainsFunc(jobs, func(job TaskInfo) bool { return !job.Delete })) {
+		http.Error(w, "assignment removed; reopen configuration from a collector", http.StatusConflict)
+		return
+	}
+	ordered := len(a.lease.route.Members) > 0 && (versioned || slices.ContainsFunc(jobs, func(job TaskInfo) bool { return job.Type != TypeRepeater }))
+	var write scheduleWrite
+	if ordered {
+		tag := scheduleTag(a.tasks.AllTasks())
+		write = scheduleWrite{before: r.Header.Get("If-Match"), changes: scheduleTag(slices.Clone(jobs))}
+		if r.Header.Get("X-Twamp-Route-Revision") != strconv.FormatInt(a.lease.route.Revision, 10) || write.before == "" {
+			http.Error(w, "schedule changed; reopen configuration from a collector", http.StatusConflict)
+			return
+		}
+		if write.before != tag {
+			write.after = tag
+			if a.lastScheduleWrite != write {
+				http.Error(w, "schedule changed; reopen configuration from a collector", http.StatusConflict)
+				return
+			}
+			jobs = nil // Retry persistence without starting the same jobs twice.
+		}
+	}
 	logHTTP.Info("SetJobs: получены изменения задач", "задач", len(jobs))
-	a.tasks.MergeJobs(jobs)
+	err := a.tasks.MergeJobs(jobs)
+	if ordered {
+		write.after = scheduleTag(a.tasks.AllTasks())
+		a.lastScheduleWrite = write
+		w.Header().Set("ETag", write.after)
+	}
+	if err != nil {
+		http.Error(w, "Не удалось сохранить расписание", http.StatusServiceUnavailable)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// A stable tag survives a reboot and detects writes made by another configurator.
+func scheduleTag(tasks []TaskInfo) string {
+	slices.SortFunc(tasks, func(a, b TaskInfo) int { return cmp.Compare(a.Id, b.Id) })
+	data, _ := json.Marshal(tasks)
+	return fmt.Sprintf("\"%x\"", sha256.Sum256(data))
 }
 
 // taskIds возвращает идентификаторы задач по расписанию (для сверки).
@@ -328,6 +388,7 @@ func (a *apiServer) tasksFull(w http.ResponseWriter, _ *http.Request) {
 	if tasks == nil {
 		tasks = []TaskInfo{}
 	}
+	w.Header().Set("ETag", scheduleTag(tasks))
 	writeJSON(w, tasks)
 }
 
@@ -381,17 +442,33 @@ func (a *apiServer) taskStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkData выдаёт пачку результатов длинным опросом (до 30 секунд).
-func (a *apiServer) checkData(w http.ResponseWriter, _ *http.Request) {
+func (a *apiServer) checkData(w http.ResponseWriter, r *http.Request) {
+	a.lease.mu.Lock()
+	allowed := a.allowDelivery(w, r)
+	a.lease.mu.Unlock()
+	if !allowed {
+		return
+	}
 	batch, err := a.results.readBatch(30 * time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, batch)
+	a.lease.mu.Lock()
+	allowed = a.allowDelivery(w, r)
+	a.lease.mu.Unlock()
+	if allowed {
+		writeJSON(w, batch)
+	}
 }
 
 // confirmData подтверждает запись пачки сервером — проба удаляет её.
 func (a *apiServer) confirmData(w http.ResponseWriter, r *http.Request) {
+	a.lease.mu.Lock()
+	defer a.lease.mu.Unlock()
+	if !a.allowDelivery(w, r) {
+		return
+	}
 	if r.Header.Get("X-Twamp-Commit") != "clickhouse" || (a.cfg.RequireQuorumAck && r.Header.Get("X-Twamp-Quorum") != "2") {
 		http.Error(w, "ClickHouse commit required", http.StatusPreconditionRequired)
 		return

@@ -122,6 +122,9 @@ try
     builder.Services.AddSingleton<IProbePoller>(sp => sp.GetRequiredService<ProbeConfigurationService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ProbeConfigurationService>());
     builder.Services.AddSingleton<CollectorRegistry>();
+    builder.Services.AddSingleton<RoutePublisher>();
+    builder.Services.AddSingleton<OrderedSchedules>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<RoutePublisher>());
     builder.Services.AddSingleton<SPI.Twamp.HighAvailability.KeeperPlanStore>();
     builder.Services.AddHostedService<HaRegistrySync>();
     builder.Services.AddHttpClient("collector", client =>
@@ -129,7 +132,7 @@ try
         client.Timeout = TimeSpan.FromSeconds(10);
         if (builder.Configuration["Auth:ApiKey"] is { Length: > 0 } key)
             client.DefaultRequestHeaders.Add("X-Api-Key", key);
-    });
+    }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
     builder.Services.AddSingleton<CollectorMonitor>();
     builder.Services.AddSingleton<IProbeStatusProvider>(sp => sp.GetRequiredService<CollectorMonitor>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<CollectorMonitor>());
@@ -209,6 +212,15 @@ try
     }
 
     app.UseStatusCodePages();
+    app.Use(async (context, next) =>
+    {
+        try { await next(); }
+        catch (ScheduleConflictException ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsync(ex.Message);
+        }
+    });
 
     app.UseForwardedHeaders(new ForwardedHeadersOptions
     {

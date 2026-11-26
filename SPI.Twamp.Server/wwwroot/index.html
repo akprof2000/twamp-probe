@@ -73,6 +73,7 @@
     <div class="row">
       <input id="collectorUrl" type="url" placeholder="http://адрес-съёмника:9001" aria-label="Адрес съёмника">
       <button class="act" onclick="withBusy(this, registerCollector)">Зарегистрировать</button>
+      <button class="act" onclick="withBusy(this, importCollectors)">Открыть конфигурацию со съёмника</button>
     </div>
     <div id="msgCollector" role="status"></div>
     <ul id="collectorsList"></ul>
@@ -89,7 +90,7 @@
       <span id="probeCount" style="color:var(--mut)"></span>
     </div>
     <div class="scroll" style="max-height:60vh;overflow-y:auto"><table id="tblStatus">
-      <thead><tr><th>Проба</th><th>Съёмник</th><th>Имя</th><th>Хост</th><th>Версия</th><th>Связь</th><th>Последний ответ</th><th>Ошибка</th><th>Задач</th><th>Результатов</th><th></th></tr></thead>
+      <thead><tr><th>Проба</th><th>Основной съёмник</th><th>Резерв 1</th><th>Резерв 2</th><th>Собирает сейчас</th><th>Имя</th><th>Хост</th><th>Версия</th><th>Связь</th><th>Последний ответ</th><th>Ошибка</th><th>Задач</th><th>Результатов</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="msg" id="msgStatus"></div>
@@ -418,7 +419,8 @@ async function loadCollectors() {
   try {
     collectorsCache = await jget('collectors');
     $('#collectorsList').innerHTML = collectorsCache.map(c =>
-      '<li><strong>' + escHtml(c.id) + '</strong> ' + escHtml(c.url) + '</li>').join('');
+      '<li><strong>' + escHtml(c.id) + '</strong> ' + escHtml(c.url) +
+      (c.registered ? ' <button class="act" data-id="'+escHtml(c.id)+'" onclick="removeCollector(this)">Удалить</button>' : '') + '</li>').join('');
     for (const id of ['storageCollector', 'reportCollector']) {
       const select = $('#' + id);
       select.innerHTML = collectorOptions(select.value || 'default');
@@ -434,17 +436,61 @@ async function registerCollector() {
     await loadStatus();
   } catch (e) { $('#msgCollector').textContent = e.message; }
 }
-
-async function assignCollector(select) {
+async function removeCollector(button) {
+  const id = button.dataset.id;
+  if (!confirm('Удалить съёмник ' + id + ' из каталога?')) return;
   try {
-    await jsend('setinfoclient', 'POST', {requestInfo: select.dataset.probe, name: select.dataset.name, collectorId: select.value});
+    await jsend('collectors/' + encodeURIComponent(id), 'DELETE');
+    await loadStatus();
+    $('#msgCollector').textContent = 'Съёмник удалён из каталога.';
+  } catch(e) { $('#msgCollector').textContent = e.message; }
+}
+
+async function importCollectors() {
+  try {
+    const response = await jsend('collector-routes/import', 'POST', {url: $('#collectorUrl').value.trim()});
+    const report = await response.json();
+    routeDrafts.clear();
+    await loadStatus();
+    $('#msgCollector').textContent = 'Прочитано проб: ' + report.probes + '. Проверено съёмников: ' + report.collectors +
+      (report.unavailable.length ? '. Требуют повторной сверки: ' + report.unavailable.join(', ') : '.');
   } catch (e) { $('#msgCollector').textContent = e.message; }
-  await loadStatus();
+}
+
+let assignedRoutes = new Map();
+const routeDrafts = new Map();
+function editRoute(select) {
+  const tr = select.closest('tr');
+  const url = tr.dataset.probe;
+  const previous = routeDrafts.get(url);
+  routeDrafts.set(url, {revision:previous?.revision ?? assignedRoutes.get(url)?.revision ?? 0,
+    values:[...tr.querySelectorAll('select.route-member')].map(s => s.value)});
+}
+function routeCells(p) {
+  if (window.twampHa?.enabled) return '<td>По плану HA</td><td>—</td><td>—</td>';
+  const saved = assignedRoutes.get(p.requestInfo);
+  const ids = routeDrafts.get(p.requestInfo)?.values ?? saved?.members.map(m=>m.id) ?? [p.collectorId];
+  return ['Основной съёмник','Резерв 1','Резерв 2'].map((label,i) =>
+    '<td><select class="route-member" aria-label="'+label+'" onchange="editRoute(this)">'+
+    (i ? '<option value="">Не задан</option>' : '')+collectorOptions(ids[i])+'</select></td>').join('');
+}
+async function saveRoute(button) {
+  const tr=button.closest('tr'), url=tr.dataset.probe;
+  editRoute(tr.querySelector('select'));
+  const draft=routeDrafts.get(url), ids=draft.values;
+  if(!ids[0] || ids[2] && !ids[1] || new Set(ids.filter(Boolean)).size!==ids.filter(Boolean).length) {
+    $('#msgStatus').textContent='Выберите разных съёмников по порядку, начиная с основного.';return;
+  }
+  try {
+    await jsend('collector-routes','POST',{probe:url,revision:draft.revision,members:ids.filter(Boolean)});
+    routeDrafts.delete(url); await loadStatus(); $('#msgStatus').textContent='Назначение сохранено на съёмниках и пробе.';
+  } catch(e) { routeDrafts.delete(url); await loadStatus(); $('#msgStatus').textContent=e.message; }
 }
 
 async function loadStatus() {
   try {
     await loadCollectors();
+    assignedRoutes = new Map((await jget('collector-routes')).map(r=>[r.probe,r]));
     probesCache = await jget('probestatus');
     renderProbes();
     $('#msgStatus').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
@@ -470,17 +516,17 @@ function renderProbes() {
     return [p.requestInfo, p.name, p.hostName, p.version].some(v => (v || '').toLowerCase().includes(q));
   });
   const esc = s => (s || '').replace(/'/g, "\\'");
-  $('#tblStatus tbody').innerHTML = rows.map(p => `<tr>
+  $('#tblStatus tbody').innerHTML = rows.map(p => `<tr data-probe="${escHtml(p.requestInfo)}">
     <td class="wrap">${escHtml(p.requestInfo)}</td>
-    <td>${window.twampHa?.enabled ? escHtml(p.owner || 'Ожидает владельца') : `<select aria-label="Съёмник пробы" data-probe="${escHtml(p.requestInfo)}" data-name="${escHtml(p.name)}" onchange="assignCollector(this)">${collectorOptions(p.collectorId)}</select>`}</td><td>${escHtml(p.name)}</td><td>${escHtml(p.hostName||'')}</td><td>${escHtml(p.version||'—')}</td>
+    ${routeCells(p)}<td>${escHtml(p.owner || '—')}${assignedRoutes.get(p.requestInfo)?.applied === false ? ' · настройка не доставлена' : ''}</td><td>${escHtml(p.name)}</td><td>${escHtml(p.hostName||'')}</td><td>${escHtml(p.version||'—')}</td>
     <td>${window.twampHa?.enabled && !p.owner ? 'ожидает владельца' : p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
     <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
     <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
-    <td><button class="act" onclick="loadProbeTasks(this,'${esc(p.requestInfo)}')">задачи</button>
+    <td>${window.twampHa?.enabled ? '' : '<button class="act" onclick="withBusy(this,()=>saveRoute(this))">Сохранить съёмники</button>'} <button class="act" onclick="loadProbeTasks(this,'${esc(p.requestInfo)}')">задачи</button>
         <button class="act" onclick="withBusy(this,()=>showProbeState('${esc(p.requestInfo)}'))">состояние</button>
         ${window.twampHa?.enabled ? '' : `<button class="act" onclick="renameProbe('${esc(p.requestInfo)}','${esc(p.name)}')">имя</button>
         <button class="act" onclick="removeProbe('${esc(p.requestInfo)}')">удалить</button>`}</td></tr>`).join('')
-    || `<tr><td colspan="11">${probesCache.length ? 'ничего не найдено по фильтру' : 'пробы не подключены'}</td></tr>`;
+    || `<tr><td colspan="14">${probesCache.length ? 'ничего не найдено по фильтру' : 'пробы не подключены'}</td></tr>`;
   $('#probeCount').textContent = (q || link)
     ? `показано ${rows.length} из ${probesCache.length}`
     : `всего проб: ${probesCache.length}`;

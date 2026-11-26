@@ -7,7 +7,7 @@ using SPI.Twamp.Server.Contracts;
 namespace SPI.Twamp.Server.BackgroundServices
 {
     internal sealed class ProbeConfigurationService(IConfiguration configuration, IClientRepository clients,
-        IProbeClient probe, ITaskService taskService, IChangeNotifier changeNotifier) : BackgroundService, IProbePoller
+        IProbeClient probe, ITaskService taskService, IChangeNotifier changeNotifier, Infrastructure.OrderedSchedules ordered) : BackgroundService, IProbePoller
     {
         private static readonly Logger _logger = LogManager.GetCurrentClassLogger();
         private readonly IClientRepository _clients = clients;
@@ -53,7 +53,7 @@ namespace SPI.Twamp.Server.BackgroundServices
                     foreach (Client client in allClients)
                     {
                         await ReconcileSafeAsync(client.RequestInfo, cancellationToken);
-                        await RefreshVersionAsync(client, cancellationToken);
+                        if (!await ordered.IsRouted(client.RequestInfo)) await RefreshVersionAsync(client, cancellationToken);
                     }
 
                     await ProcessCleanupsAsync(cancellationToken);
@@ -199,7 +199,8 @@ namespace SPI.Twamp.Server.BackgroundServices
         {
             try
             {
-                await _taskService.ReconcileAsync(requestInfo, cancellationToken);
+                if (!await ordered.SyncIfRouted(requestInfo,cancellationToken))
+                    await _taskService.ReconcileAsync(requestInfo, cancellationToken);
             }
             catch (OperationCanceledException)
             {

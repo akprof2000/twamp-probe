@@ -24,6 +24,10 @@ namespace SPI.Twamp.Server.Infrastructure
 
         /// <summary>Коллекция съёмников.</summary>
         public ILiteCollectionAsync<CollectorRegistration> Collectors => _db.GetCollection<CollectorRegistration>("collectors");
+        /// <summary>Упорядоченные назначения, доставляемые на съёмники и пробы.</summary>
+        public ILiteCollectionAsync<ProbeRouteRecord> ProbeRoutes => _db.GetCollection<ProbeRouteRecord>("probe_routes");
+        /// <summary>Подтверждённые определения расписаний автономных проб.</summary>
+        public ILiteCollectionAsync<ScheduleReceipt> ScheduleReceipts => _db.GetCollection<ScheduleReceipt>("schedule_receipts");
 
         /// <summary>Коллекция задач.</summary>
         public ILiteCollectionAsync<TaskInfo> Tasks => _db.GetCollection<TaskInfo>("tasksinfo");

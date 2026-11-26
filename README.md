@@ -1,5 +1,7 @@
 # SPI TWamp — распределённая система зондирования сети
 
+[Автономный сбор с основным и двумя резервными съёмниками — схема и настройка без Keeper](docs/ordered-collectors.md)
+
 [Парный сбор и кластер ClickHouse — схема, развёртывание и переход с одиночного съёмника](deploy/ha/README.md)
 
 [![CI](https://github.com/akprof2000/twamp-probe/actions/workflows/build.yml/badge.svg)](https://github.com/akprof2000/twamp-probe/actions/workflows/build.yml)
@@ -162,7 +164,7 @@ Windows (служба, порт в брандмауэре; права админ
 dotnet SPI.Twamp.Server.dll
 ```
 
-Для съёмника соберите `dotnet publish SPI.Twamp.Collector -c Release` или распакуйте отдельный пакет `twamp-collector-*`. В его `appsettings.json` задайте `Configurator:Url` и подключение к ClickHouse. При обновлении перенесите прежний буфер по [порядку перехода](docs/deployment.md#переход-на-три-службы).
+Для съёмника соберите `dotnet publish SPI.Twamp.Collector -c Release` или распакуйте отдельный пакет `twamp-collector-*`. В его `appsettings.json` задайте свой ID, адрес прослушивания, общий ключ API и подключение к ClickHouse. Адрес конфигуратора для автономного сбора не требуется. [Настройка назначений и подключение второго конфигуратора](docs/ordered-collectors.md) · [Перенос прежнего буфера](docs/deployment.md#переход-на-три-службы).
 
 Порты меняются ключом `Urls` в `appsettings.json` каждого приложения.
 
