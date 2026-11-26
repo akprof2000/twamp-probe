@@ -14,7 +14,7 @@ public class CollectorCatalogController(IClientRepository clients, ITaskReposito
     public async Task<ActionResult<CollectorCatalog>> Get([FromQuery] string collectorId = CollectorRegistry.DefaultId)
     {
         if(keeper.Enabled) return new CollectorCatalog([]); // Old workers cannot own HA probes.
-        if ((await collectors.ListAsync()).All(c => c.Id != collectorId)) return NotFound();
+        if (collectorId != CollectorRegistry.DefaultId && (await collectors.ListAsync()).All(c => c.Id != collectorId)) return NotFound();
         var routed=(await routes.ListAsync()).Where(r=>r.Applied).Select(r=>r.Probe).ToHashSet();
         var probes = (await clients.GetAllAsync()).Where(c => !routed.Contains(c.RequestInfo) && (c.CollectorId ?? CollectorRegistry.DefaultId) == collectorId);
         return new CollectorCatalog(probes.Select(c => c.RequestInfo).ToArray());
