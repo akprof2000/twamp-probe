@@ -147,6 +147,7 @@ def main():
                     cfg['Logging']['LogLevel']['SPI.Twamp.Collector']='Debug'
                     cfg['NLog']['rules'][0]['minLevel']='Debug'
                     cfg['NLog']['targets']['file']['fileName']=str(d/'log'/'Collector.log')
+                    cfg['NLog']['targets']['file']['archiveFileName']=str(d/'log'/'Collector.{#}.zip')
                     cfg.update({'Collector':{'Id':k},
                                 'ClickHouse':{'Urls':[b.url for b in backend],'Database':'default','Table':table,
                                               'Password':os.environ.get('TWAMP_CLICKHOUSE_PASSWORD',''),'TimeoutSec':5,'FailoverRetrySeconds':2,

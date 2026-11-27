@@ -124,6 +124,11 @@ jobs:
           done
           ls -lh publish/*.tar.gz publish/*.zip
 
+      - name: Ротация журнала Linux-съёмника при обновлении
+        run: |
+          python3 tests/collector_log_rotation.py publish/twamp-collector-framework-linux-x64
+          python3 tests/collector_log_rotation.py publish/twamp-collector-selfcontained-linux-x64
+
       - name: Установка Go
         uses: actions/setup-go@v7
         with:
@@ -232,6 +237,8 @@ jobs:
             publish/*.zip
           generate_release_notes: true
           body: |
+            **Ротация журнала съёмника.** Текущий `log/Collector.log` доступен для чтения обычным текстом. При достижении 10 МиБ съёмник сжимает его в `Collector.0.zip` и хранит до пяти ZIP-архивов.
+
             **Журналы и контроль доставки.** В «Статус проб → Обмен данными» видны очереди проб и съёмников, свободное место на пробе, последняя пачка, адрес ClickHouse и подтверждение доставки. Параметры журнала съёмника находятся в секциях `Logging` и `NLog` его `appsettings.json`.
             Linux-проба автоматически уменьшает `results.db` после подтверждения всей очереди. Порог `Probe:ResultCompactMinMiB` по умолчанию равен 64 МиБ.
             Комплект [настроек и инструкции Word](https://github.com/akprof2000/twamp-probe/releases/download/v${{ env.VERSION }}/twamp-appsettings-${{ env.VERSION }}-1probe-2collectors-2configurators.zip) включает примеры для двух съёмников и двух конфигураторов.

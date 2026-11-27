@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="../SPI.Twamp.Shared/SPI.Twamp.Shared.csproj" />
     <PackageReference Include="NLog.Extensions.Logging" Version="6.3.0" />
+    <PackageReference Include="NLog.Targets.ConcurrentFile" Version="6.2.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="11.0.0" />
     <Content Update="appsettings.json" CopyToPublishDirectory="PreserveNewest" />
