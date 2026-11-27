@@ -43,9 +43,13 @@ func (s *ResultStore) TakeBatch(timeout time.Duration) ResultBatch {
 	return batch
 }
 func (s *ResultStore) Confirm(id string) bool {
-	ok, err := s.confirm(id)
+	ok, err := s.confirm(id, "")
 	if err != nil {
 		panic(err)
 	}
 	return ok
+}
+func (s *ResultStore) PendingCount() int {
+	count, _, _ := s.deliveryState()
+	return count
 }

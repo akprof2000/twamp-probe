@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting.WindowsServices;
 using NLog;
+using NLog.Extensions.Logging;
 using SPI.Twamp.Collector;
 using SPI.Twamp.Server.Abstractions;
 using SPI.Twamp.Server.BackgroundServices;
@@ -16,6 +17,19 @@ var config = builder.Configuration;
 config["ClickHouse:SpoolPath"] = Path.GetFullPath(config["ClickHouse:SpoolPath"] ?? "spool");
 if (!config.GetValue("ClickHouse:Enabled", true))
     throw new InvalidOperationException("Для запуска съёмника требуется ClickHouse:Enabled=true");
+if (config.GetSection("NLog").Exists())
+{
+    LogManager.Setup().LoadConfigurationFromSection(config);
+    builder.Logging.ClearProviders();
+    builder.Logging.AddNLog(new NLogProviderOptions { RemoveLoggerFactoryFilter = false, ShutdownOnDispose = true });
+}
+else if (LogManager.Configuration == null)
+{
+    // Older installations can keep their appsettings.json or a site-specific NLog.config.
+    var fallback = new NLog.Config.LoggingConfiguration();
+    fallback.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, new NLog.Targets.ConsoleTarget("console"));
+    LogManager.Configuration = fallback;
+}
 builder.Services.AddSingleton(LogManager.GetCurrentClassLogger());
 builder.Services.AddHttpClient("configurator", client =>
 {
@@ -83,6 +97,7 @@ app.MapPost("/peer/route", (string recipient, CollectorRoute route, LocalRoutes 
 app.MapGet("/snapshot", (Guid? instance, long? version, CollectorWorker worker) =>
     worker.Snapshot(instance,version) is { } snapshot ? Results.Ok(snapshot) : Results.NoContent());
 app.MapGet("/storage", (CollectorWorker worker, ClickHouseExportService legacy) => worker.Storage(legacy.GetState()));
+app.MapGet("/exchange", (CollectorWorker worker, ClickHouseExportService legacy) => worker.Exchange(legacy.GetState()));
 app.MapGet("/report", async (char? separator, char? decimalSeparator, HttpResponse response,
     CollectorWorker worker, IResultSpool legacy, CancellationToken ct) =>
 {

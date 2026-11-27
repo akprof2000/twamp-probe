@@ -74,7 +74,7 @@ func (l *collectorLease) change(cmd leaseCommand, now time.Time) string {
 var routeKey = []byte("collectorRouteV1")
 
 func (a *apiServer) loadRoute() error {
-	return a.results.db.View(func(tx *bolt.Tx) error {
+	return a.results.view(func(tx *bolt.Tx) error {
 		data := tx.Bucket(metaBucket).Get(routeKey)
 		if data == nil {
 			return nil
@@ -124,7 +124,7 @@ func (a *apiServer) configureRoute(w http.ResponseWriter, r *http.Request) {
 	if route.Revision != l.route.Revision {
 		data, err := json.Marshal(route)
 		if err == nil {
-			err = a.results.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(metaBucket).Put(routeKey, data) })
+			err = a.results.update(func(tx *bolt.Tx) error { return tx.Bucket(metaBucket).Put(routeKey, data) })
 		}
 		if err != nil {
 			http.Error(w, "could not persist route", 503)

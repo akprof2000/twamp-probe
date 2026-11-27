@@ -68,6 +68,13 @@
 </section>
 
 <section id="tab-status" class="active">
+  <div class="card" id="exchange">
+    <h2>Обмен данными <button class="act" style="float:right" onclick="withBusy(this, loadExchange)">Обновить обмен</button></h2>
+    <div id="exchangeSummary" role="status">Запрашиваем показания проб и съёмников…</div>
+    <div class="scroll" id="exchangeProbes"></div>
+    <div class="scroll" id="exchangeCollectors"></div>
+    <div class="scroll" id="exchangeTransfers"></div>
+  </div>
   <div class="card">
     <h2>Съёмники</h2>
     <div class="row">
@@ -84,8 +91,8 @@
       <input id="fProbe2" type="text" placeholder="фильтр: адрес / имя / хост / версия" style="width:280px" oninput="renderProbes()">
       <select id="fProbeLink" onchange="renderProbes()">
         <option value="">связь: все</option>
-        <option value="ok">в порядке</option>
-        <option value="down">нет связи</option>
+        <option value="ok">обмен подтверждён</option>
+        <option value="down">требует внимания</option>
       </select>
       <span id="probeCount" style="color:var(--mut)"></span>
     </div>
@@ -260,6 +267,7 @@
 </section>
 
 </main>
+<script src="/exchange.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const api = p => '/api/userinterface/' + p;
@@ -510,17 +518,17 @@ function renderProbes() {
   const q = $('#fProbe2').value.trim().toLowerCase();
   const link = $('#fProbeLink').value;
   const rows = probesCache.filter(p => {
-    if (link === 'ok' && p.backoffSeconds) return false;
-    if (link === 'down' && !p.backoffSeconds) return false;
+    const good = exchangeStatus(p).good;
+    if (link === 'ok' && !good || link === 'down' && good) return false;
     if (!q) return true;
     return [p.requestInfo, p.name, p.hostName, p.version].some(v => (v || '').toLowerCase().includes(q));
   });
   const esc = s => (s || '').replace(/'/g, "\\'");
   $('#tblStatus tbody').innerHTML = rows.map(p => `<tr data-probe="${escHtml(p.requestInfo)}">
     <td class="wrap">${escHtml(p.requestInfo)}</td>
-    ${routeCells(p)}<td>${escHtml(p.owner || '—')}${assignedRoutes.get(p.requestInfo)?.applied === false ? ' · настройка не доставлена' : ''}</td><td>${escHtml(p.name)}</td><td>${escHtml(p.hostName||'')}</td><td>${escHtml(p.version||'—')}</td>
-    <td>${window.twampHa?.enabled && !p.owner ? 'ожидает владельца' : p.backoffSeconds ? '<span class="bad">нет связи</span>' : '<span class="ok">в порядке</span>'}</td>
-    <td>${fmt(p.lastSuccess)}</td><td class="wrap">${p.lastErrorMessage||''}</td>
+    ${routeCells(p)}<td>${escHtml(exchangeOwner(p) || '—')}${assignedRoutes.get(p.requestInfo)?.applied === false ? ' · настройка не доставлена' : ''}</td><td>${escHtml(p.name)}</td><td>${escHtml(p.hostName||'')}</td><td>${escHtml(p.version||'—')}</td>
+    <td>${exchangeStatus(p).html}</td>
+    <td>${fmt(p.lastSuccess)}</td><td class="wrap">${escHtml(p.lastErrorMessage)}</td>
     <td>${p.activeTasks} (${p.deletedTasks} удал.)</td><td>${p.totalResults}</td>
     <td>${window.twampHa?.enabled ? '' : '<button class="act" onclick="withBusy(this,()=>saveRoute(this))">Сохранить съёмники</button>'} <button class="act" onclick="loadProbeTasks(this,'${esc(p.requestInfo)}')">задачи</button>
         <button class="act" onclick="withBusy(this,()=>showProbeState('${esc(p.requestInfo)}'))">состояние</button>
@@ -932,6 +940,8 @@ async function changeLoop() {
 
 changeLoop();
 loadStatus();
+loadExchange();
+setInterval(() => { if (!document.hidden && $('#tab-status').classList.contains('active')) loadExchange(); }, 10000);
 </script>
 <script src="/ha.js"></script>
 </body>

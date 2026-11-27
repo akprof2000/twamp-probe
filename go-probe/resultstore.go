@@ -20,6 +20,9 @@ var rowsBucket = []byte("results")
 var metaBucket = []byte("delivery")
 
 type ResultStore struct {
+	mu         sync.RWMutex
+	path       string
+	drained    chan struct{}
 	db         *bolt.DB
 	batchSize  int
 	signal     chan struct{}
@@ -36,11 +39,26 @@ func readNumber(b []byte) uint64 {
 }
 
 func OpenResultStore(dir string, batchSize int) (*ResultStore, error) {
-	db, err := bolt.Open(filepath.Join(dir, "results.db"), 0600, &bolt.Options{Timeout: time.Second})
+	path := filepath.Join(dir, "results.db")
+	var handle *os.File
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second,
+		OpenFile: func(name string, flags int, mode os.FileMode) (*os.File, error) {
+			var err error
+			handle, err = os.OpenFile(name, flags, mode)
+			return handle, err
+		}})
 	if err != nil {
 		return nil, err
 	}
-	s := &ResultStore{db: db, batchSize: max(1, batchSize), signal: make(chan struct{}, 1), legacyPath: filepath.Join(dir, "JobResult.json")}
+	// Another process may have compacted the database while we waited for its lock.
+	locked, lockErr := handle.Stat()
+	current, statErr := os.Stat(path)
+	if lockErr != nil || statErr != nil || !os.SameFile(locked, current) {
+		db.Close()
+		return nil, fmt.Errorf("results.db изменился при открытии: повторите запуск")
+	}
+	s := &ResultStore{db: db, path: path, drained: make(chan struct{}, 1),
+		batchSize: max(1, batchSize), signal: make(chan struct{}, 1), legacyPath: filepath.Join(dir, "JobResult.json")}
 	err = db.Update(func(tx *bolt.Tx) error {
 		rows, err := tx.CreateBucketIfNotExists(rowsBucket)
 		if err != nil {
@@ -108,7 +126,9 @@ func (s *ResultStore) Add(result ActionData) error {
 	if err != nil {
 		return err
 	}
+	s.mu.RLock()
 	err = s.db.Batch(func(tx *bolt.Tx) error { return appendRow(tx.Bucket(rowsBucket), data) })
+	s.mu.RUnlock()
 	if err == nil {
 		select {
 		case s.signal <- struct{}{}:
@@ -124,7 +144,7 @@ func (s *ResultStore) readBatch(timeout time.Duration) (ResultBatch, error) {
 	for {
 		empty := ResultBatch{BatchId: EmptyGuid, Items: []ActionData{}}
 		var pending bool
-		err := s.db.View(func(tx *bolt.Tx) error {
+		err := s.view(func(tx *bolt.Tx) error {
 			key, _ := tx.Bucket(rowsBucket).Cursor().First()
 			pending = key != nil
 			return nil
@@ -134,7 +154,7 @@ func (s *ResultStore) readBatch(timeout time.Duration) (ResultBatch, error) {
 		}
 		if pending {
 			// Persist the upper key before exposing the batch, so retries after restart are identical.
-			err = s.db.Update(func(tx *bolt.Tx) error {
+			err = s.update(func(tx *bolt.Tx) error {
 				rows, meta := tx.Bucket(rowsBucket), tx.Bucket(metaBucket)
 				if meta.Get([]byte("batch")) != nil {
 					return nil
@@ -154,7 +174,7 @@ func (s *ResultStore) readBatch(timeout time.Duration) (ResultBatch, error) {
 				return empty, err
 			}
 			batch := empty
-			err = s.db.View(func(tx *bolt.Tx) error {
+			err = s.view(func(tx *bolt.Tx) error {
 				meta := tx.Bucket(metaBucket)
 				id := meta.Get([]byte("batch"))
 				if id == nil {
@@ -188,9 +208,16 @@ func (s *ResultStore) readBatch(timeout time.Duration) (ResultBatch, error) {
 	}
 }
 
-func (s *ResultStore) confirm(id string) (bool, error) {
-	confirmed := false
-	err := s.db.Update(func(tx *bolt.Tx) error {
+type batchAck struct {
+	At        time.Time `json:"at"`
+	Batch     string    `json:"batch"`
+	Collector string    `json:"collector,omitempty"`
+	Results   uint64    `json:"results"`
+}
+
+func (s *ResultStore) confirm(id, collector string) (bool, error) {
+	confirmed, drained := false, false
+	err := s.update(func(tx *bolt.Tx) error {
 		rows, meta := tx.Bucket(rowsBucket), tx.Bucket(metaBucket)
 		if id == "" || string(meta.Get([]byte("batch"))) != id {
 			return nil
@@ -200,6 +227,13 @@ func (s *ResultStore) confirm(id string) (bool, error) {
 		last := readNumber(end)
 		first, _ := rows.Cursor().First()
 		if first != nil {
+			record, err := json.Marshal(batchAck{time.Now().UTC(), id, collector, last - readNumber(first) + 1})
+			if err != nil {
+				return err
+			}
+			if err := meta.Put([]byte("lastAck"), record); err != nil {
+				return err
+			}
 			for n := readNumber(first); n <= last; n++ {
 				if err := rows.Delete(number(n)); err != nil {
 					return err
@@ -213,10 +247,17 @@ func (s *ResultStore) confirm(id string) (bool, error) {
 			return err
 		}
 		confirmed = true
+		drained = last == rows.Sequence()
 		return meta.Delete([]byte("batch"))
 	})
 	if err == nil && confirmed {
 		s.cleanupLegacy()
+		if drained {
+			select {
+			case s.drained <- struct{}{}:
+			default:
+			}
+		}
 	}
 	return confirmed && err == nil, err
 }
@@ -224,7 +265,7 @@ func (s *ResultStore) confirm(id string) (bool, error) {
 func (s *ResultStore) cleanupLegacy() {
 	// Keep the import marker until the old file is unlinked. If the process
 	// exits between unlink and commit, retrying is safe.
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		m := tx.Bucket(metaBucket)
 		end := m.Get([]byte("legacyEnd"))
 		if end == nil || readNumber(m.Get([]byte("acked"))) < readNumber(end) {
@@ -251,12 +292,35 @@ func (s *ResultStore) cleanupLegacy() {
 	}
 }
 
-func (s *ResultStore) PendingCount() int {
+func (s *ResultStore) deliveryState() (int, *batchAck, error) {
 	count := 0
-	_ = s.db.View(func(tx *bolt.Tx) error {
-		count = int(tx.Bucket(rowsBucket).Sequence() - readNumber(tx.Bucket(metaBucket).Get([]byte("acked"))))
+	var ack *batchAck
+	err := s.view(func(tx *bolt.Tx) error {
+		meta := tx.Bucket(metaBucket)
+		count = int(tx.Bucket(rowsBucket).Sequence() - readNumber(meta.Get([]byte("acked"))))
+		if raw := meta.Get([]byte("lastAck")); raw != nil {
+			return json.Unmarshal(raw, &ack)
+		}
 		return nil
 	})
-	return count
+	return count, ack, err
 }
-func (s *ResultStore) Close() { s.closeOnce.Do(func() { _ = s.db.Close() }) }
+func (s *ResultStore) view(fn func(*bolt.Tx) error) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db.View(fn)
+}
+
+func (s *ResultStore) update(fn func(*bolt.Tx) error) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db.Update(fn)
+}
+
+func (s *ResultStore) Close() {
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_ = s.db.Close()
+	})
+}

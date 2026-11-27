@@ -104,6 +104,7 @@ func main() {
 		logMain.Error("Не удалось открыть очередь результатов", "ошибка", err)
 		os.Exit(1)
 	}
+	go results.runCompaction(ctx, int64(cfg.ResultCompactMinMiB)<<20)
 	runReg := NewRunRegistry()
 	cancels := NewRunCancelRegistry()
 	// Локальные порты зондов проба раздаёт сама: два замера не возьмут один и
@@ -276,12 +277,14 @@ func (a *apiServer) routes() http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.ToLower(r.URL.Path)
-		a.tracker.Mark() // отметка «сервер выходил на связь» — для сторожа
 
 		// Аутентификация по общему ключу — включается, когда задан Auth:ApiKey.
 		if a.cfg.ApiKey != "" && r.Header.Get("X-Api-Key") != a.cfg.ApiKey {
 			http.Error(w, "Недопустимый ключ API", http.StatusUnauthorized)
 			return
+		}
+		if r.URL.Path != "/api/probeinterface/probestate" {
+			a.tracker.Mark()
 		}
 		mux.ServeHTTP(w, r)
 	})
@@ -474,7 +477,11 @@ func (a *apiServer) confirmData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	batchId := queryParam(r, "batchId")
-	confirmed, err := a.results.confirm(strings.ToLower(batchId))
+	collector := ""
+	if a.lease.valid(r.Header.Get(leaseHeader), time.Now()) {
+		collector = a.lease.owner
+	}
+	confirmed, err := a.results.confirm(strings.ToLower(batchId), collector)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -541,8 +548,14 @@ type ProbeState struct {
 	PortsCapacity  int `json:"portsCapacity"`
 
 	// Очереди.
-	QueueCapacity  int `json:"queueCapacity"`
-	PendingResults int `json:"pendingResults"`
+	QueueCapacity  int        `json:"queueCapacity"`
+	PendingResults int        `json:"pendingResults"`
+	LastAck        *batchAck  `json:"lastAck,omitempty"`
+	Owner          string     `json:"owner"`
+	Ordered        bool       `json:"ordered"`
+	TaskInfoBytes  *int64     `json:"taskInfoBytes"`
+	ResultsDBBytes *int64     `json:"resultsDbBytes"`
+	Disk           *diskSpace `json:"disk"`
 }
 
 // probeState отдаёт снимок состояния пробы.
@@ -555,7 +568,21 @@ func (a *apiServer) probeState(w http.ResponseWriter, r *http.Request) {
 		TwampEmbedded:  a.cfg.TwampEmbedded,
 		TwampyEmbedded: a.cfg.TwampyEmbedded,
 		QueueCapacity:  a.cfg.QueueCapacity,
-		PendingResults: a.results.PendingCount(),
+		TaskInfoBytes:  fileBytes(a.tasks.file),
+		ResultsDBBytes: fileBytes(a.results.path),
+		Disk:           dataDisk(filepath.Dir(a.results.path)),
+	}
+	a.lease.mu.Lock()
+	state.Ordered = len(a.lease.route.Members) > 0
+	if a.lease.valid(a.lease.token, time.Now()) {
+		state.Owner = a.lease.owner
+	}
+	a.lease.mu.Unlock()
+	var err error
+	state.PendingResults, state.LastAck, err = a.results.deliveryState()
+	if err != nil {
+		http.Error(w, "Не удалось прочитать состояние очереди", http.StatusServiceUnavailable)
+		return
 	}
 
 	if from, to := a.ports.Range(); from > 0 {

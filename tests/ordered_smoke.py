@@ -141,15 +141,29 @@ def main():
                     cfg.update({'Database':{'Path':str(d/'catalog.db')}})
                     if args.browser:cfg['StaticPathApp']=str(Path(args.configurator).parent/'wwwroot')
                 elif k in collectors:
+                    log_config=json.loads((Path(args.collector).parent/'appsettings.json').read_text(encoding='utf-8-sig'))
+                    cfg['Logging']=log_config['Logging']
+                    cfg['NLog']=log_config['NLog']
+                    cfg['Logging']['LogLevel']['SPI.Twamp.Collector']='Debug'
+                    cfg['NLog']['rules'][0]['minLevel']='Debug'
+                    cfg['NLog']['targets']['file']['fileName']=str(d/'log'/'Collector.log')
                     cfg.update({'Collector':{'Id':k},
                                 'ClickHouse':{'Urls':[b.url for b in backend],'Database':'default','Table':table,
                                               'Password':os.environ.get('TWAMP_CLICKHOUSE_PASSWORD',''),'TimeoutSec':5,'FailoverRetrySeconds':2,
                                               'RetrySeconds':1,'SpoolPath':str(d/'spool')}})
-                else:cfg['Probe']={'MaxParallel':4,'PortRange':'','ResultBatchSize':10}
+                else:
+                    cfg['Probe']={'MaxParallel':4,'PortRange':'','ResultBatchSize':10,'ResultCompactMinMiB':1}
+                    if k=='p1':
+                        seeded=[dict(resultId=str(uuid4()),taskId=str(uuid4()),taskTitle='space-check',mode='WinPing',
+                                     creation='2026-01-01T00:00:00Z',console='x'*32768) for _ in range(64)]
+                        (d/'JobResult.json').write_text(json.dumps(seeded))
                 (d/'appsettings.json').write_text(json.dumps(cfg),encoding='utf8')
                 if k != 'manager2': start(k)
             manager=urls['manager']+'/api/userinterface/'
             check('Manager and native services started',lambda:api(manager+'collectors') and all(api(urls[k]+'/identity') for k in collectors))
+            check('Large queue remains on the probe before assignment',
+                  lambda:api(urls['p1']+'/api/probeinterface/probestate')['pendingResults']==64)
+            initial_db_size=(root/'p1'/'results.db').stat().st_size
             for k in collectors:api(manager+'collectors',{'url':peers[k].url})
             tasks={}
             revisions={}
@@ -177,6 +191,40 @@ def main():
                 tasks[p]=submit(p)
             check('Primary A owns P1, B owns P2 and both deliver scheduled measurements',
                   lambda:owner('a','p1') and owner('b','p2') and all(rows(p)>0 for p in probe_ids))
+            def sample(kind, key):
+                return next(s for s in api(manager+'exchange') if s['kind']==kind and s['id']==key)
+            def logged(k, msg):
+                return all(msg in path.read_text(encoding='utf8',errors='replace')
+                           for path in (root/k/'run.log',root/k/'log'/'Collector.log'))
+            def confirmed():
+                probe=sample('probe',urls['p1'])['data']
+                transfer=sample('collector','a')['data']['transfers'][urls['p1']]
+                return (probe.get('lastAck',{}).get('collector')=='a' and probe['disk']['totalBytes']>0
+                        and probe['resultsDbBytes']>0 and transfer['read']['count']>0
+                        and transfer['stored']['endpoint']==backend[0].url)
+            check('Live exchange reports probe ACK, file sizes, batch receipt and exact ClickHouse destination',confirmed)
+            check('Disk space reclaimed after all seeded results reached ClickHouse',
+                  lambda:rows('space-check')==64 and (root/'p1'/'results.db').stat().st_size < initial_db_size//2)
+            print('results.db before delivery:',initial_db_size,'bytes; after ACK:',(root/'p1'/'results.db').stat().st_size,'bytes',flush=True)
+            check('Collector writes startup, ownership and insertion to stdout and rotating file',
+                  lambda:all(logged('a',msg) for msg in ('Служба выгрузки в ClickHouse запущена','Съёмник a начал сбор','записана пачка')))
+            for relay in backend: relay.down=True
+            check('Outage: probe retains results and the configurator reports a delivery error',
+                  lambda:sample('probe',urls['p1'])['data']['pendingResults']>=2 and
+                  sample('collector','a')['data']['transfers'][urls['p1']]['error'] and logged('a','не может собирать'))
+            if args.browser:
+                with sync_playwright() as driver:
+                    browser=driver.chromium.launch(args=['--no-sandbox'])
+                    page=browser.new_page()
+                    page.add_init_script("localStorage.setItem('apiKey',"+json.dumps(key)+")")
+                    page.goto(urls['manager']+'/index.html')
+                    expect(page.locator('#exchangeTransfers')).to_contain_text('ClickHouse')
+                    expect(page.locator('#exchangeProbes')).to_contain_text('Нет активного съёмника')
+                    expect(page.locator('#exchangeCollectors')).to_contain_text('В буфере')
+                    browser.close()
+            for relay in backend: relay.down=False
+            check('Recovered ClickHouse: all queued results acknowledged and active owner restored',
+                  lambda:owner('a','p1') and sample('probe',urls['p1'])['data']['pendingResults']==0)
             # Preparing a revision must preserve the active assignment while one recipient is down.
             stop('c')
             try:api(manager+'collector-routes',{'probe':urls['p1'],'revision':revisions['p1'],'members':['a','c','b']})
@@ -201,6 +249,7 @@ def main():
             print('Isolated peers cannot displace live owners; probe rejects overlapping tokens',flush=True)
             stop('a')
             check('B takes P1 and continues P2 without manager',lambda:all(owner('b',p) for p in probe_ids))
+            check('Reserve logs P1 takeover without a configurator',lambda:logged('b','Съёмник b начал сбор с '+urls['p1']))
             stop('b')
             check('C takes both probes with both higher priorities offline',lambda:all(owner('c',p) for p in probe_ids))
             before=[rows(p) for p in probe_ids]

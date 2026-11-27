@@ -88,12 +88,12 @@ public sealed class DeliveryBuffer : IDisposable
     public static bool IsStored(string path) => path.EndsWith(".stored.ndjson", StringComparison.Ordinal) || IsQuorumStored(path);
 
     // A failed INSERT leaves pending in place. A failed ACK leaves stored in place.
-    public static async Task<string> StoreAsync(string path, IClickHouseWriter writer, CancellationToken ct, bool quorum = false)
+    public static async Task<(string Path, string Endpoint)> StoreAsync(string path, IClickHouseWriter writer, CancellationToken ct, bool quorum = false)
     {
-        await writer.InsertSegmentAsync(path, ct);
+        var endpoint = await writer.InsertSegmentAsync(path, ct);
         var stored = Path.ChangeExtension(Path.ChangeExtension(path, null), quorum ? "quorum.ndjson" : "stored.ndjson");
         File.Move(path, stored);
-        return stored;
+        return (stored, endpoint);
     }
 
     public static async Task AcknowledgeAsync(string path, string url, IProbeClient probe, CancellationToken ct)

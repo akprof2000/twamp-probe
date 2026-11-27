@@ -204,6 +204,7 @@ jobs:
           python3 tests/ha_smoke.py --configurator SPI.Twamp.Server/bin/Release/net11.0/SPI.Twamp.Server --collector SPI.Twamp.Collector/bin/Release/net11.0/SPI.Twamp.Collector
           (cd deploy/ha && zip -q "../../publish/twamp-ha-${VERSION}.zip" README.md compose.yaml clickhouse.xml twamp-deployment.svg)
           (cd docs && zip -q "../publish/twamp-ordered-collectors-${VERSION}.zip" ordered-collectors.md)
+          (cd docs/examples/one-probe-two-collectors && zip -q "../../../publish/twamp-appsettings-${VERSION}-1probe-2collectors-2configurators.zip" README.md *.docx */appsettings.json)
           (cd publish && sha256sum *.zip *.tar.gz > SHA256SUMS)
 
       - name: Артефакты (без выпуска релиза)
@@ -231,6 +232,10 @@ jobs:
             publish/*.zip
           generate_release_notes: true
           body: |
+            **Журналы и контроль доставки.** В «Статус проб → Обмен данными» видны очереди проб и съёмников, свободное место на пробе, последняя пачка, адрес ClickHouse и подтверждение доставки. Параметры журнала съёмника находятся в секциях `Logging` и `NLog` его `appsettings.json`.
+            Linux-проба автоматически уменьшает `results.db` после подтверждения всей очереди. Порог `Probe:ResultCompactMinMiB` по умолчанию равен 64 МиБ.
+            Комплект [настроек и инструкции Word](https://github.com/akprof2000/twamp-probe/releases/download/v${{ env.VERSION }}/twamp-appsettings-${{ env.VERSION }}-1probe-2collectors-2configurators.zip) включает примеры для двух съёмников и двух конфигураторов.
+
             **Автономный сбор на Linux.** На странице «Статус проб» выберите основной съёмник и до двух резервных.
             Съёмники переключаются по приоритету и продолжают работу при выключенном конфигураторе.
             Для подключения с другого компьютера введите адрес одного настроенного съёмника и нажмите «Открыть конфигурацию со съёмника». Адрес конфигуратора на съёмниках не требуется.

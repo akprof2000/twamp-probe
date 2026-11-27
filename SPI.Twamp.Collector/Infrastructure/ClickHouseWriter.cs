@@ -117,7 +117,7 @@ namespace SPI.Twamp.Server.Infrastructure
         }
 
         /// <inheritdoc/>
-        public Task InsertSegmentAsync(string path, CancellationToken cancellationToken) =>
+        public Task<string> InsertSegmentAsync(string path, CancellationToken cancellationToken) =>
             WithFailoverAsync(async (endpoint, ct) =>
             {
                 await EnsureEndpointAsync(endpoint, ct);
@@ -132,7 +132,7 @@ namespace SPI.Twamp.Server.Infrastructure
                 await EnsureSuccessAsync(response, ct);
             }, cancellationToken);
 
-        private async Task WithFailoverAsync(Func<Endpoint, CancellationToken, Task> operation, CancellationToken ct, bool recordSuccess = true)
+        private async Task<string> WithFailoverAsync(Func<Endpoint, CancellationToken, Task> operation, CancellationToken ct, bool recordSuccess = true)
         {
             long now = _clock.GetUtcNow().UtcTicks;
             // After a cooldown, the next operation tries the primary first again.
@@ -149,7 +149,7 @@ namespace SPI.Twamp.Server.Infrastructure
                         Interlocked.Exchange(ref endpoint.RetryAtTicks, 0);
                         Volatile.Write(ref _activeUrl, endpoint.Url);
                     }
-                    return;
+                    return endpoint.Url;
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested &&
                     ex is (HttpRequestException or OperationCanceledException or System.Net.Http.HttpIOException))

@@ -3,13 +3,12 @@ using System.Net;
 using System.Net.Http.Json;
 using SPI.Twamp.Server.Contracts;
 using SPI.Twamp.Server.Infrastructure;
-using SPI.Twamp.Server.Abstractions;
 
 namespace SPI.Twamp.Collector;
 
 // Peer readiness implements priority. Only the token returned by the probe permits delivery.
 public sealed class OrderedCollectors(LocalRoutes routes, CollectorWorker worker, IConfiguration config,
-    IHttpClientFactory clients, IClickHouseWriter writer, IHostApplicationLifetime lifetime, ILogger<OrderedCollectors> log) : BackgroundService
+    IHttpClientFactory clients, IHostApplicationLifetime lifetime, ILogger<OrderedCollectors> log) : BackgroundService
 {
     private readonly string id = config["Collector:Id"] ?? "default";
     private readonly string instance = Guid.NewGuid().ToString("N");
@@ -26,7 +25,7 @@ public sealed class OrderedCollectors(LocalRoutes routes, CollectorWorker worker
             if (storageCheck == null || storageCheck.IsCompleted && Environment.TickCount64 - lastStorageCheck >= 4000)
             {
                 lastStorageCheck = Environment.TickCount64;
-                storageCheck = writer.CheckAvailableAsync(lifetime.ApplicationStopping);
+                storageCheck = worker.CheckStorageAsync(lifetime.ApplicationStopping);
             }
             return storageCheck.WaitAsync(ct);
         }
@@ -116,7 +115,9 @@ public sealed class OrderedCollectors(LocalRoutes routes, CollectorWorker worker
                 {
                     await CheckStorage(ct);
                     readiness[(route.Probe, route.Revision)] = Environment.TickCount64;
-                    if (priority.MayCollect(await ReadPeers(client, route, ct)) && await Change(client, route, "acquire", null, ct) is { Length: > 0 } token)
+                    if (!priority.MayCollect(await ReadPeers(client, route, ct)))
+                        worker.ClearFailure(route.Probe);
+                    else if (await Change(client, route, "acquire", null, ct) is { Length: > 0 } token)
                         await Collect(client, route, token, priority, ct);
                 }
                 else readiness.TryRemove((route.Probe, route.Revision), out _);
@@ -124,7 +125,8 @@ public sealed class OrderedCollectors(LocalRoutes routes, CollectorWorker worker
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 readiness.TryRemove((route.Probe, route.Revision), out _);
-                log.LogWarning("Сбор {Probe} временно передан резерву: {Reason}", route.Probe, ex.Message);
+                worker.ReportFailure(route.Probe, ex.Message);
+                log.LogWarning("Съёмник {Collector} не может собирать с {Probe}: {Reason}", id, route.Probe, ex.Message);
                 delay = TimeSpan.FromSeconds(12);
             }
             var remaining = delay - TimeSpan.FromMilliseconds(Environment.TickCount64 - cycleStarted);
@@ -140,6 +142,7 @@ public sealed class OrderedCollectors(LocalRoutes routes, CollectorWorker worker
             if (routes.Active(route.Probe) != route.Revision || await Change(client, route, "renew", token, stop.Token) != token)
                 throw new IOException("Изменилось право сбора.");
         }
+        log.LogInformation("Съёмник {Collector} начал сбор с {Probe}", id, route.Probe);
         var work = worker.RunOrderedAsync(route.Probe, token, Guard, stop.Token);
         try
         {
@@ -164,6 +167,7 @@ public sealed class OrderedCollectors(LocalRoutes routes, CollectorWorker worker
                 try { await Change(client, route, "release", token, CancellationToken.None); }
                 catch (HttpRequestException) { }
                 catch (OperationCanceledException) { }
+                log.LogInformation("Съёмник {Collector} завершил сбор с {Probe}", id, route.Probe);
             }
         }
     }

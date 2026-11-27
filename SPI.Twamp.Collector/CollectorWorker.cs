@@ -15,12 +15,66 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
     private readonly Dictionary<string,Task> _workers = new();
     private readonly ConcurrentDictionary<string,ProbePollState> _states = new();
     private readonly ConcurrentDictionary<Guid,TaskLastResult> _results = new();
+    private sealed record BatchEvent(DateTimeOffset At, Guid Batch, int Count, string? Endpoint = null);
+    private sealed record Transfer(BatchEvent? Read = null, BatchEvent? Stored = null, string? Error = null, DateTimeOffset? ErrorAt = null);
+    private readonly ConcurrentDictionary<string,Transfer> _transfers = new();
+
+    private void UpdateTransfer(string url, Func<Transfer,Transfer> update) =>
+        _transfers.AddOrUpdate(url, _ => update(new()), (_, old) => update(old));
+
+    public void ReportFailure(string url, string message) =>
+        UpdateTransfer(url, old => old with { Error = message, ErrorAt = DateTimeOffset.UtcNow });
+
+    public void ClearFailure(string url)
+    {
+        if (_transfers.TryGetValue(url, out var last) && last.Error != null)
+            _transfers.TryUpdate(url, last with { Error = null, ErrorAt = null }, last);
+    }
+
+    public object Exchange(ClickHouseState legacy) => new {
+        Id = _id, Storage = Storage(legacy), Transfers = _transfers.ToArray().ToDictionary(),
+        SampledAt = DateTimeOffset.UtcNow
+    };
+
+    private async Task<string> StoreBatch(string path, string url, bool quorum, CancellationToken ct)
+    {
+        var stored = await DeliveryBuffer.StoreAsync(path, writer, ct, quorum);
+        var batch = Guid.ParseExact(Path.GetFileName(path).Split('.')[0], "N");
+        var sent = new BatchEvent(DateTimeOffset.UtcNow, batch, DeliveryBuffer.RowCount(path), stored.Endpoint);
+        lock (_storage)
+        {
+            _lastUpload = sent.At.LocalDateTime;
+            _storageAvailable = true;
+            _error = null;
+            _uploaded++;
+            _rows += sent.Count;
+        }
+        UpdateTransfer(url, old => old with { Stored = sent, Error = null, ErrorAt = null });
+        log.LogDebug("В ClickHouse {Endpoint} {Target} записана пачка {Batch} с пробы {Probe}, строк {Rows}",
+            stored.Endpoint, writer.Target, batch, url, sent.Count);
+        return stored.Path;
+    }
     private readonly Guid _instance = Guid.NewGuid();
     private long _version, _uploaded, _rows;
     private readonly TimeSpan _retry = TimeSpan.FromSeconds(Math.Max(1,settings.GetValue("ClickHouse:RetrySeconds",5)));
     private readonly object _storage = new();
     private DateTime? _lastUpload, _lastFailure;
     private string? _error;
+    private bool? _storageAvailable;
+
+    public async Task CheckStorageAsync(CancellationToken ct)
+    {
+        try
+        {
+            await writer.CheckAvailableAsync(ct);
+            lock (_storage) { _storageAvailable = true; _error = null; }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            lock (_storage) { _storageAvailable = false; _lastFailure = DateTime.Now; _error = ex.Message; }
+            throw;
+        }
+    }
     private readonly string _id = settings["Collector:Id"] ?? "default";
     private readonly string _machine = settings["Collector:Machine"] is {Length:>0} machine ? machine : Environment.MachineName;
     private volatile VersionedPlan _plan = new(-1,CollectionPlan.Empty);
@@ -41,7 +95,7 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                     if (!DeliveryBuffer.IsStored(saved))
                     {
                         await verify();
-                        saved = await DeliveryBuffer.StoreAsync(saved, writer, ct);
+                        saved = await StoreBatch(saved, url, false, ct);
                     }
                     File.Delete(saved);
                 }
@@ -75,7 +129,7 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                 PendingRows = legacy.PendingRows + pending.Sum(p => (long)DeliveryBuffer.RowCount(p)),
                 SealedSegments = legacy.SealedSegments + pending.Length,
                 LastUploadAt = _lastUpload ?? legacy.LastUploadAt,
-                Online = _error != null ? false : _lastUpload != null || legacy.Online == true ? true : legacy.Online,
+                Online = _error != null ? false : _storageAvailable ?? legacy.Online,
                 LastError = _error ?? legacy.LastError, LastErrorAt = _lastFailure ?? legacy.LastErrorAt,
                 SegmentsUploaded = _uploaded + legacy.SegmentsUploaded, RowsUploaded = _rows + legacy.RowsUploaded
             };
@@ -260,6 +314,8 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                     var batch = await source.GetResultsAsync(url, ct);
                     if (batch.Items.Length > 0)
                     {
+                        var read = new BatchEvent(DateTimeOffset.UtcNow, batch.BatchId, batch.Items.Length);
+                        UpdateTransfer(url, old => old with { Read = read });
                         Dictionary<Guid,string> titles;
                         try { titles = verify == null ? await GetLegacyTitlesAsync(batch,ct) : new(); }
                         catch(Exception ex) when(lease!=null && !ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException)
@@ -289,12 +345,7 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                         {
                             if (!schemaReady) { await writer.EnsureTableAsync(ct); schemaReady = true; }
                             await Guard();
-                            path = await DeliveryBuffer.StoreAsync(path, writer, ct,lease!=null);
-                            lock (_storage)
-                            {
-                                _lastUpload = DateTime.Now; _error = null;
-                                _uploaded++; _rows += DeliveryBuffer.RowCount(path);
-                            }
+                            path = await StoreBatch(path, url, lease!=null, ct);
                         }
                         catch (Exception ex) when (!ct.IsCancellationRequested)
                         {
@@ -307,12 +358,14 @@ public sealed class CollectorWorker(DeliveryBuffer buffer, IProbeClient probe, I
                     await DeliveryBuffer.AcknowledgeAsync(path, url, source, ct);
                 }
                 _states[url] = new(DateTime.Now, null, null, received, 0,_id,rate);
+                ClearFailure(url);
                 Interlocked.Increment(ref _version);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 _states.TryGetValue(url, out var previous);
                 _states[url] = new(previous?.LastSuccess, DateTime.Now, ex.Message, received, (int)_retry.TotalSeconds);
+                ReportFailure(url, ex.Message);
                 Interlocked.Increment(ref _version);
                 log.LogWarning("Доставка с {Probe}: {Reason}", url, ex.Message);
                 if(lease!=null || verify!=null) throw;

@@ -27,6 +27,6 @@ namespace SPI.Twamp.Server.Abstractions
         /// </summary>
         /// <param name="path">Путь файла сегмента.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        Task InsertSegmentAsync(string path, CancellationToken cancellationToken);
+        Task<string> InsertSegmentAsync(string path, CancellationToken cancellationToken);
     }
 }
